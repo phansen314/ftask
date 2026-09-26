@@ -1,0 +1,620 @@
+# ftask CLI spec
+
+The `ftask` command-line interface: how each command maps to the [operations](operations.md), how input gets in, and what comes out. The CLI adds no behavior of its own beyond parsing arguments — including any input resolution a command's Input part lists, such as `init`'s path resolution or `create`'s `--notes-file` — and composing operations; everything about the data is specified by the operations and the [design spec](design-spec.md).
+
+The intended user is a power user working through Claude, with `jq` for anything a person reads directly.
+
+## Global behavior
+
+### Output
+
+- **JSON only.** Every invocation that exits `0`, `1`, or `2`, other than `--help`, writes exactly one [output envelope](operations.md#output-envelope) to stdout, success or failure. There is no human-readable output mode; `jq` does the pretty-printing.
+- **Passthrough.** A command that runs one operation writes that operation's envelope unchanged. Where a command's output differs from its operation's, the command's entry says how.
+- **Compact.** The envelope is written on a single line, followed by a newline. The format is the same whether or not stdout is a terminal. A complete envelope always ends in that newline.
+- **Encoding.** Output is UTF-8, with the string escaping of the design spec's [File format](design-spec.md#file-format): only `"`, `\`, U+0000–U+001F, U+2028, and U+2029 are escaped; everything else is raw UTF-8.
+- **Delivered before exit.** Exit `0`, `1`, or `2` is reported only once the whole envelope has been written. On any other exit status, stdout may hold nothing or an incomplete line (see [Exit codes](#exit-codes)).
+- **stderr** is unused, except for the notice on exit `3` and a crash's diagnostics (on any other exit status). Both are human-readable and not part of the contract, like an error's `message`.
+- **Exception:** `--help` writes plain-text usage to stdout. It is not an operation.
+
+### Input
+
+- **Flags and arguments** supply operation input for everyday use.
+- **`-i, --input <file>`** supplies operation input read from `<file>`; `-` means stdin. Every command accepts it.
+- **stdin is read only when a value names it:** `--input -`, or `create`'s `--notes-file -`. ftask never reads stdin on its own, so it is safe inside loops and pipelines that feed stdin to something else (e.g. `while read id; do ftask … "$id"; done < ids.txt`). When stdin is named, ftask reads until end of input; if stdin is a terminal, it waits for it.
+- **Any readable path.** `<file>` may be any path that can be read to the end, not only a regular file: process substitution (`-i <(jq -n …)`) and named pipes work. A file literally named `-` is given as `./-`.
+- **Exactly one JSON value.** The input is one JSON object, optionally surrounded by whitespace. Empty input, a value that is not an object, a second value (e.g. several objects from `jq -c '.[]'`), or any other trailing bytes are `invalid-input` (`field`: `""`).
+- **UTF-8.** The input is UTF-8 with no byte-order mark. A byte-order mark or invalid UTF-8 is `invalid-input` (`field`: `""`).
+- **Operation rules apply.** The input is held to the operation's input schema and to the [input conventions](operations.md#conventions); violations are `invalid-input`.
+- **Unreadable input.** A missing or unreadable `<file>`, or a directory, is `io`.
+
+```sh
+jq -n '{title: "x"}' | ftask create -i -
+ftask create -i - < req.json
+ftask create -i req.json
+ftask create -i <(jq -n '{title: "x"}')
+```
+
+- **Either `--input` or field arguments, not both.** `--input` supplies the whole operation input. Giving it together with any argument or option that sets an input field is a [usage error](#usage-errors). Options that set no input field (e.g. `--help`) are unaffected.
+- **`--input` is taken as-is,** as the operation's input, except for any resolution the command's Input part lists (e.g. `init`'s [path resolution](#init)), which applies to a field whether it comes from an argument or from `--input`.
+
+### Command line
+
+- **Command names are operation names.** A command that runs one operation has that operation's name (`create-folder`, `show`, `complete`). A command that composes several operations gets a name of its own.
+- **Option names are field names.** An option that sets an input field is named after that field, in kebab-case: `blocked_by` is `--blocked-by`, `replace_config` is `--replace-config`. A nested field is named by its path: `/tags/add` is `--tags-add`, `/extra/replace_all` is `--extra-replace-all`. Options that set no field under their own name (e.g. `--notes-file`) are the exceptions, and each command lists them.
+- **Arguments are for the one required subject.** A command's single required subject — the task it acts on, the folder it creates, the title it needs — is a positional argument. Everything optional is an option. There are no optional arguments, so a bare token always has one meaning, and a field keeps one spelling across commands (e.g. `folder` is `--folder` everywhere except [`create-folder`](#create-folder), where it is the subject).
+- **Booleans** get two options: `--<field>` sets `true`, `--no-<field>` sets `false` (e.g. `--recursive`, `--no-recursive`). Giving both sets one field twice, a usage error.
+- **Required options.** An option a command marks as required — typically one whose position alone would not make its meaning clear — is a usage error when missing, unless `--input` is given.
+- **Short options are rare.** An option gets a one-letter form only when it has a strong Unix precedent (e.g. `-p` for `--parents`, as in `mkdir -p`) or is used constantly. Everything else is long-form only.
+- **Folder paths are exact.** A folder path given as an argument or option is taken exactly as a [folder path](design-spec.md#folder-paths): from the root, which is `/` (e.g. `/proj/travel`). The CLI does not complete or normalize it — `proj/travel` and `/proj/` are `invalid-input` — and never derives one from the working directory.
+- **Options and arguments follow the command,** in any order: `ftask <command> [options and arguments]`. The exceptions are `--help` and `--version`, which may also be given with no command (`ftask --help`, `ftask --version`).
+- **`--`** ends options. Everything after it is an argument, even if it starts with `-` (e.g. a title like `-urgent`), including a second `--`.
+- **A lone `-`** is an ordinary argument, not an option.
+- **Long option values** may be given as `--flag value` or `--flag=value`.
+- **One spelling each.** Every command and option has exactly one spelling, matched exactly, apart from the `=` form above, the short forms a command lists (`-p`, `-i`), and the `--version` alias. Everything else is a usage error:
+  - a value on a boolean option (`--parents=true`, `--no-recursive=false`): booleans take none;
+  - combined short options (`-pi file`) and attached short values (`-ifile`, `-i=file`): only `-i file`;
+  - abbreviations (`--fold` for `--folder`, `ftask comp` for `complete`), so that adding an option or command never breaks an existing command line;
+  - a different case (`--Folder`, `ftask Show`).
+- **Empty values** are values: `--folder ''` or `--notes=` sets the empty string, which the operation then judges like any other value (an empty folder path is `invalid-input`; empty notes are fine). For a comma list, `''` is the empty list (see *Value formats*).
+- **An option that takes a value always consumes the next token,** even one starting with `-`, so `--priority -3` works.
+- **Arguments are single tokens.** A value with spaces, such as a title, is one argument and must be quoted for the shell (`'Book flights'`; single quotes also keep `$` literal). The quotes are shell syntax, not part of the value. Unquoted words are extra arguments, a usage error; they are never joined.
+- **Value formats.** An argument or option value that sets an input field is converted by its field's type:
+  - *Integers* are decimal, with an optional leading `-`: no `+`, no leading zeros, no fraction or exponent, the same rule as for [`--input`](#input).
+  - *Null.* For a field that may be `null`, the value `null` converts to it: `--priority null` clears the priority. For any other field, `null` is an ordinary value.
+  - *Lists of items that cannot contain a comma* (tags, IDs) are comma-separated: `--tags travel,urgent`. Items are taken exactly and passed on: `a, b` (with a space), `a,,b`, and a duplicate item all reach the operation, which rejects them as `invalid-input`. An empty value (`''`) is the empty list.
+  - *Lists of items that can contain a comma* (e.g. `extra` keys, which are arbitrary strings) use a **repeatable** option instead, one item per occurrence: `--extra-remove status --extra-remove owner`. Each occurrence is exactly one item, so `--extra-remove 'a,b'` names the single key `a,b`.
+  - *JSON values* (e.g. `--extra`) are exactly one JSON value, held to the [input conventions](operations.md#conventions) (integer literals, no duplicate keys). Problems are reported at the option's field (e.g. `/extra`); the value's type — e.g. that it is an object — is checked by the operation.
+  - *Encoding.* Every value is UTF-8; one that is not is `invalid-input` at its field.
+  - A value that cannot be converted is `invalid-input` (see [Usage errors](#usage-errors)).
+- **Mutually exclusive options,** where a command lists them, are a usage error when given together.
+- **The CLI rejects only what it cannot build.** A combination of options is a usage error only when the CLI cannot construct an input from it — e.g. two options that set the same field, like `--notes` and `--notes-file`. A combination the CLI can build but the operation forbids (e.g. `update`'s `--tags-replace-all` with `--tags-add`, or no field to change at all) is passed to the operation, which rejects it as `invalid-input`. Rules about input live in the operation, not in the CLI.
+- **A repeated option** (e.g. `-i a -i b`) is a [usage error](#usage-errors), unless the command marks it repeatable (see *Lists* above).
+- **Bare `ftask`**, with no command, is a usage error.
+- **`--help`** anywhere among the options — before or after the command, but not after `--` and not as an option's value (in `--notes --help`, `--help` is the notes) — writes help text and exits `0`. It overrides every other usage problem and runs no operation: `ftask create --help --bogus` prints help. With a known command anywhere on the line (`ftask create --help`, `ftask --help create`), the help is that command's; otherwise (`ftask --help`, `ftask nosuch --help`), it is the general help.
+- **`--version`** is valid only alone (`ftask --version`). Combined with anything else, it is a usage error.
+
+### Usage errors
+
+A usage error is a problem with the command line itself: an unknown command or option, a missing or extra argument, a repeated option not marked repeatable, an option missing its value, mutually exclusive options given together, two options that set the same field (e.g. `--recursive` with `--no-recursive`), `--input` together with field arguments or options. It is reported as an envelope with error kind `usage`, and exits with code `2`. `invalid-input` stays reserved for operation input, whose `field` is a JSON Pointer into that input; problems with an `--input` file's content are `invalid-input`, not `usage` (see [Input](#input)).
+
+**Shape, not values.** `usage` is about the shape of the command line: an unknown, missing, extra, repeated, or conflicting token. A token in the right place whose value is unacceptable — one that cannot be converted to its field's type (e.g. `ftask show abc`, where the ID is an integer) or that fails the operation's validation — is `invalid-input`, with `field` the JSON Pointer of the input field it sets, per the command's Arguments and Options tables. A bad value is therefore the same error whether it arrives as an argument or through `--input`.
+
+`usage` is a CLI-only error kind: no operation raises it, and it is not listed in the operations' [error kinds](operations.md#error-kinds). As with any kind, callers treat an unknown one as a generic failure.
+
+`details` reports **every** problem the parser can find, not just the first. After an unknown command, that is only one. Problems are in command-line order — the order their offending tokens appear — followed by problems about something missing (an argument, a required option), in the order the command's Synopsis lists them.
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "usage-details",
+  "type": "object",
+  "required": ["problems"],
+  "properties": {
+    "problems": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["reason"],
+        "properties": {
+          "argument": { "type": "string", "description": "The offending command-line token, e.g. --limt; for an option missing its value, the option; for two conflicting tokens, the later one. Absent when the problem is something missing: an argument, a required option, or the command." },
+          "reason": { "type": "string", "description": "Human-readable." }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
+```
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Success (`ok: true`), with or without warnings. Also `--help`, which writes help text instead of an envelope. |
+| `1` | Operation error. The kind is in the envelope. |
+| `2` | Usage error. |
+| `3` | Outcome unknown: the envelope could not be written to stdout. |
+| any other | Outcome unknown: ftask was terminated before it finished (e.g. `128+n` for signal `n`). Handle like `3`. |
+
+- **One code for all operation errors.** Callers branch on the envelope's `kind` (e.g. `jq -e '.error.kind == "busy"'`), not on the exit code. A new error kind, a minor change under [Versioning](operations.md#versioning), therefore needs no new exit code.
+- **Outcome unknown.** On `3` or any status outside `0`–`2`, the operation may already have taken effect, and there may be no envelope, or only part of one. The caller treats this like a crash: whether to rerun follows the operation's **Retry safety**. Exiting `1` here would invite a retry that, for `create`, makes a duplicate. For a read, rerunning is always safe.
+- **Unwritable stdout.** When stdout cannot be written (e.g. a closed pipe, a full disk behind a redirect), ftask exits `3` with a notice on stderr, or, for a closed pipe, may instead be terminated by `SIGPIPE`. Both mean outcome unknown. This applies even when nothing was run, e.g. a usage error with stdout closed.
+- **Interrupts are crashes.** An interrupt or termination signal (e.g. Ctrl-C, `kill`, a timeout in the calling harness) ends ftask like a crash: no envelope, exit `128+n`, and the operation's **Crash behavior** and **Retry safety** apply.
+
+### Global options
+
+| Option | Meaning |
+|---|---|
+| `-i, --input <file>` | Read operation input from `<file>` (`-` for stdin). See [Input](#input). |
+| `--help` | Print plain-text usage. See [Command line](#command-line). |
+| `--version` | Same as [`ftask version`](#version). Valid only alone. |
+
+## Command template
+
+Every command is specified with the same parts, in this order. Every part is always present except **Composition**, which appears only for commands that run more than one operation. An empty part is written `**Part:** none.`, optionally followed by one sentence saying why. A part may be followed by short unlabeled notes that belong to it.
+
+| Part | Content |
+|---|---|
+| **Summary** | Unlabeled first paragraph: what the command does, in one or two sentences, and the operation(s) it runs, linked. |
+| **Synopsis** | The usage line(s), e.g. `ftask create <title> [options]`, including any aliases. |
+| **Operation** | The operation the command runs; for a composed command, the operations, their order, and whether they run under one write lock. |
+| **Arguments** | Table of positional arguments and the input field each sets. |
+| **Options** | Table of command-specific options (not the [global options](#global-options)), the input field each sets, and its default. |
+| **Input** | Anything about input beyond the Arguments and Options mapping, e.g. fields that only `--input` can set. |
+| **Output** | `Passthrough.`, or exactly how the output differs from the operation's (e.g. a composed command's combined result). |
+| **Errors** | Errors the CLI adds beyond the operation's, and their kinds. Usually none. |
+| **Composition** | Only for composed commands: what a failure in a later operation leaves behind after an earlier one succeeded, crash behavior, and retry safety. |
+| **Examples** | One or more `sh` examples, with the `jq` side where it helps. |
+
+Exit codes are not a part: they follow from the envelope and the global [Exit codes](#exit-codes) table (`ok: true` is `0`; `ok: false` is `1`, or `2` for kind `usage`).
+
+## Commands
+
+### version
+
+Report the version and build of the ftask binary, and the data format versions it supports. Runs [`version`](operations.md#version).
+
+**Synopsis:** `ftask version`, `ftask version -i <file>`, or the alias `ftask --version`.
+
+**Operation:** [`version`](operations.md#version).
+
+**Arguments:** none.
+
+**Options:** none.
+
+**Input:** none. With `--input`, the only valid input is `{}`.
+
+**Output:** Passthrough.
+
+**Errors:** none beyond the operation's.
+
+**Examples:**
+
+```sh
+ftask version | jq -r .result.version
+ftask --version | jq .result.schemas
+```
+
+### info
+
+Report the state of this machine's configured root: the config, the tree it names, and whether this binary can use it. Runs [`info`](operations.md#info).
+
+**Synopsis:** `ftask info`, or `ftask info -i <file>`.
+
+**Operation:** [`info`](operations.md#info).
+
+**Arguments:** none.
+
+**Options:** none.
+
+**Input:** none. With `--input`, the only valid input is `{}`.
+
+**Output:** Passthrough.
+
+A root that is not initialized or not usable is reported as state (`ok: true`, `usable: false`), so it exits `0`. To turn usability into an exit status, use `jq -e .result.usable`.
+
+**Errors:** none beyond the operation's.
+
+**Examples:**
+
+```sh
+ftask info | jq -e .result.usable >/dev/null && echo ready
+ftask info | jq .result.config.root
+```
+
+### init
+
+Create a new tree, or attach an existing one, and make it this machine's configured root. Runs [`init`](operations.md#init).
+
+**Synopsis:** `ftask init <root> [--replace-config]`, or `ftask init -i <file>`.
+
+**Operation:** [`init`](operations.md#init).
+
+**Arguments:**
+
+| Argument | Field | Notes |
+|---|---|---|
+| `<root>` | `/root` | Required unless `--input` is given. Resolved to an absolute path first; see Input. |
+
+**Options:**
+
+| Option | Field | Default |
+|---|---|---|
+| `--replace-config`, `--no-replace-config` | `/replace_config` | `false`. |
+
+**Input:** `root` — from `<root>` or from `--input` — is resolved to an absolute path before the operation runs, since the operation leaves that to its caller:
+
+- **`~/`** at the start is expanded to the user's home directory. `~user/` is `invalid-input` (`/root`), as it is in the [config](design-spec.md#root-path).
+- **A relative path** is resolved against the working directory, as the shell reports it — through any symlinks, not with them resolved — matching how the design spec keeps the root [as the user spelled it](design-spec.md#root-path).
+- **`..` segments are not removed.** The resolved path goes to the operation as is, which rejects `..` (`invalid-input`, `/root`). Removing them lexically could change which directory is meant.
+
+A relative `root` is resolved against the working directory even when it comes from an `--input` file elsewhere, not against that file's location. A `root` that is not a string is left alone and fails the operation's schema.
+
+**Output:** Passthrough. `result.root` is the path as recorded in the config, so it shows how `<root>` was resolved.
+
+**Errors:**
+
+| Kind | When |
+|---|---|
+| `invalid-input` | (`/root`) `root` begins with `~user/`. |
+| `environment` | (`variable`: `HOME`) `root` begins with `~/` and the home directory cannot be determined. |
+| `io` | The working directory, needed to resolve a relative `root`, cannot be determined (e.g. it was deleted). `path` is `.`. |
+
+**Examples:**
+
+```sh
+ftask init ~/tasks
+ftask init tasks                    # relative to the working directory
+ftask init /mnt/usb/tasks --replace-config
+jq -n '{root: "~/tasks"}' | ftask init -i -
+```
+
+### create-folder
+
+Create a folder, and optionally any missing parent folders. Runs [`create-folder`](operations.md#create-folder).
+
+**Synopsis:** `ftask create-folder <folder> [-p]`, or `ftask create-folder -i <file>`.
+
+**Operation:** [`create-folder`](operations.md#create-folder).
+
+**Arguments:**
+
+| Argument | Field | Notes |
+|---|---|---|
+| `<folder>` | `/folder` | Required unless `--input` is given. An exact [folder path](#command-line). |
+
+**Options:**
+
+| Option | Field | Default |
+|---|---|---|
+| `-p, --parents`, `--no-parents` | `/parents` | `false`. |
+
+**Input:** none beyond the Arguments and Options mapping.
+
+**Output:** Passthrough. A folder that already exists succeeds with `created` empty, like `mkdir -p`.
+
+**Errors:** none beyond the operation's.
+
+**Examples:**
+
+```sh
+ftask create-folder /proj
+ftask create-folder -p /proj/travel/2026 | jq -r '.result.created[]'
+```
+
+### create
+
+Create a new, open task. Runs [`create`](operations.md#create).
+
+**Synopsis:** `ftask create <title> [options]`, or `ftask create -i <file>`.
+
+**Operation:** [`create`](operations.md#create).
+
+**Arguments:**
+
+| Argument | Field | Notes |
+|---|---|---|
+| `<title>` | `/title` | Required unless `--input` is given. One argument: quote a title with spaces. Trimmed and validated by the operation. |
+
+**Options:**
+
+| Option | Field | Default |
+|---|---|---|
+| `--folder <path>` | `/folder` | `/`. An exact [folder path](#command-line). |
+| `--priority <int\|null>` | `/priority` | `null` (no priority). |
+| `--tags <a,b,…>` | `/tags` | `[]`. |
+| `--blocked-by <id,id,…>` | `/blocked_by` | `[]`. |
+| `--extra <json>` | `/extra` | `{}`. A JSON object. |
+| `--notes <text>` | `/notes` | `""`. Mutually exclusive with `--notes-file`. |
+| `--notes-file <file>` | `/notes` | —. Reads the notes from `<file>`; `-` is stdin. Mutually exclusive with `--notes`. |
+
+**Input:** `--notes-file` reads the file's contents exactly as they are, including any trailing newline, into `notes`. It accepts any readable path, as [`--input`](#input) does. Because `--input` excludes field options, `--notes-file -` and `--input -` never both read stdin.
+
+- **`--notes`** suits short text.
+- **`--notes-file <file>`** suits notes written ahead of time.
+- **`--notes-file -`** suits notes produced by another command. It needs no shell escaping and has no argument size limit.
+
+**Output:** Passthrough: the created task.
+
+**Errors:**
+
+| Kind | When |
+|---|---|
+| `io` | The `--notes-file` file is missing, unreadable, or a directory. |
+| `invalid-input` | (`/notes`) The `--notes-file` contents are not valid UTF-8. |
+
+A `create` that exits `3` or with any other [outcome-unknown](#exit-codes) status may have created the task. Per the operation's Retry safety, check before rerunning; a blind retry can create a duplicate.
+
+**Examples:**
+
+```sh
+ftask create 'Book flights' --folder /proj/travel --tags travel,urgent --priority 2
+ftask create 'Deploy' --blocked-by 41,42 | jq .result.id
+gh issue view 12 --json body -q .body | ftask create 'Fix login bug' --notes-file -
+ftask create 'Wait on quote' --extra '{"status":"waiting"}'
+```
+
+### show
+
+Return one task by ID, with its readiness and where its notes live. Runs [`show`](operations.md#show).
+
+**Synopsis:** `ftask show <id>`, or `ftask show -i <file>`.
+
+**Operation:** [`show`](operations.md#show).
+
+**Arguments:**
+
+| Argument | Field | Notes |
+|---|---|---|
+| `<id>` | `/id` | Required unless `--input` is given. A [task ID](design-spec.md#task-ids), converted as an integer: bare digits only (`42`, not `#42` or `042`). |
+
+One ID per call. Several IDs are shown by running `show` once per ID (see Examples).
+
+**Options:** none.
+
+**Input:** none beyond the Arguments mapping.
+
+**Output:** Passthrough. `result.tasks` is always an array: one task normally, every copy when the ID is duplicated (with a `duplicate-id` warning).
+
+Notes are not included, as in the operation; `notes_path` locates them. The CLI does not read them itself.
+
+**Errors:** none beyond the operation's.
+
+**Examples:**
+
+```sh
+ftask show 42 | jq '.result.tasks[0]'
+ftask show 42 | jq -r '.result.tasks[0].readiness'
+cat "$(ftask show 42 | jq -r '.result.tasks[0].notes_path')"
+for id in 41 42 43; do ftask show "$id"; done | jq -s '[.[].result.tasks[]?]'
+```
+
+### complete
+
+Mark a task complete. Completing an already complete task changes nothing. Runs [`complete`](operations.md#complete).
+
+**Synopsis:** `ftask complete <id>`, or `ftask complete -i <file>`.
+
+**Operation:** [`complete`](operations.md#complete).
+
+**Arguments:**
+
+| Argument | Field | Notes |
+|---|---|---|
+| `<id>` | `/id` | Required unless `--input` is given. Bare digits, as for [`show`](#show). One ID per call. |
+
+**Options:** none.
+
+**Input:** none beyond the Arguments mapping.
+
+**Output:** Passthrough: the task, plus `changed`. An already complete task exits `0` with `changed: false`.
+
+**Errors:** none beyond the operation's.
+
+**Examples:**
+
+```sh
+ftask complete 42 | jq .result.changed
+for id in 41 42; do ftask complete "$id"; done | jq -c '{id: .result.id, changed: .result.changed}'
+```
+
+### reopen
+
+Reopen a complete task. Reopening an already open task changes nothing. The counterpart of [`complete`](#complete). Runs [`reopen`](operations.md#reopen).
+
+**Synopsis:** `ftask reopen <id>`, or `ftask reopen -i <file>`.
+
+**Operation:** [`reopen`](operations.md#reopen).
+
+**Arguments:**
+
+| Argument | Field | Notes |
+|---|---|---|
+| `<id>` | `/id` | Required unless `--input` is given. Bare digits, as for [`show`](#show). One ID per call. |
+
+**Options:** none.
+
+**Input:** none beyond the Arguments mapping.
+
+**Output:** Passthrough: the task, plus `changed`. An already open task exits `0` with `changed: false`.
+
+**Errors:** none beyond the operation's.
+
+**Examples:**
+
+```sh
+ftask reopen 42 | jq -r .result.completed_at   # null
+```
+
+### block
+
+Add one or more blockers to a task's `blocked_by`, all-or-nothing. Runs [`block`](operations.md#block).
+
+**Synopsis:** `ftask block <id> --blockers <id,id,…>`, or `ftask block -i <file>`.
+
+**Operation:** [`block`](operations.md#block).
+
+**Arguments:**
+
+| Argument | Field | Notes |
+|---|---|---|
+| `<id>` | `/id` | Required unless `--input` is given. The task to block. Bare digits, as for [`show`](#show). One ID per call. |
+
+**Options:**
+
+| Option | Field | Default |
+|---|---|---|
+| `--blockers <id,id,…>` | `/blockers` | Required unless `--input` is given. |
+
+`--blockers` is an option rather than a second argument so that the direction is explicit: in `ftask block 42 41` nothing would say which ID blocks which, and a swap would silently add the reverse dependency.
+
+**Input:** none beyond the Arguments and Options mapping.
+
+**Output:** Passthrough: the task, plus `added`. Blockers already present are no-ops; if all were, it exits `0` with `added: []`.
+
+**Errors:** none beyond the operation's.
+
+**Examples:**
+
+```sh
+ftask block 42 --blockers 41,43 | jq .result.added
+ftask block 42 --blockers 7 | jq -c 'select(.error.details.rule == "acyclic") | .error.details.cycles'
+```
+
+### unblock
+
+Remove one or more blockers from a task's `blocked_by`. Removing an ID that isn't there changes nothing. The counterpart of [`block`](#block). Runs [`unblock`](operations.md#unblock).
+
+**Synopsis:** `ftask unblock <id> --blockers <id,id,…>`, or `ftask unblock -i <file>`.
+
+**Operation:** [`unblock`](operations.md#unblock).
+
+**Arguments:**
+
+| Argument | Field | Notes |
+|---|---|---|
+| `<id>` | `/id` | Required unless `--input` is given. The task to unblock. Bare digits, as for [`show`](#show). One ID per call. |
+
+**Options:**
+
+| Option | Field | Default |
+|---|---|---|
+| `--blockers <id,id,…>` | `/blockers` | Required unless `--input` is given. |
+
+**Input:** none beyond the Arguments and Options mapping.
+
+**Output:** Passthrough: the task, plus `removed`. IDs that aren't there are no-ops; if none were, it exits `0` with `removed: []`.
+
+**Errors:** none beyond the operation's.
+
+**Examples:**
+
+```sh
+ftask unblock 42 --blockers 41 | jq .result.removed
+ftask unblock 42 --blockers 99   # clears a dangling reference to a task that no longer exists
+```
+
+### update
+
+Change one or more of a task's `title`, `priority`, `tags`, and `extra`. Fields not named are left unchanged. Runs [`update`](operations.md#update).
+
+**Synopsis:** `ftask update <id> [options]`, or `ftask update -i <file>`.
+
+**Operation:** [`update`](operations.md#update).
+
+**Arguments:**
+
+| Argument | Field | Notes |
+|---|---|---|
+| `<id>` | `/id` | Required unless `--input` is given. The task to update. Bare digits, as for [`show`](#show). One ID per call. |
+
+**Options:**
+
+| Option | Field | Default |
+|---|---|---|
+| `--title <text>` | `/title` | Unchanged. |
+| `--priority <int\|null>` | `/priority` | Unchanged. `null` clears the priority. |
+| `--tags-add <a,b,…>` | `/tags/add` | Unchanged. |
+| `--tags-remove <a,b,…>` | `/tags/remove` | Unchanged. |
+| `--tags-replace-all <a,b,…>` | `/tags/replace_all` | Unchanged. `''` clears all tags. |
+| `--extra-merge <json>` | `/extra/merge` | Unchanged. A JSON object. |
+| `--extra-remove <key>` | `/extra/remove` | Unchanged. **Repeatable**, one key per occurrence. |
+| `--extra-replace-all <json>` | `/extra/replace_all` | Unchanged. A JSON object; `{}` clears `extra`. |
+
+At least one option is needed, and the operation's rules on combining them (e.g. `--tags-replace-all` stands alone; a tag may not be both added and removed) are the operation's: breaking them is `invalid-input`, not a usage error (see [Command line](#command-line)).
+
+**Input:** none beyond the Arguments and Options mapping.
+
+Notes are not set by `update`, as in the operation: they are edited directly in the file at the task's `notes_path`. `blocked_by` is changed by [`block`](#block) and [`unblock`](#unblock), and `completed_at` by [`complete`](#complete) and [`reopen`](#reopen).
+
+**Output:** Passthrough: the task, plus `changed`. An update that changes nothing exits `0` with `changed: []`.
+
+**Errors:** none beyond the operation's.
+
+**Examples:**
+
+```sh
+ftask update 42 --priority 3 --tags-add urgent
+ftask update 42 --extra-merge '{"status":"waiting"}' | jq .result.changed
+ftask update 42 --priority null --tags-remove urgent --extra-remove status
+ftask update 42 --tags-replace-all ''
+```
+
+### frontier
+
+Return the ready tasks — open, and not blocked — in the order to work on them. Runs [`frontier`](operations.md#frontier).
+
+**Synopsis:** `ftask frontier [--folder <path>] [--no-recursive]`, or `ftask frontier -i <file>`.
+
+**Operation:** [`frontier`](operations.md#frontier).
+
+**Arguments:** none.
+
+**Options:**
+
+| Option | Field | Default |
+|---|---|---|
+| `--folder <path>` | `/folder` | `/`. An exact [folder path](#command-line). |
+| `--recursive`, `--no-recursive` | `/recursive` | `true`. `--no-recursive` leaves out tasks in subfolders. |
+
+**Input:** none beyond the Options mapping.
+
+**Output:** Passthrough. `result.tasks` is in frontier order and may be empty; an empty frontier exits `0`.
+
+Taking the first N, or filtering by tag or `extra`, is left to `jq` (see [Not included](#not-included)).
+
+**Errors:** none beyond the operation's.
+
+**Examples:**
+
+```sh
+ftask frontier | jq '.result.tasks[0]'                       # next task
+ftask frontier --folder /proj | jq -r '.result.tasks[] | "\(.id)\t\(.title)"'
+ftask frontier | jq '[.result.tasks[] | select(.tags | index("urgent"))]'
+ftask frontier | jq '.result.tasks[:5]'                      # the first five
+```
+
+### list
+
+Return every task in scope, whatever its readiness, with its readiness shown — and optionally the folders in scope. Complete tasks are included only on request. Runs [`list`](operations.md#list).
+
+**Synopsis:** `ftask list [--folder <path>] [--no-recursive] [--include-complete] [--include-folders]`, or `ftask list -i <file>`.
+
+**Operation:** [`list`](operations.md#list).
+
+**Arguments:** none.
+
+**Options:**
+
+| Option | Field | Default |
+|---|---|---|
+| `--folder <path>` | `/folder` | `/`. An exact [folder path](#command-line). |
+| `--recursive`, `--no-recursive` | `/recursive` | `true`. `--no-recursive` leaves out tasks in subfolders, and folders below the immediate subfolders. |
+| `--include-complete`, `--no-include-complete` | `/include_complete` | `false`. |
+| `--include-folders`, `--no-include-folders` | `/include_folders` | `false`. |
+
+**Input:** none beyond the Options mapping.
+
+**Output:** Passthrough. `result.tasks` is in tree order and may be empty. `result.folders` is present only with `--include-folders`.
+
+Slicing, filtering, and grouping are left to `jq`; rendering the result as a tree is [Future work](design-spec.md#tree-view) outside the CLI (see [Not included](#not-included)).
+
+**Errors:** none beyond the operation's.
+
+**Examples:**
+
+```sh
+ftask list | jq -r '.result.tasks[] | "\(.id)\t\(.readiness)\t\(.title)"'
+ftask list --folder /proj --include-complete | jq '[.result.tasks[] | select(.completed_at != null)] | length'
+ftask list --include-folders | jq -r '.result.folders[]'
+ftask list | jq '.result.tasks | group_by(.folder) | map({folder: .[0].folder, ids: map(.id)})'
+```
+
+## Not included
+
+- **`--limit`**: output shaping, left to `jq` (see the operations' [Parameters](operations.md#conventions) convention). Task lists are not expected to be large enough to need it.
+- **Filters** (e.g. `--tag`, or on `extra` fields): output shaping, left to `jq`, like `--limit`.
+- **`--config` / `--root`**: there is one config and one root per user (see the design spec's [Assumptions](design-spec.md#assumptions)). A different config location is reached by setting `XDG_CONFIG_HOME` (or `HOME`), with the effects the design spec describes.
+- **Tree view**: rendering for people, which the JSON-only CLI does not do. Stays in the design spec's [Future work](design-spec.md#tree-view).
