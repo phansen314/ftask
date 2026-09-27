@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "frontier-output",
+  "type": "object",
+  "required": ["tasks"],
+  "properties": {
+    "tasks": {
+      "type": "array",
+      "items": { "$ref": "task-view" },
+      "description": "Every ready task in scope, in frontier order. May be empty."
+    }
+  },
+  "additionalProperties": false
+}

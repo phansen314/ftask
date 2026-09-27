@@ -116,7 +116,7 @@ func (p *Problems) titleBody(t, ptr string) bool {
 // isLineBreakOrControl is category Cc, plus the line and paragraph
 // separators.
 func isLineBreakOrControl(r rune) bool {
-	return unicode.Is(unicode.Cc, r) || r == ' ' || r == ' '
+	return unicode.Is(unicode.Cc, r) || r == '\u2028' || r == '\u2029'
 }
 
 // Tag is a tag: a name (see design-spec.md, Tags).

@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 
+	"github.com/phansen314/ftask/internal/errs"
 	"github.com/phansen314/ftask/internal/jsonio"
 )
 
@@ -30,10 +31,10 @@ type FileResult struct {
 	Status    FileStatus
 	Versioned bool
 	Found     int64
-	Problems  []string
+	Problems  []errs.Problem
 }
 
-func corrupt(problems ...string) FileResult {
+func corrupt(problems ...errs.Problem) FileResult {
 	return FileResult{Status: FileCorrupt, Problems: problems}
 }
 
@@ -42,19 +43,19 @@ func corrupt(problems ...string) FileResult {
 // supported version.
 func checkVersion(obj *jsonio.Object, repeated []string, supported int64) (FileResult, bool) {
 	if slices.Contains(repeated, "/schema") {
-		return corrupt("/schema: repeated, so its version is ambiguous"), false
+		return corrupt(errs.Problem{Field: "/schema", Reason: "repeated, so its version is ambiguous"}), false
 	}
 	v, ok := obj.Get("schema")
 	if !ok {
-		return corrupt("/schema: " + reasonRequired), false
+		return corrupt(errs.Problem{Field: "/schema", Reason: reasonRequired}), false
 	}
 	n, ok := v.(json.Number)
 	if !ok || !integerLiteral.MatchString(string(n)) {
-		return corrupt("/schema: " + reasonLiteral), false
+		return corrupt(errs.Problem{Field: "/schema", Reason: reasonLiteral}), false
 	}
 	found, err := strconv.ParseInt(string(n), 10, 64)
 	if err != nil || found < -schemaMax || found > schemaMax {
-		return corrupt(fmt.Sprintf("/schema: must be between %d and %d", -schemaMax, schemaMax)), false
+		return corrupt(errs.Problem{Field: "/schema", Reason: fmt.Sprintf("must be between %d and %d", -schemaMax, schemaMax)}), false
 	}
 	if found != supported {
 		return FileResult{Status: FileUnsupported, Versioned: true, Found: found}, false
@@ -70,13 +71,11 @@ const schemaMax = 1<<53 - 1
 // steps 1 and 2 (version: that result): every repeated key and problem makes
 // it corrupt.
 func finish(version FileResult, repeated []string, p *Problems) FileResult {
-	var out []string
+	var out []errs.Problem
 	for _, r := range repeated {
-		out = append(out, r+": repeated key")
+		out = append(out, errs.Problem{Field: r, Reason: "repeated key"})
 	}
-	for _, pr := range p.List() {
-		out = append(out, pr.Field+": "+pr.Reason)
-	}
+	out = append(out, p.List()...)
 	if len(out) > 0 {
 		r := corrupt(out...)
 		r.Versioned, r.Found = true, version.Found

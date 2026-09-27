@@ -17,21 +17,21 @@ func TestTitleInput(t *testing.T) {
 	}{
 		{"plain", "Book flights", "Book flights", true},
 		{"trimmed", "  Book flights\t\n", "Book flights", true},
-		{"no-break space trimmed", " Book ", "Book", true},
-		{"ideographic space trimmed", "　Book ", "Book", true},
-		{"inner whitespace kept", "Book    flights", "Book    flights", true},
-		{"not normalized", "é", "é", true},
-		{"zero-width joiner kept", "👩‍💻", "👩‍💻", true},
+		{"no-break space trimmed", "\u00a0Book\u00a0", "Book", true},
+		{"ideographic space trimmed", "\u3000Book\u2003", "Book", true},
+		{"inner whitespace kept", "Book  \u00a0 flights", "Book  \u00a0 flights", true},
+		{"not normalized", "e\u0301", "e\u0301", true},
+		{"zero-width joiner kept", "👩\u200d💻", "👩\u200d💻", true},
 		{"200 code points", strings.Repeat("é", 200), strings.Repeat("é", 200), true},
 		{"201 code points", strings.Repeat("é", 201), "", false},
 		{"empty", "", "", false},
-		{"only whitespace", "  \t", "", false},
+		{"only whitespace", " \u00a0\t", "", false},
 		{"inner newline", "a\nb", "", false},
 		{"inner tab", "a\tb", "", false},
 		{"inner NEL", "a\u0085b", "", false},
 		{"inner DEL", "a\u007fb", "", false},
-		{"inner line separator", "a b", "", false},
-		{"inner paragraph separator", "a b", "", false},
+		{"inner line separator", "a\u2028b", "", false},
+		{"inner paragraph separator", "a\u2029b", "", false},
 	} {
 		var p Problems
 		got, ok := p.TitleInput(tc.in, "/title")
@@ -46,12 +46,12 @@ func TestTitleInput(t *testing.T) {
 
 func TestStoredTitle(t *testing.T) {
 	for in, ok := range map[string]bool{
-		"Book flights": true,
-		" Book":        false,
-		"Book ":        false,
-		"":             false,
-		"a b":          false,
-		"trailing ":    false,
+		"Book flights":   true,
+		" Book":          false,
+		"Book\u00a0":     false,
+		"":               false,
+		"a\u2028b":       false,
+		"trailing\u205f": false,
 	} {
 		var p Problems
 		if _, got := p.StoredTitle(in, "/title"); got != ok {

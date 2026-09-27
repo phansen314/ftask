@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "list-output",
+  "type": "object",
+  "required": ["tasks"],
+  "properties": {
+    "folders": {
+      "type": "array",
+      "items": { "$ref": "folder-path" },
+      "description": "Present only when include_folders is true: folder itself, then — with recursive — every folder under it, or — without — its immediate subfolders; empty folders included; in tree order."
+    },
+    "tasks": {
+      "type": "array",
+      "items": { "$ref": "task-view" },
+      "description": "Every task in scope — open ones, plus complete ones if include_complete — in tree order. May be empty."
+    }
+  },
+  "additionalProperties": false
+}

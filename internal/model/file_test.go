@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/phansen314/ftask/internal/errs"
 	"github.com/phansen314/ftask/internal/jsonio"
 )
 
@@ -26,6 +27,15 @@ const exampleTask = `{
 }
 `
 
+// problemStrings renders problems as "field: reason", for matching.
+func problemStrings(ps []errs.Problem) []string {
+	var out []string
+	for _, p := range ps {
+		out = append(out, p.Field+": "+p.Reason)
+	}
+	return out
+}
+
 func decodeTask(t *testing.T, s string, filenameID ID) (TaskFile, FileResult) {
 	t.Helper()
 	obj, repeated, err := jsonio.ParseObject([]byte(s))
@@ -38,7 +48,7 @@ func decodeTask(t *testing.T, s string, filenameID ID) (TaskFile, FileResult) {
 func TestTaskFileRoundTrip(t *testing.T) {
 	tf, r := decodeTask(t, exampleTask, 42)
 	if r.Status != FileOK {
-		t.Fatalf("status %v: %v", r.Status, r.Problems)
+		t.Fatalf("status %v: %v", r.Status, problemStrings(r.Problems))
 	}
 	got, err := tf.Encode()
 	if err != nil {
@@ -53,7 +63,7 @@ func TestTaskFileNormalized(t *testing.T) {
 	in := strings.NewReplacer(`"blocked_by": []`, `"blocked_by": [9, 3, 41]`, `"travel"`, `"travel", "b-side", "a"`).Replace(exampleTask)
 	tf, r := decodeTask(t, in, 42)
 	if r.Status != FileOK {
-		t.Fatalf("status %v: %v", r.Status, r.Problems)
+		t.Fatalf("status %v: %v", r.Status, problemStrings(r.Problems))
 	}
 	got, _ := jsonio.MarshalLine(struct {
 		B []ID  `json:"b"`
@@ -121,7 +131,7 @@ func TestTaskFileValidity(t *testing.T) {
 			t.Errorf("%s: Versioned %v, want %v", tc.name, r.Versioned, versioned)
 		}
 		if r.Status != tc.status || r.Found != tc.found {
-			t.Errorf("%s: status %v found %d, want %v %d (%v)", tc.name, r.Status, r.Found, tc.status, tc.found, r.Problems)
+			t.Errorf("%s: status %v found %d, want %v %d (%v)", tc.name, r.Status, r.Found, tc.status, tc.found, problemStrings(r.Problems))
 			continue
 		}
 		if r.Status != FileOK && tf.Title != "" {
@@ -131,11 +141,11 @@ func TestTaskFileValidity(t *testing.T) {
 			continue
 		}
 		found := false
-		for _, pr := range r.Problems {
+		for _, pr := range problemStrings(r.Problems) {
 			found = found || strings.HasPrefix(pr, tc.problem)
 		}
 		if !found {
-			t.Errorf("%s: no problem starting %q in %q", tc.name, tc.problem, r.Problems)
+			t.Errorf("%s: no problem starting %q in %q", tc.name, tc.problem, problemStrings(r.Problems))
 		}
 	}
 }
@@ -162,12 +172,12 @@ func TestTaskFileExactProblems(t *testing.T) {
 			[]string{"/blocked_by/2: duplicate of item 0", "/blocked_by/3: expected an integer", "/blocked_by/4: duplicate of item 1"}},
 	} {
 		_, r := decodeTask(t, tc.in, tc.filenameID)
-		got := slices.Clone(r.Problems)
+		got := slices.Clone(problemStrings(r.Problems))
 		slices.Sort(got)
 		want := slices.Clone(tc.want)
 		slices.Sort(want)
 		if r.Status != FileCorrupt || !slices.Equal(got, want) {
-			t.Errorf("%s: status %v, problems %q; want %q", tc.name, r.Status, r.Problems, tc.want)
+			t.Errorf("%s: status %v, problems %q; want %q", tc.name, r.Status, problemStrings(r.Problems), tc.want)
 		}
 	}
 }
@@ -216,7 +226,7 @@ func TestRootFile(t *testing.T) {
 		}
 		rf, r := DecodeRootFile(obj, repeated)
 		if r.Status != tc.status || rf.LastID != tc.lastID {
-			t.Errorf("%s: status %v last_id %d, want %v %d (%v)", tc.in, r.Status, rf.LastID, tc.status, tc.lastID, r.Problems)
+			t.Errorf("%s: status %v last_id %d, want %v %d (%v)", tc.in, r.Status, rf.LastID, tc.status, tc.lastID, problemStrings(r.Problems))
 		}
 	}
 	got, _ := RootFile{Schema: 1, LastID: 7}.Encode()

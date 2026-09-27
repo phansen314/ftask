@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "frontier-input",
+  "type": "object",
+  "properties": {
+    "folder": { "$ref": "folder-path", "default": "/", "description": "Only tasks in this folder are returned." },
+    "recursive": { "type": "boolean", "default": true, "description": "Also return tasks in the folder's subfolders." }
+  },
+  "additionalProperties": false
+}
