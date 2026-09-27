@@ -15,6 +15,7 @@ const (
 	OpMkdir      = "mkdir"
 	OpMkdirAll   = "mkdirall"
 	OpReadFile   = "readfile"
+	OpStat       = "stat"
 	OpLstat      = "lstat"
 	OpReadDir    = "readdir"
 	OpCreateTemp = "createtemp"
@@ -101,6 +102,13 @@ func (f Fault) ReadFile(p string) ([]byte, error) {
 		return nil, err
 	}
 	return f.FS.ReadFile(p)
+}
+
+func (f Fault) Stat(p string) (fs.FileInfo, error) {
+	if err := f.before(Op{Name: OpStat, Path: p}); err != nil {
+		return nil, err
+	}
+	return f.FS.Stat(p)
 }
 
 type faultRoot struct {

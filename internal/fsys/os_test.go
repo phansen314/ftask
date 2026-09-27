@@ -431,3 +431,16 @@ func TestFSReadFileFollowsSymlink(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestFSStatFollowsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	must(t, os.Mkdir(filepath.Join(dir, "real"), 0o755))
+	must(t, os.Symlink("real", filepath.Join(dir, "link")))
+	fi, err := OS{}.Stat(filepath.Join(dir, "link"))
+	must(t, err)
+	if !fi.IsDir() {
+		t.Errorf("mode %v, want a directory", fi.Mode())
+	}
+	_, err = OS{}.Stat(filepath.Join(dir, "missing"))
+	wantErrno(t, err, syscall.ENOENT)
+}

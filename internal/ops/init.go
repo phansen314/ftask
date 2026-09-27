@@ -29,34 +29,14 @@ func decodeInit(f *model.Fields, p *model.Problems) any {
 // segments — then checks that it is absolute and has no ".." segment, which
 // cleaning never removes (see design-spec.md, Root path).
 func cleanRoot(root string, p *model.Problems) (string, bool) {
-	clean := CleanPath(root)
+	clean := model.CleanPath(root)
 	switch {
 	case !strings.HasPrefix(clean, "/"):
 		p.AddAdditional("/root", "must be an absolute path (resolving ~ or a relative path is the caller's job)")
 		return "", false
-	case strings.Contains(clean+"/", "/../"):
+	case model.HasDotDot(clean):
 		p.AddAdditional("/root", `must not contain ".." segments`)
 		return "", false
 	}
 	return clean, true
-}
-
-// CleanPath removes a path's empty and "." segments and any trailing "/",
-// lexically: ".." segments are kept, and symlinks are not resolved.
-func CleanPath(path string) string {
-	abs := strings.HasPrefix(path, "/")
-	var segs []string
-	for _, s := range strings.Split(path, "/") {
-		if s != "" && s != "." {
-			segs = append(segs, s)
-		}
-	}
-	joined := strings.Join(segs, "/")
-	switch {
-	case abs:
-		return "/" + joined
-	case joined == "":
-		return "."
-	}
-	return joined
 }

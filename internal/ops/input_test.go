@@ -214,13 +214,3 @@ func TestDecodedInputs(t *testing.T) {
 		t.Errorf("unknown operation: %v", e)
 	}
 }
-
-func TestCleanPath(t *testing.T) {
-	for in, want := range map[string]string{
-		"/": "/", "//": "/", "/a/": "/a", "/a//b/./c": "/a/b/c", "/a/../b": "/a/../b", "a/b": "a/b", "": ".", "./": ".",
-	} {
-		if got := CleanPath(in); got != want {
-			t.Errorf("CleanPath(%q) = %q, want %q", in, got, want)
-		}
-	}
-}

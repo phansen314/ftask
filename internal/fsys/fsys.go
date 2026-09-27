@@ -6,7 +6,8 @@ import (
 )
 
 // FS opens roots, and makes the few calls that happen outside one: init's
-// creation of the root and the config directory, and reading the config.
+// creation of the root and the config directory, reading the config, and
+// checking what the root path leads to.
 type FS interface {
 	// OpenRoot opens the directory at path, following symlinks. Every later
 	// call through the Root is relative to this one resolution.
@@ -18,6 +19,9 @@ type FS interface {
 	// ReadFile reads the config file, following symlinks: a config is often
 	// a symlink into a dotfiles checkout.
 	ReadFile(path string) ([]byte, error)
+	// Stat follows symlinks: whether the root path leads to a directory
+	// (info's root_exists, init's check of an existing root).
+	Stat(path string) (fs.FileInfo, error)
 }
 
 // Root is a directory opened once, through which every call is made. Names
