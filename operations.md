@@ -99,7 +99,7 @@ An error means the operation failed. `kind` and `details` are the contract; `mes
 | `not-found` | A task or folder named by the input, or a filesystem directory it requires, does not exist. | `folders`: tree folder paths; `ids`: task IDs; `paths`: filesystem paths (e.g. `init`'s missing parent directory). All three always present, empty when not applicable. |
 | `conflict` | The operation was refused because it would violate an invariant, overwrite state it must not, or act on a task the tree cannot identify uniquely. | `rule`: the rule that refused it — currently `acyclic`, `id-exhausted` (no ID left under the [ID ceiling](design-spec.md#task-ids)), `config-exists`, `root-not-empty`, `duplicate-id` (a write names an ID that more than one task file has). `ids`: the tasks involved, always present, possibly empty. For `acyclic`, also `cycles`: `cycles[i]` is one cycle through `ids[i]`, chosen deterministically (see [`block`](#block)). |
 | `busy` | Another write holds the write lock. Safe to retry. | none (`{}`). |
-| `corrupt` | A needed file — or an entry on an input path — is present and readable but its content or type is wrong (see [File validity](design-spec.md#file-validity)); or ftask found a file where, under its own invariants, none can exist (e.g. creating a task file that already exists). | `path`; `reason`: `not-json` (not parseable, or not an object), `invalid` (fails a file-level rule, including a missing `schema` or one not written as an integer literal), or `unexpected-file` (wrong entry type, e.g. `ftask.json` is a symlink or directory; or a file exists that must not). |
+| `corrupt` | A needed file — or an entry on an input path — is present and readable but its content or type is wrong (see [File validity](design-spec.md#file-validity)); or ftask found a file where, under its own invariants, none can exist (e.g. creating a task file that already exists). | `path`; `reason`: `not-json` (not parseable, or not an object), `invalid` (fails a file-level rule, including a missing `schema` or one not written as an integer literal within ±(2^53 − 1)), or `unexpected-file` (wrong entry type, e.g. `ftask.json` is a symlink or directory; or a file exists that must not). |
 | `io` | The environment refused an operation: an unreadable file, permission denied, disk full, read-only filesystem, and similar. An OS error with no symbolic name is `internal`, not `io`. | `path`: built from the root as stored (see [Root path](design-spec.md#root-path)), or the config's own path for an error on the config; `code`: the symbolic OS error, e.g. `ENOSPC`, never a number. |
 | `unsupported-format` | A needed file's `schema` is not the version this binary supports (see [Format versions](design-spec.md#format-versions)). | `path`; `found`: the file's version; `supported`: the versions this binary supports. |
 | `internal` | A bug ftask detects. Every failure ftask reports has a kind: anything not covered above is `internal`. A crash reports nothing at all (see the CLI's [exit codes](cli-spec.md#exit-codes)). | none (`{}`). |
@@ -238,7 +238,7 @@ A kind that lists every instance lists them across the whole step: e.g. [`create
       "required": ["path", "found", "supported"],
       "properties": {
         "path": { "type": "string" },
-        "found": { "type": "integer" },
+        "found": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
         "supported": { "type": "array", "items": { "type": "integer" } }
       },
       "additionalProperties": false
@@ -640,7 +640,7 @@ Report the state of this machine's configured root: what is configured, what exi
       "properties": {
         "root_exists": { "type": "boolean", "description": "Whether the root path leads, through symlinks, to a directory." },
         "metadata": { "type": "string", "enum": ["missing", "unreadable", "corrupt", "unsupported-format", "ok"], "description": "State of ftask.json, per the three-step check (see File validity): corrupt fails step 1 or 3 (or is not a regular file); unsupported-format fails step 2." },
-        "schema": { "type": ["integer", "null"], "description": "ftask.json's schema value; set whenever step 1 passes — whether metadata ends up ok, unsupported-format, or corrupt at step 3 — otherwise null." },
+        "schema": { "type": ["integer", "null"], "minimum": -9007199254740991, "maximum": 9007199254740991, "description": "ftask.json's schema value; set whenever step 1 passes — whether metadata ends up ok, unsupported-format, or corrupt at step 3 — otherwise null." },
         "last_id": { "anyOf": [{ "$ref": "root-file#/properties/last_id" }, { "type": "null" }], "description": "Highest task ID issued; null unless metadata is ok." }
       },
       "additionalProperties": false,

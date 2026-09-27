@@ -131,7 +131,9 @@ Task file:
   "created_at": "2026-09-20T18:31:51Z",
   "completed_at": null,
   "blocked_by": [],
-  "tags": ["travel"],
+  "tags": [
+    "travel"
+  ],
   "extra": {
     "status": "waiting on quote"
   }
@@ -278,7 +280,7 @@ Rules are checked at two levels, and they fail differently:
 
 Every versioned file (`ftask.json`, a task file) is checked in three steps, stopping at the first failure:
 
-1. **Parseable and versioned.** The file is valid JSON (with no `\u` escape of an unpaired UTF-16 surrogate, e.g. `\ud800` alone, and no more than 9,990 levels of nested objects and arrays), is a JSON object, and has a `schema` written as an integer literal (`2.0` does not count). Otherwise: `corrupt`.
+1. **Parseable and versioned.** The file is valid JSON (with no `\u` escape of an unpaired UTF-16 surrogate, e.g. `\ud800` alone, and no more than 9,990 levels of nested objects and arrays), is a JSON object, and has a `schema` written as an integer literal (`2.0` does not count) from −(2^53 − 1) to 2^53 − 1, the range every JSON reader holds exactly. Otherwise: `corrupt`.
 2. **Supported version.** `schema` is the version this binary supports. Otherwise: `unsupported-format` — and nothing further is checked, since the rest of the file follows a format this binary doesn't know (see [Format versions](#format-versions)).
 3. **Valid.** The file passes every file-level rule above. Otherwise: `corrupt`.
 
