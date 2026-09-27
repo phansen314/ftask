@@ -14,13 +14,27 @@ import (
 // of the field it concerns. An adapter checks each field once, so no field is
 // reported twice for one rule.
 type Problems struct {
-	list []errs.Problem
-	bad  map[string]bool
+	list       []errs.Problem
+	additional []bool // per problem: from a rule no schema expresses
+	bad        map[string]bool
 }
 
 // Add records a problem at field.
 func (p *Problems) Add(field, reason string) {
+	p.add(field, reason, false)
+}
+
+// AddAdditional records a problem found by a rule the published schema cannot
+// express (an operation's Additional validation, or a file-level rule beyond
+// its schema). Such problems are reported like any other; the schema-agreement
+// tests leave them out (see SchemaList).
+func (p *Problems) AddAdditional(field, reason string) {
+	p.add(field, reason, true)
+}
+
+func (p *Problems) add(field, reason string, additional bool) {
 	p.list = append(p.list, errs.Problem{Field: field, Reason: reason})
+	p.additional = append(p.additional, additional)
 	if p.bad == nil {
 		p.bad = map[string]bool{}
 	}
@@ -36,6 +50,18 @@ func (p *Problems) Failed(field string) bool { return p.bad[field] }
 
 // List returns the problems in the order found; errs.InvalidInput sorts them.
 func (p *Problems) List() []errs.Problem { return p.list }
+
+// SchemaList returns the problems the published schema also finds: every
+// problem not added with AddAdditional.
+func (p *Problems) SchemaList() []errs.Problem {
+	var out []errs.Problem
+	for i, pr := range p.list {
+		if !p.additional[i] {
+			out = append(out, pr)
+		}
+	}
+	return out
+}
 
 // Reasons shared by every adapter, so one mistake reads the same everywhere.
 const (

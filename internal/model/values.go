@@ -84,7 +84,7 @@ func isTitleSpace(r rune) bool { return unicode.IsSpace(r) }
 // TitleInput trims s, a title given as input, then validates it.
 func (p *Problems) TitleInput(s, ptr string) (Title, bool) {
 	t := strings.TrimFunc(s, isTitleSpace)
-	return Title(t), p.titleBody(t, ptr)
+	return Title(t), titleBody(t, ptr, p.AddAdditional) // the input schema takes any string
 }
 
 // StoredTitle validates s, a title read from a task file: it must already be
@@ -94,20 +94,20 @@ func (p *Problems) StoredTitle(s, ptr string) (Title, bool) {
 		p.Add(ptr, "must not start or end with whitespace")
 		return "", false
 	}
-	return Title(s), p.titleBody(s, ptr)
+	return Title(s), titleBody(s, ptr, p.Add) // the file schema's pattern
 }
 
-func (p *Problems) titleBody(t, ptr string) bool {
+func titleBody(t, ptr string, add func(field, reason string)) bool {
 	n := utf8.RuneCountInString(t)
 	switch {
 	case n == 0:
-		p.Add(ptr, "must not be empty")
+		add(ptr, "must not be empty")
 		return false
 	case n > titleMax:
-		p.Add(ptr, "must be at most 200 characters")
+		add(ptr, "must be at most 200 characters")
 		return false
 	case strings.ContainsFunc(t, isLineBreakOrControl):
-		p.Add(ptr, "must not contain control characters or line breaks")
+		add(ptr, "must not contain control characters or line breaks")
 		return false
 	}
 	return true
@@ -214,7 +214,7 @@ func (p *Problems) Timestamp(v any, ptr string) (Timestamp, bool) {
 		return "", false
 	}
 	if _, err := time.Parse(timestampLayout, s); err != nil {
-		p.Add(ptr, "is not a real date and time")
+		p.AddAdditional(ptr, "is not a real date and time") // the schema checks only the shape
 		return "", false
 	}
 	return Timestamp(s), true

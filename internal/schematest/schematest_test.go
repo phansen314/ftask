@@ -193,8 +193,8 @@ func TestLocations(t *testing.T) {
 		{`{"schema": 1, "last_id": 0, "x": 1, "a/b": 2}`, []string{"/a~1b", "/x"}},
 		{`{"schema": 2, "last_id": -1}`, []string{"/last_id", "/schema"}},
 	} {
-		ok, got := Check(t, "root-file", []byte(tc.in))
-		if ok != (tc.want == nil) || !reflect.DeepEqual(got, tc.want) {
+		ok, f := Check(t, "root-file", []byte(tc.in))
+		if got := f.Fields; ok != (tc.want == nil) || !reflect.DeepEqual(got, tc.want) || f.Alternatives != nil {
 			t.Errorf("%s: ok %v, locations %q; want %q", tc.in, ok, got, tc.want)
 		}
 	}
@@ -208,9 +208,46 @@ func TestLocations(t *testing.T) {
 		{`[3, 3.0]`, `[]`, []string{"/blocked_by/1"}}, // equal numbers, however written
 	} {
 		doc := `{"schema":1,"id":1,"title":"t","priority":null,"created_at":"2026-09-20T18:31:51Z","completed_at":null,"blocked_by":` + tc.blockedBy + `,"tags":` + tc.tags + `,"extra":{}}`
-		ok, got := Check(t, "task-file", []byte(doc))
-		if ok || !reflect.DeepEqual(got, tc.want) {
+		ok, f := Check(t, "task-file", []byte(doc))
+		if got := f.Fields; ok || !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("duplicates %s %s: ok %v, locations %q; want %q", tc.blockedBy, tc.tags, ok, got, tc.want)
+		}
+	}
+}
+
+// Each alternative of a failing anyOf or oneOf is kept apart; an adapter must
+// match exactly one.
+func TestAlternatives(t *testing.T) {
+	for _, tc := range []struct {
+		in      string
+		want    string
+		matches [][]string
+		misses  [][]string
+	}{
+		{`{"id": 1}`, `[] + one of [[""] [""] [""] [""]] at ""`,
+			[][]string{{""}}, [][]string{{"/title"}, nil}},
+		{`{"id": 1, "x": 1}`, `["/x"] + one of [[""] [""] [""] [""]] at ""`,
+			[][]string{{"", "/x"}}, [][]string{{""}, {"/x"}}},
+		{`{"id": 1, "tags": {"add": ["Urgent"]}}`, `[] + one of [["/tags" "/tags/add"] ["/tags/add/0"]] at "/tags"`,
+			[][]string{{"/tags/add/0"}, {"/tags", "/tags/add"}}, [][]string{{"/tags"}, {"/tags/add"}, {"/tags/add/0", "/tags"}}},
+		{`{"id": 1, "tags": {"replace_all": ["a"], "add": ["b"]}}`, `[] + one of [["/tags/add"] ["/tags/replace_all"]] at "/tags"`,
+			[][]string{{"/tags/add"}}, [][]string{{"/tags"}}},
+		{`{"id": 1, "tags": {}}`, `[] + one of [["/tags"] ["/tags"]] at "/tags"`,
+			[][]string{{"/tags"}}, [][]string{{"/tags/add"}}},
+	} {
+		_, f := Check(t, "update-input", []byte(tc.in))
+		if got := f.String(); got != tc.want {
+			t.Errorf("%s: %s, want %s", tc.in, got, tc.want)
+		}
+		for _, m := range tc.matches {
+			if !f.Matches(m) {
+				t.Errorf("%s: %q should match", tc.in, m)
+			}
+		}
+		for _, m := range tc.misses {
+			if f.Matches(m) {
+				t.Errorf("%s: %q should not match", tc.in, m)
+			}
 		}
 	}
 }

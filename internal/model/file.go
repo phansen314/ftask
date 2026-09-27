@@ -26,12 +26,15 @@ const (
 // passed step 1 (parseable and versioned); Found is then its schema version,
 // whatever the final Status — info reports it even for a file corrupt at
 // step 3. Problems says what made it corrupt; it is for diagnostics only,
-// since corrupt reports no detail beyond its reason.
+// since corrupt reports no detail beyond its reason. SchemaProblems are those
+// of a file corrupt at step 3 that its published schema also finds: not
+// repeated keys, nor the rules beyond the schema (see Problems.SchemaList).
 type FileResult struct {
-	Status    FileStatus
-	Versioned bool
-	Found     int64
-	Problems  []errs.Problem
+	Status         FileStatus
+	Versioned      bool
+	Found          int64
+	Problems       []errs.Problem
+	SchemaProblems []errs.Problem
 }
 
 func corrupt(problems ...errs.Problem) FileResult {
@@ -78,7 +81,7 @@ func finish(version FileResult, repeated []string, p *Problems) FileResult {
 	out = append(out, p.List()...)
 	if len(out) > 0 {
 		r := corrupt(out...)
-		r.Versioned, r.Found = true, version.Found
+		r.Versioned, r.Found, r.SchemaProblems = true, version.Found, p.SchemaList()
 		return r
 	}
 	return version
@@ -101,7 +104,7 @@ func DecodeTaskFile(obj *jsonio.Object, repeated []string, filenameID ID) (TaskF
 		if id, ok := p.ID(v, "/id"); ok {
 			t.ID = id
 			if id != filenameID {
-				p.Add("/id", fmt.Sprintf("must match the ID in the filename (%d)", filenameID))
+				p.AddAdditional("/id", fmt.Sprintf("must match the ID in the filename (%d)", filenameID))
 			}
 		}
 	}
@@ -125,7 +128,7 @@ func DecodeTaskFile(obj *jsonio.Object, repeated []string, filenameID ID) (TaskF
 		if ids, ok := p.IDs(v, "/blocked_by"); ok {
 			t.BlockedBy = ids
 			if i := slices.Index(ids, t.ID); i >= 0 && !p.Failed("/id") {
-				p.Add(jsonio.Pointer("/blocked_by", strconv.Itoa(i)), "must not be the task's own ID")
+				p.AddAdditional(jsonio.Pointer("/blocked_by", strconv.Itoa(i)), "must not be the task's own ID")
 			}
 		}
 	}

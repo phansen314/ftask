@@ -103,8 +103,8 @@ func newCompiler() (*jsonschema.Compiler, error) {
 }
 
 // Check validates data, one JSON value, against the schema with the given
-// $id. On failure it returns where, per Locations.
-func Check(t testing.TB, id string, data []byte) (ok bool, locations []string) {
+// $id. On failure it returns where, per Analyze.
+func Check(t testing.TB, id string, data []byte) (ok bool, failure Failure) {
 	t.Helper()
 	v, err := jsonschema.UnmarshalJSON(bytes.NewReader(data))
 	if err != nil {
@@ -112,53 +112,121 @@ func Check(t testing.TB, id string, data []byte) (ok bool, locations []string) {
 	}
 	err = Schema(t, id).Validate(v)
 	if err == nil {
-		return true, nil
+		return true, Failure{}
 	}
 	ve, isVE := err.(*jsonschema.ValidationError)
 	if !isVE {
 		t.Fatalf("validate %s against %s: %v", data, id, err)
 	}
-	return false, Locations(ve, v)
+	return false, Analyze(ve, v)
 }
 
-// Locations returns the JSON Pointers of a validation error's leaves,
-// sorted and without repeats. Errors a parent reports about one of its
-// children — a missing required property, a disallowed additional property,
-// a duplicate array item — are placed at that child, where ftask's adapters
-// report them. instance is the value validated, as jsonschema.UnmarshalJSON
-// returns it: the library names only the first duplicate in an array, so
-// every item equal to an earlier one is found there.
-func Locations(ve *jsonschema.ValidationError, instance any) []string {
-	var out []string
-	var walk func(*jsonschema.ValidationError)
-	walk = func(e *jsonschema.ValidationError) {
+// Failure is where a value fails a schema, as JSON Pointers.
+type Failure struct {
+	// Fields are the failures outside any anyOf or oneOf.
+	Fields []string
+	// Alternatives are the failing anyOf and oneOf, outermost ones only.
+	Alternatives []Alternatives
+}
+
+// Alternatives are the failures of one anyOf or oneOf: Options[i] is where
+// its i-th alternative fails.
+type Alternatives struct {
+	At      string
+	Options [][]string
+}
+
+// Matches reports whether fields — an adapter's problems, as pointers — are
+// exactly f's Fields plus, for each failing anyOf or oneOf, exactly the
+// failures of one of its alternatives: the form the value evidently meant,
+// which is the only one an adapter reports.
+func (f Failure) Matches(fields []string) bool {
+	want := set(fields)
+	var try func(i int, acc []string) bool
+	try = func(i int, acc []string) bool {
+		if i == len(f.Alternatives) {
+			return slices.Equal(set(acc), want)
+		}
+		for _, opt := range f.Alternatives[i].Options {
+			if try(i+1, append(slices.Clone(acc), opt...)) {
+				return true
+			}
+		}
+		return false
+	}
+	return try(0, f.Fields)
+}
+
+// String shows the failure for test messages.
+func (f Failure) String() string {
+	s := fmt.Sprintf("%q", f.Fields)
+	for _, a := range f.Alternatives {
+		s += fmt.Sprintf(" + one of %q at %q", a.Options, a.At)
+	}
+	return s
+}
+
+func set(xs []string) []string {
+	return slices.Compact(slices.Sorted(slices.Values(xs)))
+}
+
+// Analyze returns where a validation error's leaves are. Errors a parent
+// reports about one of its children — a disallowed additional property, each
+// array item equal to an earlier one, a missing required property — are
+// placed at that child, where ftask's adapters report them. The exception is
+// a property an alternative of an anyOf or oneOf requires: it is placed at
+// the object, since the alternative does not make it required overall, and
+// adapters report a missing form there. instance is the value validated, as
+// jsonschema.UnmarshalJSON returns it: the library names only the first
+// duplicate in an array, so every duplicate is found there.
+func Analyze(ve *jsonschema.ValidationError, instance any) Failure {
+	var f Failure
+	var leaves func(e *jsonschema.ValidationError, inAlternative bool, out *[]string)
+	leaves = func(e *jsonschema.ValidationError, inAlternative bool, out *[]string) {
 		if len(e.Causes) > 0 {
+			switch e.ErrorKind.(type) {
+			case *kind.AnyOf, *kind.OneOf:
+				if !inAlternative {
+					alt := Alternatives{At: pointer(e.InstanceLocation)}
+					for _, c := range e.Causes {
+						var opt []string
+						leaves(c, true, &opt)
+						alt.Options = append(alt.Options, set(opt))
+					}
+					f.Alternatives = append(f.Alternatives, alt)
+					return
+				}
+			}
 			for _, c := range e.Causes {
-				walk(c)
+				leaves(c, inAlternative, out)
 			}
 			return
 		}
 		at := pointer(e.InstanceLocation)
 		switch k := e.ErrorKind.(type) {
 		case *kind.Required:
+			if inAlternative {
+				*out = append(*out, at)
+				break
+			}
 			for _, name := range k.Missing {
-				out = append(out, child(at, name))
+				*out = append(*out, child(at, name))
 			}
 		case *kind.AdditionalProperties:
 			for _, name := range k.Properties {
-				out = append(out, child(at, name))
+				*out = append(*out, child(at, name))
 			}
 		case *kind.UniqueItems:
 			for _, i := range duplicates(at, lookup(instance, e.InstanceLocation)) {
-				out = append(out, child(at, strconv.Itoa(i)))
+				*out = append(*out, child(at, strconv.Itoa(i)))
 			}
 		default:
-			out = append(out, at)
+			*out = append(*out, at)
 		}
 	}
-	walk(ve)
-	slices.Sort(out)
-	return slices.Compact(out)
+	leaves(ve, false, &f.Fields)
+	f.Fields = set(f.Fields)
+	return f
 }
 
 // lookup returns the value at tokens within v.
