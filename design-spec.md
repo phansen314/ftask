@@ -273,12 +273,12 @@ Rules are checked at two levels, and they fail differently:
 
 | Level | Checked against | Rules | When broken |
 |---|---|---|---|
-| **File** | The one file alone | Valid JSON with no duplicate keys; integer fields written as integer literals (`42`, never `42.0` or `4.2e1`); the file's JSON Schema; the [naming and validation](#naming-and-validation) rules the schema can't express (e.g. timestamps are real calendar date-times); the task's own ID not in its `blocked_by`; the filename ID equals the `id` field | The file is **`corrupt`**. Reads skip it with an [`unusable-file`](operations.md#warning-kinds) warning; a write that needs it fails with `corrupt`. |
+| **File** | The one file alone | Valid JSON (per step 1 below) with no duplicate keys; integer fields written as integer literals (`42`, never `42.0` or `4.2e1`); the file's JSON Schema; the [naming and validation](#naming-and-validation) rules the schema can't express (e.g. timestamps are real calendar date-times); the task's own ID not in its `blocked_by`; the filename ID equals the `id` field | The file is **`corrupt`**. Reads skip it with an [`unusable-file`](operations.md#warning-kinds) warning; a write that needs it fails with `corrupt`. |
 | **Tree** | Several files together | The [invariants](#invariants) | The files stay usable. Reads report or absorb the violation (e.g. a dangling blocker counts as blocking); [`doctor`](#doctor) repairs it. |
 
 Every versioned file (`ftask.json`, a task file) is checked in three steps, stopping at the first failure:
 
-1. **Parseable and versioned.** The file is valid JSON, a JSON object, and has a `schema` written as an integer literal (`2.0` does not count). Otherwise: `corrupt`.
+1. **Parseable and versioned.** The file is valid JSON (with no `\u` escape of an unpaired UTF-16 surrogate, e.g. `\ud800` alone, and no more than 9,990 levels of nested objects and arrays), is a JSON object, and has a `schema` written as an integer literal (`2.0` does not count). Otherwise: `corrupt`.
 2. **Supported version.** `schema` is the version this binary supports. Otherwise: `unsupported-format` — and nothing further is checked, since the rest of the file follows a format this binary doesn't know (see [Format versions](#format-versions)).
 3. **Valid.** The file passes every file-level rule above. Otherwise: `corrupt`.
 

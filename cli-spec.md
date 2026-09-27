@@ -24,6 +24,7 @@ The intended user is a power user working through Claude, with `jq` for anything
 - **Any readable path.** `<file>` may be any path that can be read to the end, not only a regular file: process substitution (`-i <(jq -n …)`) and named pipes work. A file literally named `-` is given as `./-`.
 - **Exactly one JSON value.** The input is one JSON object, optionally surrounded by whitespace. Empty input, a value that is not an object, a second value (e.g. several objects from `jq -c '.[]'`), or any other trailing bytes are `invalid-input` (`field`: `""`).
 - **UTF-8.** The input is UTF-8 with no byte-order mark. A byte-order mark or invalid UTF-8 is `invalid-input` (`field`: `""`).
+- **No unpaired surrogates, bounded nesting.** A `\u` escape of an unpaired UTF-16 surrogate (e.g. `\ud800` alone), or objects and arrays nested more than 9,990 levels deep, is `invalid-input` (`field`: `""`), as in a [file](design-spec.md#file-validity).
 - **Operation rules apply.** The input is held to the operation's input schema and to the [input conventions](operations.md#conventions); violations are `invalid-input`.
 - **Unreadable input.** A missing or unreadable `<file>`, or a directory, is `io`.
 

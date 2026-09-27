@@ -34,6 +34,8 @@ The reader builds an **ordered tree**: objects as ordered lists of members, arra
 | The top-level value is an object | The decoder accepts any value; operation input and every file must be an object (for a file, otherwise `not-json`). |
 | No repeated key within an object | The token stream yields both keys; only the reader can see the repeat. |
 | Nothing after the first value | The decoder is a stream and happily yields a second value. |
+| No `\u` escape of an unpaired surrogate: a high one not followed by an escaped low one, or a low one alone | The decoder silently replaces it with U+FFFD, changing the string — and can make two distinct keys equal. Checked by a scan of the raw bytes after decoding. |
+| At most 9,990 levels of nested objects and arrays | The token stream has no limit, but the encoder rejects output deeper than 10,000. The margin lets anything read be written back, even inside the output envelope, which adds at most 3 levels. |
 
 How a failure is reported:
 
