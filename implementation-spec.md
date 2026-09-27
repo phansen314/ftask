@@ -217,9 +217,9 @@ So the first discovery of `id` yields the required path.
 
 ### Names
 
-The standard library has no errno-to-name function (`syscall.Errno.Error()` is the message, e.g. "no space left on device"), and errno numbers differ by platform (`EAGAIN` is 11 on Linux, 35 on macOS). ftask keeps its own table, `map[syscall.Errno]string{syscall.ENOSPC: "ENOSPC", …}`: the `syscall` constants carry each platform's numbers, so the one source file is correct on both.
+The standard library has no errno-to-name function (`syscall.Errno.Error()` is the message, e.g. "no space left on device"), and errno numbers differ by platform (`EAGAIN` is 11 on Linux, 35 on macOS). ftask keeps its own table, one per OS (`errno_linux.go`, `errno_darwin.go`), each written with `syscall` constants — `map[syscall.Errno]string{syscall.ENOSPC: "ENOSPC", …}` — so each carries its platform's numbers. They are separate files because some names exist on only one OS (`EL2NSYNC` on Linux, `EBADRPC` on macOS), and the completeness test needs them all.
 
-- **Aliases** get one fixed name on both platforms: `EAGAIN` (not `EWOULDBLOCK`), `ENOTSUP` (not `EOPNOTSUPP`, which is the same number on Linux but not on macOS), `EDEADLK` (not `EDEADLOCK`).
+- **Aliases** get one fixed name on every platform: `EAGAIN` (not `EWOULDBLOCK`), `ENOTSUP` (not `EOPNOTSUPP`), `EDEADLK` (not `EDEADLOCK`). The rule is about names, not numbers: where a platform gives the other name its own number (`EOPNOTSUPP` is 102 on macOS, `ENOTSUP` 45), that number also maps to the canonical name, and the other name never appears in output. The table can therefore map two numbers to one name; a test checks that each alias maps to its canonical name on the current platform.
 - **Completeness test**, run on each platform: for every errno from 1 to 255 whose message is a real one (not "errno N"), the table must have a name. A missing name fails CI rather than shipping.
 - **An errno not in the table** (e.g. from a newer kernel) is `internal` — never an invented name.
 

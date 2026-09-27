@@ -17,7 +17,7 @@ Operations on this data model are specified in [operations.md](operations.md).
 
 ## Supported platforms
 
-Only Linux and macOS are supported. Windows is never supported.
+Only Linux and macOS, on amd64 and arm64, are supported. Windows is never supported.
 
 ## Terms
 
