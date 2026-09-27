@@ -7,8 +7,9 @@
 package errs
 
 import (
+	"cmp"
 	"fmt"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -70,12 +71,9 @@ func InvalidInput(problems []Problem) *Error {
 	if len(problems) == 0 {
 		return Internal("invalid-input with no problems")
 	}
-	ps := append([]Problem(nil), problems...)
-	sort.SliceStable(ps, func(i, j int) bool {
-		if ps[i].Field != ps[j].Field {
-			return ps[i].Field < ps[j].Field
-		}
-		return ps[i].Reason < ps[j].Reason
+	ps := slices.Clone(problems)
+	slices.SortFunc(ps, func(a, b Problem) int {
+		return cmp.Or(strings.Compare(a.Field, b.Field), strings.Compare(a.Reason, b.Reason))
 	})
 	msg := fmt.Sprintf("%d invalid inputs", len(ps))
 	if len(ps) == 1 {
@@ -191,8 +189,8 @@ func Conflict(rule Rule, ids []int64) *Error {
 }
 
 // Acyclic reports blockers that would create a cycle: cycles[i] is the cycle
-// through ids[i], at least two IDs long. Anything else is a bug, reported as
-// internal.
+// through ids[i], at least two distinct IDs, ids[i] among them. Anything else
+// is a bug, reported as internal.
 func Acyclic(ids []int64, cycles [][]int64) *Error {
 	if len(ids) == 0 || len(cycles) != len(ids) {
 		return Internal(fmt.Sprintf("acyclic conflict with %d ids and %d cycles", len(ids), len(cycles)))
@@ -200,6 +198,12 @@ func Acyclic(ids []int64, cycles [][]int64) *Error {
 	for i, c := range cycles {
 		if len(c) < 2 {
 			return Internal(fmt.Sprintf("acyclic conflict: cycle through %d has %d IDs", ids[i], len(c)))
+		}
+		if !slices.Contains(c, ids[i]) {
+			return Internal(fmt.Sprintf("acyclic conflict: cycle %v does not pass through %d", c, ids[i]))
+		}
+		if sorted := slices.Sorted(slices.Values(c)); len(slices.Compact(sorted)) != len(c) {
+			return Internal(fmt.Sprintf("acyclic conflict: cycle %v repeats an ID", c))
 		}
 	}
 	return &Error{

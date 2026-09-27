@@ -37,14 +37,30 @@ type Warning struct {
 	Code    string         `json:"code,omitempty"`
 }
 
-// UnusableFile: the task file at path, of task id, is unusable. code is the
-// symbolic OS error, given exactly when reason is unreadable.
-func UnusableFile(path string, id int64, reason UnusableReason, code string) Warning {
-	msg := fmt.Sprintf("%s: skipped, %s", path, reason)
-	if code != "" {
-		msg += " (" + code + ")"
-	}
-	return Warning{Kind: WarnUnusableFile, Message: msg, Paths: []string{path}, IDs: []int64{id}, Reason: reason, Code: code}
+// UnreadableFile: the task file at path, of task id, could not be read; code
+// is the symbolic OS error.
+func UnreadableFile(path string, id int64, code string) Warning {
+	w := unusableFile(path, id, UnusableUnreadable)
+	w.Message += " (" + code + ")"
+	w.Code = code
+	return w
+}
+
+// CorruptFile: the task file at path, of task id, is corrupt.
+func CorruptFile(path string, id int64) Warning {
+	return unusableFile(path, id, UnusableCorrupt)
+}
+
+// UnsupportedFile: the task file at path, of task id, has an unsupported
+// format version.
+func UnsupportedFile(path string, id int64) Warning {
+	return unusableFile(path, id, UnusableUnsupportedFormat)
+}
+
+// unusableFile is an unusable-file warning. Only UnreadableFile gives a code,
+// which the warning has exactly when reason is unreadable.
+func unusableFile(path string, id int64, reason UnusableReason) Warning {
+	return Warning{Kind: WarnUnusableFile, Message: fmt.Sprintf("%s: skipped, %s", path, reason), Paths: []string{path}, IDs: []int64{id}, Reason: reason}
 }
 
 // DuplicateID: id has several task files; paths are those in the operation's

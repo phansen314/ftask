@@ -52,6 +52,14 @@ func TestInputsAgreeWithSchemas(t *testing.T) {
 	for op, docs := range bases {
 		n := 0
 		for _, base := range docs {
+			// A base both sides reject would let every mutation agree
+			// vacuously, losing the accept side unnoticed.
+			if ok, f := schematest.Check(t, op+"-input", []byte(base)); !ok {
+				t.Errorf("%s: base rejected by the schema at %s\n  %s", op, f, base)
+			}
+			if ps := problems(t, op, base); ps != nil {
+				t.Errorf("%s: base rejected by the adapter: %v\n  %s", op, ps, base)
+			}
 			for _, doc := range schematest.Mutations(t, base, updateCandidates...) {
 				agreeInput(t, op, doc)
 				n++
@@ -153,6 +161,12 @@ func TestInputProblems(t *testing.T) {
 		{"update", `{"id": 42, "extra": {"remove": ["a", "a", 1]}}`, []string{"/extra/remove/1", "/extra/remove/2"}},
 		{"update", `{"id": 42, "extra": {"replace_all": []}}`, []string{"/extra/replace_all"}},
 		{"update", `{"id": 42, "title": ""}`, []string{"/title"}},
+		// Integer literals, which the agreement corpus leaves out.
+		{"show", `{"id": 2.0}`, []string{"/id"}},
+		{"complete", `{"id": 42e0}`, []string{"/id"}},
+		{"create", `{"title": "x", "priority": 1.0, "blocked_by": [4, 5.0]}`, []string{"/blocked_by/1", "/priority"}},
+		{"block", `{"id": 42, "blockers": [2e0]}`, []string{"/blockers/0"}},
+		{"update", `{"id": 42, "priority": 3.0}`, []string{"/priority"}},
 	} {
 		if got := fields(problems(t, tc.op, tc.doc)); !slices.Equal(got, tc.want) {
 			t.Errorf("%s %s: fields %q, want %q", tc.op, tc.doc, got, tc.want)

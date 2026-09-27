@@ -1,7 +1,6 @@
 package model
 
 import (
-	"encoding/json"
 	"fmt"
 	"slices"
 	"strconv"
@@ -29,6 +28,10 @@ const (
 // since corrupt reports no detail beyond its reason. SchemaProblems are those
 // of a file corrupt at step 3 that its published schema also finds: not
 // repeated keys, nor the rules beyond the schema (see Problems.SchemaList).
+// The integer-literal rule is the exception: its problems are included,
+// though the schema accepts an integral 42.0, because Int reports a
+// fraction (which the schema rejects) and 42.0 alike. The agreement corpus
+// leaves such numbers out (implementation-spec.md, Agreement tests).
 type FileResult struct {
 	Status         FileStatus
 	Versioned      bool
@@ -52,13 +55,10 @@ func checkVersion(obj *jsonio.Object, repeated []string, supported int64) (FileR
 	if !ok {
 		return corrupt(errs.Problem{Field: "/schema", Reason: reasonRequired}), false
 	}
-	n, ok := v.(json.Number)
-	if !ok || !integerLiteral.MatchString(string(n)) {
-		return corrupt(errs.Problem{Field: "/schema", Reason: reasonLiteral}), false
-	}
-	found, err := strconv.ParseInt(string(n), 10, 64)
-	if err != nil || found < -schemaMax || found > schemaMax {
-		return corrupt(errs.Problem{Field: "/schema", Reason: fmt.Sprintf("must be between %d and %d", -schemaMax, schemaMax)}), false
+	var p Problems
+	found, ok := p.Int(v, "/schema", -schemaMax, schemaMax)
+	if !ok {
+		return corrupt(p.List()...), false
 	}
 	if found != supported {
 		return FileResult{Status: FileUnsupported, Versioned: true, Found: found}, false
@@ -100,9 +100,10 @@ func DecodeTaskFile(obj *jsonio.Object, repeated []string, filenameID ID) (TaskF
 	t := TaskFile{Schema: TaskSchema}
 	f.Required("schema") // already checked
 
+	idOK := false // id passed its field rules (step 3), whether or not it matches the filename
 	if v, ok := f.Required("id"); ok {
 		if id, ok := p.ID(v, "/id"); ok {
-			t.ID = id
+			t.ID, idOK = id, true
 			if id != filenameID {
 				p.AddAdditional("/id", fmt.Sprintf("must match the ID in the filename (%d)", filenameID))
 			}
@@ -127,7 +128,7 @@ func DecodeTaskFile(obj *jsonio.Object, repeated []string, filenameID ID) (TaskF
 	if v, ok := f.Required("blocked_by"); ok {
 		if ids, ok := p.IDs(v, "/blocked_by"); ok {
 			t.BlockedBy = ids
-			if i := slices.Index(ids, t.ID); i >= 0 && !p.Failed("/id") {
+			if i := slices.Index(ids, t.ID); i >= 0 && idOK {
 				p.AddAdditional(jsonio.Pointer("/blocked_by", strconv.Itoa(i)), "must not be the task's own ID")
 			}
 		}

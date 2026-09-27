@@ -82,8 +82,16 @@ func TestWarningJSON(t *testing.T) {
 		w    Warning
 		want string
 	}{
-		{UnusableFile("/r/1.json", 1, UnusableCorrupt, ""),
+		{CorruptFile("/r/1.json", 1),
 			`{"kind":"unusable-file","message":"/r/1.json: skipped, corrupt","paths":["/r/1.json"],"ids":[1],"reason":"corrupt"}`},
+		{UnreadableFile("/r/2.json", 2, "EACCES"),
+			`{"kind":"unusable-file","message":"/r/2.json: skipped, unreadable (EACCES)","paths":["/r/2.json"],"ids":[2],"reason":"unreadable","code":"EACCES"}`},
+		{UnsupportedFile("/r/3.json", 3),
+			`{"kind":"unusable-file","message":"/r/3.json: skipped, unsupported-format","paths":["/r/3.json"],"ids":[3],"reason":"unsupported-format"}`},
+		{DanglingReference("/r/4.json", 4, 9),
+			`{"kind":"dangling-reference","message":"task 4 is blocked by task 9, which does not exist","paths":["/r/4.json"],"ids":[4,9]}`},
+		{NotesMissing("/r/5.md", 5, "ENOSPC"),
+			`{"kind":"notes-missing","message":"/r/5.md: task 5 written, but its notes could not be (ENOSPC)","paths":["/r/5.md"],"ids":[5],"code":"ENOSPC"}`},
 		{UnreadableFolder("/r/p", "EACCES"),
 			`{"kind":"unreadable-folder","message":"/r/p: cannot list folder (EACCES)","paths":["/r/p"],"ids":[],"code":"EACCES"}`},
 		{DuplicateID(4, nil),
@@ -97,8 +105,8 @@ func TestWarningJSON(t *testing.T) {
 
 func TestCollectorDedup(t *testing.T) {
 	var c Collector
-	c.Add(UnusableFile("/r/1.json", 1, UnusableCorrupt, ""))
-	c.Add(UnusableFile("/r/1.json", 1, UnusableCorrupt, ""))
+	c.Add(CorruptFile("/r/1.json", 1))
+	c.Add(CorruptFile("/r/1.json", 1))
 	c.Add(DuplicateID(4, []string{"/r/4.json", "/r/p/4.json"}))
 	c.Add(DuplicateID(4, []string{"/r/4.json"}))
 	c.Add(DanglingReference("/r/2.json", 2, 9))
@@ -121,10 +129,10 @@ func TestCollectorDedup(t *testing.T) {
 
 func TestCollectorOrder(t *testing.T) {
 	var c Collector
-	c.Add(UnusableFile("/r/b.json", 2, UnusableCorrupt, ""))
+	c.Add(CorruptFile("/r/b.json", 2))
 	c.Add(DanglingReference("/r/5.json", 5, 10))
 	c.Add(DanglingReference("/r/5.json", 5, 9))
-	c.Add(UnusableFile("/r/a.json", 1, UnusableCorrupt, ""))
+	c.Add(CorruptFile("/r/a.json", 1))
 	c.Add(DuplicateID(3, []string{"/r/3.json"}))
 	c.Add(Warning{Kind: "zz-unknown", Paths: []string{}, IDs: []int64{}})
 	c.Add(UnreadableFolder("/r/q", "EACCES"))
@@ -171,6 +179,8 @@ func TestBrokenPreconditionsAreInternal(t *testing.T) {
 		{"acyclic no ids", Acyclic(nil, nil)},
 		{"acyclic length mismatch", Acyclic([]int64{3, 4}, [][]int64{{1, 3}})},
 		{"acyclic short cycle", Acyclic([]int64{3}, [][]int64{{3}})},
+		{"acyclic repeated ID", Acyclic([]int64{3}, [][]int64{{3, 3}})},
+		{"acyclic cycle not through id", Acyclic([]int64{3}, [][]int64{{1, 2}})},
 	} {
 		if tc.e.Kind != KindInternal {
 			t.Errorf("%s: kind %s, want internal", tc.name, tc.e.Kind)

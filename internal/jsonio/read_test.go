@@ -70,6 +70,8 @@ func TestParseObjectEdgeCases(t *testing.T) {
 		{"high then other escape", `{"a":"\ud800\n"}`, FailLoneSurrogate, nil},
 		{"low then high", `{"a":"\udc00\ud800"}`, FailLoneSurrogate, nil},
 		{"lone surrogate in key", `{"\ud800":1,"\udc00":2}`, FailLoneSurrogate, nil},
+		{"high then escaped backslash", `{"a":"\ud800\\udc00"}`, FailLoneSurrogate, nil},
+		{"escaped backslash, then high", `{"a":"\\\ud800"}`, FailLoneSurrogate, nil},
 	} {
 		obj, repeated, err := ParseObject([]byte(tc.in))
 		if got := failureOf(err); got != tc.fail {
@@ -285,9 +287,13 @@ func FuzzParseObject(f *testing.F) {
 	for _, s := range []string{
 		`{}`, `{"a":1}`, `{"a":1,"a":2}`, `[]`, `{} {}`, `{"a":[1,{"b":null}]}`,
 		"\xEF\xBB\xBF{}", "{\"a\":\"\xff\"}", `{"a":"\ud800"}`, `{"a":"\ud83d\ude00"}`, `{"\\ud800":"\udc00x"}`, ` `, `{"a":1e400}`, `{"a":-0.0e-0}`,
+		`{"a":"\ud800\\udc00"}`, `{"a":"\\\ud800"}`,
 	} {
 		f.Add([]byte(s))
 	}
+	// Either side of the depth limit.
+	f.Add(append(append([]byte(`{"a":`), bytes.Repeat([]byte("["), maxDepth-1)...), append(bytes.Repeat([]byte("]"), maxDepth-1), '}')...))
+	f.Add(append(append([]byte(`{"a":`), bytes.Repeat([]byte("["), maxDepth)...), append(bytes.Repeat([]byte("]"), maxDepth), '}')...))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		obj, repeated, err := ParseObject(data)
 		trimmed := bytes.TrimLeft(data, " \t\r\n")
