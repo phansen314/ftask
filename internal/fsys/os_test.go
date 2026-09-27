@@ -2,12 +2,14 @@ package fsys
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // newRoot creates a temp directory, runs setup in it, and opens it as a Root.
@@ -80,7 +82,7 @@ func TestLstatReportsSymlink(t *testing.T) {
 }
 
 // An entry swapped for a symlink between the Lstat and the open is caught by
-// comparing the opened file with the one Lstat saw.
+// comparing the opened file with the one Lstat saw, and examining it again.
 func TestReadFileRejectsSwap(t *testing.T) {
 	r, dir := newRoot(t, func(dir string) {
 		must(t, os.WriteFile(filepath.Join(dir, "1.json"), []byte("a"), 0o644))
@@ -96,21 +98,140 @@ func TestReadFileRejectsSwap(t *testing.T) {
 	wantErrno(t, err, syscall.ELOOP)
 }
 
+// A file replaced by a concurrent write between the Lstat and the open is
+// read in its new version, not reported as a symlink.
+func TestReadFileFollowsReplacement(t *testing.T) {
+	r, dir := newRoot(t, func(dir string) {
+		must(t, os.WriteFile(filepath.Join(dir, "1.json"), []byte("old"), 0o644))
+	})
+	calls := 0
+	beforeOpen = func(name string) {
+		calls++
+		if calls == 1 {
+			tmp := filepath.Join(dir, "tmp")
+			must(t, os.WriteFile(tmp, []byte("new"), 0o644))
+			must(t, os.Rename(tmp, filepath.Join(dir, name)))
+		}
+	}
+	t.Cleanup(func() { beforeOpen = nil })
+	got, err := r.ReadFile("1.json")
+	must(t, err)
+	if string(got) != "new" {
+		t.Errorf("got %q, want the new version", got)
+	}
+	if calls != 2 {
+		t.Errorf("opened %d times, want 2", calls)
+	}
+}
+
+// An entry replaced on every attempt fails with EAGAIN.
+func TestReadFileKeepsChanging(t *testing.T) {
+	r, dir := newRoot(t, func(dir string) {
+		must(t, os.WriteFile(filepath.Join(dir, "1.json"), []byte("0"), 0o644))
+	})
+	calls := 0
+	beforeOpen = func(name string) {
+		calls++
+		tmp := filepath.Join(dir, "tmp")
+		must(t, os.WriteFile(tmp, []byte{byte('0' + calls)}, 0o644))
+		must(t, os.Rename(tmp, filepath.Join(dir, name)))
+	}
+	t.Cleanup(func() { beforeOpen = nil })
+	_, err := r.ReadFile("1.json")
+	wantErrno(t, err, syscall.EAGAIN)
+	if calls != openAttempts {
+		t.Errorf("opened %d times, want %d", calls, openAttempts)
+	}
+}
+
+// A folder swapped for a symlink between the Lstat and the open is caught as
+// a file is.
+func TestReadDirRejectsSwap(t *testing.T) {
+	r, dir := newRoot(t, func(dir string) {
+		must(t, os.Mkdir(filepath.Join(dir, "sub"), 0o755))
+		must(t, os.Mkdir(filepath.Join(dir, "other"), 0o755))
+		must(t, os.WriteFile(filepath.Join(dir, "other", "x"), nil, 0o644))
+	})
+	calls := 0
+	beforeOpen = func(name string) {
+		calls++
+		if calls == 1 {
+			p := filepath.Join(dir, name)
+			must(t, os.Remove(p))
+			must(t, os.Symlink("other", p))
+		}
+	}
+	t.Cleanup(func() { beforeOpen = nil })
+	_, err := r.ReadDir("sub")
+	wantErrno(t, err, syscall.ELOOP)
+}
+
+// A folder replaced between the Lstat and the open is listed in its new
+// version.
+func TestReadDirFollowsReplacement(t *testing.T) {
+	r, dir := newRoot(t, func(dir string) {
+		must(t, os.Mkdir(filepath.Join(dir, "sub"), 0o755))
+	})
+	calls := 0
+	beforeOpen = func(name string) {
+		calls++
+		if calls == 1 {
+			tmp := filepath.Join(dir, "new")
+			must(t, os.Mkdir(tmp, 0o755))
+			must(t, os.WriteFile(filepath.Join(tmp, "y"), nil, 0o644))
+			// os.Rename refuses a directory over a directory; rename(2)
+			// replaces an empty one on Linux and macOS.
+			must(t, syscall.Rename(tmp, filepath.Join(dir, name)))
+		}
+	}
+	t.Cleanup(func() { beforeOpen = nil })
+	got, err := r.ReadDir("sub")
+	must(t, err)
+	if len(got) != 1 || got[0].Name() != "y" {
+		t.Errorf("got %v, want [y]", got)
+	}
+	if calls != 2 {
+		t.Errorf("opened %d times, want 2", calls)
+	}
+}
+
 func TestReadFileDirectory(t *testing.T) {
 	r, _ := newRoot(t, symlinkTree(t))
 	_, err := r.ReadFile("sub")
 	wantErrno(t, err, syscall.EISDIR)
 }
 
+// A FIFO reads as empty without blocking, with or without a writer holding it
+// open.
 func TestReadFileFIFODoesNotBlock(t *testing.T) {
-	r, _ := newRoot(t, func(dir string) {
+	r, dir := newRoot(t, func(dir string) {
 		must(t, syscall.Mkfifo(filepath.Join(dir, "1.json"), 0o644))
 	})
-	got, err := r.ReadFile("1.json")
-	must(t, err)
-	if len(got) != 0 {
-		t.Fatalf("got %q", got)
+	readEmpty := func() {
+		t.Helper()
+		done := make(chan error, 1)
+		go func() {
+			got, err := r.ReadFile("1.json")
+			if err == nil && len(got) != 0 {
+				err = fmt.Errorf("got %q", got)
+			}
+			done <- err
+		}()
+		select {
+		case err := <-done:
+			must(t, err)
+		case <-time.After(5 * time.Second):
+			t.Fatal("ReadFile blocked on a FIFO")
+		}
 	}
+	readEmpty()
+
+	// O_RDWR opens a FIFO without waiting for a reader: a writer that never
+	// writes.
+	w, err := os.OpenFile(filepath.Join(dir, "1.json"), os.O_RDWR, 0)
+	must(t, err)
+	defer w.Close()
+	readEmpty()
 }
 
 func TestReadFileMissing(t *testing.T) {
@@ -216,6 +337,23 @@ func TestOpenRootErrors(t *testing.T) {
 	must(t, os.WriteFile(file, nil, 0o644))
 	_, err = OS{}.OpenRoot(file)
 	wantErrno(t, err, syscall.ENOTDIR)
+}
+
+// A FIFO at the root path is refused without being opened, which would block.
+func TestOpenRootFIFO(t *testing.T) {
+	fifo := filepath.Join(t.TempDir(), "root")
+	must(t, syscall.Mkfifo(fifo, 0o644))
+	done := make(chan error, 1)
+	go func() {
+		_, err := OS{}.OpenRoot(fifo)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		wantErrno(t, err, syscall.ENOTDIR)
+	case <-time.After(5 * time.Second):
+		t.Fatal("OpenRoot blocked on a FIFO")
+	}
 }
 
 func TestFSReadFileFollowsSymlink(t *testing.T) {

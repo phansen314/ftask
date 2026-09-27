@@ -27,11 +27,17 @@ type FS interface {
 // fail with ELOOP on one, and Lstat reports it. Symlinks in earlier
 // components that stay inside the root are followed, so callers that must
 // not follow them (the path walk) Lstat each component in turn.
+//
+// A name that escapes the root — through "..", or a symlink in an earlier
+// component that leads outside — fails with os.Root's error, which holds no
+// errno, so store reports it as internal. Only a caller bug or an outside
+// change mid-operation reaches it: the path walk sees such a symlink first.
 type Root interface {
 	// Name is the path the root was opened with.
 	Name() string
 	Lstat(name string) (fs.FileInfo, error)
-	// ReadFile reads a whole file. A directory fails with EISDIR.
+	// ReadFile reads a whole file. A directory fails with EISDIR; a FIFO,
+	// socket, or device reads as empty.
 	ReadFile(name string) ([]byte, error)
 	// ReadDir lists a directory in the order the OS gives; callers sort.
 	ReadDir(name string) ([]fs.DirEntry, error)

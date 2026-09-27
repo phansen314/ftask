@@ -125,6 +125,22 @@ func TestFaultUnlockReleases(t *testing.T) {
 	must(t, l.Unlock())
 }
 
+// An injected close fault still closes the real root: the inner Fault sees
+// the close.
+func TestFaultCloseRootCloses(t *testing.T) {
+	var inner []Op
+	fsys := Fault{
+		FS:   Fault{FS: OS{}, Hook: Record(&inner)},
+		Hook: ErrnoAt(OpCloseRoot, "", 1, syscall.EIO),
+	}
+	r, err := fsys.OpenRoot(t.TempDir())
+	must(t, err)
+	wantErrno(t, r.Close(), syscall.EIO)
+	if last := inner[len(inner)-1]; last.Name != OpCloseRoot {
+		t.Errorf("inner calls %+v, want the real root closed", inner)
+	}
+}
+
 func TestHooksFirstErrorWins(t *testing.T) {
 	h := Hooks(
 		ErrnoAt(OpRemove, "", 1, syscall.EACCES),

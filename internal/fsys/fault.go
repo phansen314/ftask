@@ -1,10 +1,12 @@
 package fsys
 
 import (
+	"fmt"
 	"io/fs"
 	"os"
 	"sync"
 	"syscall"
+	"time"
 )
 
 // Op names, one per call a Fault can intercept.
@@ -180,11 +182,14 @@ func (r *faultRoot) Lock() (Lock, error) {
 	return &faultLock{r: r, l: l}, nil
 }
 
+// Close closes the real root even when a fault is injected.
 func (r *faultRoot) Close() error {
-	if err := r.before(Op{Name: OpCloseRoot, Path: "."}); err != nil {
+	err := r.before(Op{Name: OpCloseRoot, Path: "."})
+	cerr := r.r.Close()
+	if err != nil {
 		return err
 	}
-	return r.r.Close()
+	return cerr
 }
 
 type faultFile struct {
@@ -272,8 +277,12 @@ func CrashBefore(k int) Hook {
 		crash := seen == k
 		mu.Unlock()
 		if crash {
-			syscall.Kill(os.Getpid(), syscall.SIGKILL)
-			select {}
+			if err := syscall.Kill(os.Getpid(), syscall.SIGKILL); err != nil {
+				panic(fmt.Sprintf("fsys: CrashBefore: kill: %v", err))
+			}
+			for {
+				time.Sleep(time.Hour) // the kill lands; never return
+			}
 		}
 		return nil
 	}

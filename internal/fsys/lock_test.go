@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"syscall"
 	"testing"
+	"time"
 )
 
 func TestLockContention(t *testing.T) {
@@ -47,7 +48,9 @@ func TestLockThroughSymlinkedRoot(t *testing.T) {
 }
 
 // A held lock survives garbage collection: the Lock keeps its descriptor
-// referenced, so no finalizer closes it.
+// referenced, so no finalizer closes it. Finalizers run on their own
+// goroutine after a collection, so each collection is followed by a pause
+// that lets them run.
 func TestLockSurvivesGC(t *testing.T) {
 	r1, dir := newRoot(t, nil)
 	r2, err := OS{}.OpenRoot(dir)
@@ -56,8 +59,10 @@ func TestLockSurvivesGC(t *testing.T) {
 
 	l, err := r1.Lock()
 	must(t, err)
-	runtime.GC()
-	runtime.GC()
+	for range 10 {
+		runtime.GC()
+		time.Sleep(time.Millisecond)
+	}
 	_, err = r2.Lock()
 	wantErrno(t, err, syscall.EAGAIN)
 	runtime.KeepAlive(l)
