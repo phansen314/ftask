@@ -1,7 +1,6 @@
 package model
 
 import (
-	"cmp"
 	"slices"
 
 	"github.com/phansen314/ftask/internal/jsonio"
@@ -37,7 +36,7 @@ func (t *TaskFile) Normalize() {
 	if t.Tags == nil {
 		t.Tags = []Tag{}
 	}
-	slices.SortFunc(t.Tags, func(a, b Tag) int { return cmp.Compare(a, b) })
+	slices.Sort(t.Tags)
 	if t.Extra == nil {
 		t.Extra = &jsonio.Object{}
 	}

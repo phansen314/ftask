@@ -50,6 +50,14 @@ func TestFaultPassesThrough(t *testing.T) {
 	}
 }
 
+// A Fault without a Hook passes every call through.
+func TestFaultNilHook(t *testing.T) {
+	r, err := Fault{FS: OS{}}.OpenRoot(t.TempDir())
+	must(t, err)
+	must(t, r.Mkdir("proj", 0o755))
+	must(t, r.Close())
+}
+
 func TestErrnoAt(t *testing.T) {
 	dir := t.TempDir()
 	fsys := Fault{FS: OS{}, Hook: ErrnoAt(OpWrite, "", 2, syscall.ENOSPC)}

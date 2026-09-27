@@ -89,9 +89,10 @@ func Mutations(t testing.TB, base string, extra ...string) []string {
 }
 
 // edit returns a copy of obj with the member at path (a key per object
-// level) set to v, or deleted; obj itself is unchanged.
+// level) set to v, or deleted; obj itself is unchanged, since Set and Delete
+// never write to the members slice they share with it.
 func edit(obj *jsonio.Object, path []string, v any, del bool) *jsonio.Object {
-	cp := &jsonio.Object{Members: slices.Clone(obj.Members)}
+	cp := &jsonio.Object{Members: obj.Members}
 	if len(path) == 1 {
 		if del {
 			cp.Delete(path[0])

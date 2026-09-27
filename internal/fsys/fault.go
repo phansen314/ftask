@@ -48,7 +48,8 @@ type Op struct {
 type Hook func(Op) error
 
 // Fault wraps an FS and runs Hook before every call, through every Root and
-// File it opens. It is the seam for OS-error, precedence, and crash tests.
+// File it opens. It is the seam for OS-error, precedence, and crash tests. A
+// nil Hook passes every call through.
 type Fault struct {
 	FS   FS
 	Hook Hook
@@ -57,6 +58,9 @@ type Fault struct {
 var _ FS = Fault{}
 
 func (f Fault) before(op Op) error {
+	if f.Hook == nil {
+		return nil
+	}
 	err := f.Hook(op)
 	if err == nil {
 		return nil

@@ -16,26 +16,27 @@ type OS struct{}
 
 var _ FS = OS{}
 
-// OpenRoot on a path that leads to a non-directory fails with ENOTDIR. The
-// path is Stat'ed first: os.OpenRoot opens it before checking its type, and
-// opening a FIFO blocks. os.OpenRoot's own report of a non-directory — for
-// one swapped in after the Stat — holds no errno, which store could not
-// classify, so it is replaced too.
+// OpenRoot on a path that leads to a non-directory fails with ENOTDIR.
+// os.OpenRoot opens the path without O_DIRECTORY and checks its type only
+// afterwards, so a FIFO would block the open, and a regular file is reported
+// by an error with no errno. It is therefore handed p + "/.": resolving that
+// requires p to be a directory, so the kernel refuses a FIFO or regular file
+// with ENOTDIR before opening anything, with no window for a swap. Error
+// paths are restored to p. An empty path, which would become "/.", fails
+// with ENOENT as open(2) fails on it.
 func (OS) OpenRoot(p string) (Root, error) {
-	if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
-		return nil, &os.PathError{Op: "open", Path: p, Err: syscall.ENOTDIR}
+	if p == "" {
+		return nil, &os.PathError{Op: "open", Path: p, Err: syscall.ENOENT}
 	}
-	r, err := os.OpenRoot(p)
+	r, err := os.OpenRoot(p + "/.")
 	if err != nil {
-		var errno syscall.Errno
-		if !errors.As(err, &errno) {
-			if fi, serr := os.Stat(p); serr == nil && !fi.IsDir() {
-				return nil, &os.PathError{Op: "open", Path: p, Err: syscall.ENOTDIR}
-			}
+		var pe *os.PathError
+		if errors.As(err, &pe) {
+			pe.Path = p
 		}
 		return nil, err
 	}
-	return &osRoot{r: r}, nil
+	return &osRoot{r: r, name: p}, nil
 }
 
 func (OS) Mkdir(p string, perm fs.FileMode) error    { return os.Mkdir(p, perm) }
@@ -43,10 +44,11 @@ func (OS) MkdirAll(p string, perm fs.FileMode) error { return os.MkdirAll(p, per
 func (OS) ReadFile(p string) ([]byte, error)         { return os.ReadFile(p) }
 
 type osRoot struct {
-	r *os.Root
+	r    *os.Root
+	name string
 }
 
-func (r *osRoot) Name() string                              { return r.r.Name() }
+func (r *osRoot) Name() string                              { return r.name }
 func (r *osRoot) Lstat(name string) (fs.FileInfo, error)    { return r.r.Lstat(name) }
 func (r *osRoot) Mkdir(name string, perm fs.FileMode) error { return r.r.Mkdir(name, perm) }
 func (r *osRoot) Link(oldname, newname string) error        { return r.r.Link(oldname, newname) }
@@ -91,26 +93,27 @@ const openAttempts = 3
 // last component. os.Root ignores O_NOFOLLOW: it opens with O_NOFOLLOW
 // itself, and on ELOOP follows the symlink when its target stays inside the
 // root. So the entry is Lstat'ed first — a symlink fails with ELOOP — and
-// the opened file must be the one Lstat saw. If it is not, the entry changed
-// in between and is examined again: a symlink swapped in then fails with
-// ELOOP, and a file replaced by a concurrent write is read in its new
-// version. An entry that changes on every attempt fails with EAGAIN.
+// Lstat'ed again after the open. The opened file must be the one both saw,
+// and the second Lstat must not see a symlink: a regular file renamed away
+// and replaced by a symlink to it passes the first comparison, since the open
+// follows the symlink to the very inode the first Lstat saw, but the second
+// Lstat sees the symlink and fails with ELOOP. If the files differ, the entry
+// changed in between and is examined again: a file replaced by a concurrent
+// write is read in its new version. An entry that changes on every attempt
+// fails with EAGAIN.
 //
 // os.SameFile compares device and inode only, so an inode reused within the
 // window — a file removed, another created with its number, and a symlink to
-// it swapped in — passes. That is an outside change, outside the contract,
-// and os.Root still keeps the open inside the root.
+// it swapped in and out again — passes. That is an outside change, outside
+// the contract, and os.Root still keeps the open inside the root.
 //
 // O_NONBLOCK keeps a FIFO from blocking the open. The returned FileInfo is
 // the opened file's.
 func (r *osRoot) openNoFollow(name string) (*os.File, fs.FileInfo, error) {
 	for range openAttempts {
-		before, err := r.r.Lstat(name)
+		before, err := r.lstatNoFollow(name)
 		if err != nil {
 			return nil, nil, err
-		}
-		if before.Mode()&fs.ModeSymlink != 0 {
-			return nil, nil, &os.PathError{Op: "open", Path: name, Err: syscall.ELOOP}
 		}
 		if beforeOpen != nil {
 			beforeOpen(name)
@@ -119,17 +122,38 @@ func (r *osRoot) openNoFollow(name string) (*os.File, fs.FileInfo, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		after, err := f.Stat()
+		opened, err := f.Stat()
 		if err != nil {
 			f.Close()
 			return nil, nil, err
 		}
-		if os.SameFile(before, after) {
-			return f, after, nil
+		if !os.SameFile(before, opened) {
+			f.Close()
+			continue
+		}
+		after, err := r.lstatNoFollow(name)
+		if err != nil {
+			f.Close()
+			return nil, nil, err
+		}
+		if os.SameFile(after, opened) {
+			return f, opened, nil
 		}
 		f.Close()
 	}
 	return nil, nil, &os.PathError{Op: "open", Path: name, Err: syscall.EAGAIN}
+}
+
+// lstatNoFollow Lstats name, failing with ELOOP on a symlink.
+func (r *osRoot) lstatNoFollow(name string) (fs.FileInfo, error) {
+	fi, err := r.r.Lstat(name)
+	if err != nil {
+		return nil, err
+	}
+	if fi.Mode()&fs.ModeSymlink != 0 {
+		return nil, &os.PathError{Op: "open", Path: name, Err: syscall.ELOOP}
+	}
+	return fi, nil
 }
 
 // TempPrefix begins the name of every temp file ftask creates.

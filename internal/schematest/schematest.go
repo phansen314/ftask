@@ -20,6 +20,8 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"github.com/santhosh-tekuri/jsonschema/v6/kind"
+
+	"github.com/phansen314/ftask/internal/jsonio"
 )
 
 // base is the fixed URI the schemas are loaded under; each $id resolves
@@ -210,15 +212,15 @@ func Analyze(ve *jsonschema.ValidationError, instance any) Failure {
 				break
 			}
 			for _, name := range k.Missing {
-				*out = append(*out, child(at, name))
+				*out = append(*out, jsonio.Pointer(at, name))
 			}
 		case *kind.AdditionalProperties:
 			for _, name := range k.Properties {
-				*out = append(*out, child(at, name))
+				*out = append(*out, jsonio.Pointer(at, name))
 			}
 		case *kind.UniqueItems:
 			for _, i := range duplicates(at, lookup(instance, e.InstanceLocation)) {
-				*out = append(*out, child(at, strconv.Itoa(i)))
+				*out = append(*out, jsonio.Pointer(at, strconv.Itoa(i)))
 			}
 		default:
 			*out = append(*out, at)
@@ -302,17 +304,11 @@ func equal(a, b any) bool {
 }
 
 func pointer(tokens []string) string {
-	var b strings.Builder
+	ptr := ""
 	for _, tok := range tokens {
-		b.WriteString(child("", tok))
+		ptr = jsonio.Pointer(ptr, tok)
 	}
-	return b.String()
-}
-
-func child(ptr, token string) string {
-	token = strings.ReplaceAll(token, "~", "~0")
-	token = strings.ReplaceAll(token, "/", "~1")
-	return ptr + "/" + token
+	return ptr
 }
 
 // ecmaEngine compiles a JSON Schema pattern, written in ECMA-262 syntax, with

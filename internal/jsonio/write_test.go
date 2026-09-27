@@ -141,6 +141,36 @@ func TestObjectSetDelete(t *testing.T) {
 	}
 }
 
+// Set and Delete leave a shallow copy's members as they were, even when the
+// members slice has spare capacity.
+func TestObjectSetDeleteKeepCopy(t *testing.T) {
+	members := make([]Member, 3, 8)
+	copy(members, []Member{{"a", "1"}, {"b", "2"}, {"c", "3"}})
+	o := &Object{Members: members}
+	for _, change := range []func(){
+		func() { o.Delete("a") },
+		func() { o.Set("b", "x") },
+		func() { o.Set("d", "4") },
+	} {
+		old := *o
+		want, err := MarshalLine(old)
+		if err != nil {
+			t.Fatal(err)
+		}
+		change()
+		got, err := MarshalLine(old)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != string(want) {
+			t.Errorf("copy changed from %s to %s", want, got)
+		}
+	}
+	if got, _ := MarshalLine(o); string(got) != `{"b":"x","c":"3","d":"4"}`+"\n" {
+		t.Errorf("got %s", got)
+	}
+}
+
 func TestPointer(t *testing.T) {
 	for _, tc := range [][3]string{
 		{"", "a", "/a"},

@@ -127,12 +127,7 @@ func tagList(f *model.Fields, p *model.Problems, key string) ([]model.Tag, bool)
 	if !ok {
 		return []model.Tag{}, true
 	}
-	ptr := f.Ptr(key)
-	if a, isArr := v.([]any); isArr && len(a) == 0 {
-		p.Add(ptr, "must list at least one tag")
-		return nil, false
-	}
-	return p.Tags(v, ptr)
+	return nonEmptySet(p, v, f.Ptr(key), "tag", (*model.Problems).Tags)
 }
 
 // decodeExtraChange checks update's extra: {replace_all} or {merge, remove},
@@ -185,13 +180,13 @@ func decodeExtraChange(v any, p *model.Problems) *ExtraChange {
 // extraKeys checks extra.remove, a non-empty set of keys, and returns it and
 // whether it is valid.
 func extraKeys(v any, p *model.Problems) ([]string, bool) {
-	const ptr = "/extra/remove"
+	return nonEmptySet(p, v, "/extra/remove", "key", keySet)
+}
+
+// keySet checks v, at ptr, as a set of strings.
+func keySet(p *model.Problems, v any, ptr string) ([]string, bool) {
 	a, ok := p.Array(v, ptr)
 	if !ok {
-		return nil, false
-	}
-	if len(a) == 0 {
-		p.Add(ptr, "must list at least one key")
 		return nil, false
 	}
 	keys := make([]string, len(a))

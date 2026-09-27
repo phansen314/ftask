@@ -94,12 +94,18 @@ func blockerList(f *model.Fields, p *model.Problems, key string) ([]model.ID, bo
 	if !ok {
 		return nil, false
 	}
-	ptr := f.Ptr(key)
+	return nonEmptySet(p, v, f.Ptr(key), "ID", (*model.Problems).IDs)
+}
+
+// nonEmptySet checks v, at ptr, as a set by check, which reports a non-array
+// and bad or repeated items; an empty array is refused first, its reason
+// naming an item as noun. It is the schemas' minItems: 1 on a set.
+func nonEmptySet[T any](p *model.Problems, v any, ptr, noun string, check func(*model.Problems, any, string) ([]T, bool)) ([]T, bool) {
 	if a, isArr := v.([]any); isArr && len(a) == 0 {
-		p.Add(ptr, "must list at least one ID")
+		p.Add(ptr, "must list at least one "+noun)
 		return nil, false
 	}
-	return p.IDs(v, ptr)
+	return check(p, v, ptr)
 }
 
 // IDInput is the input of show, complete, and reopen: one task.

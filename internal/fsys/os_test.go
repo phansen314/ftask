@@ -98,6 +98,23 @@ func TestReadFileRejectsSwap(t *testing.T) {
 	wantErrno(t, err, syscall.ELOOP)
 }
 
+// A file renamed away and replaced by a symlink to itself between the Lstat
+// and the open passes the comparison — the open follows the symlink to the
+// inode Lstat saw — and is caught by the Lstat after the open.
+func TestReadFileRejectsSwapToSameFile(t *testing.T) {
+	r, dir := newRoot(t, func(dir string) {
+		must(t, os.WriteFile(filepath.Join(dir, "1.json"), []byte("a"), 0o644))
+	})
+	beforeOpen = func(name string) {
+		p := filepath.Join(dir, name)
+		must(t, os.Rename(p, filepath.Join(dir, "2.json")))
+		must(t, os.Symlink("2.json", p))
+	}
+	t.Cleanup(func() { beforeOpen = nil })
+	_, err := r.ReadFile("1.json")
+	wantErrno(t, err, syscall.ELOOP)
+}
+
 // A file replaced by a concurrent write between the Lstat and the open is
 // read in its new version, not reported as a symlink.
 func TestReadFileFollowsReplacement(t *testing.T) {
@@ -160,6 +177,22 @@ func TestReadDirRejectsSwap(t *testing.T) {
 			must(t, os.Remove(p))
 			must(t, os.Symlink("other", p))
 		}
+	}
+	t.Cleanup(func() { beforeOpen = nil })
+	_, err := r.ReadDir("sub")
+	wantErrno(t, err, syscall.ELOOP)
+}
+
+// A folder renamed away and replaced by a symlink to itself is caught as a
+// file is.
+func TestReadDirRejectsSwapToSameDir(t *testing.T) {
+	r, dir := newRoot(t, func(dir string) {
+		must(t, os.Mkdir(filepath.Join(dir, "sub"), 0o755))
+	})
+	beforeOpen = func(name string) {
+		p := filepath.Join(dir, name)
+		must(t, os.Rename(p, filepath.Join(dir, "other")))
+		must(t, os.Symlink("other", p))
 	}
 	t.Cleanup(func() { beforeOpen = nil })
 	_, err := r.ReadDir("sub")
@@ -337,6 +370,38 @@ func TestOpenRootErrors(t *testing.T) {
 	must(t, os.WriteFile(file, nil, 0o644))
 	_, err = OS{}.OpenRoot(file)
 	wantErrno(t, err, syscall.ENOTDIR)
+	var pe *os.PathError
+	if !errors.As(err, &pe) || pe.Path != file {
+		t.Errorf("got %v, want a *os.PathError on %q", err, file)
+	}
+	_, err = OS{}.OpenRoot("")
+	wantErrno(t, err, syscall.ENOENT)
+}
+
+// Name is the path the root was opened with, not the path handed to
+// os.OpenRoot.
+func TestOpenRootName(t *testing.T) {
+	r, dir := newRoot(t, nil)
+	if got := r.Name(); got != dir {
+		t.Errorf("Name() = %q, want %q", got, dir)
+	}
+}
+
+// A root reached through a symlink opens the symlink's target.
+func TestOpenRootFollowsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	must(t, os.Mkdir(filepath.Join(dir, "real"), 0o755))
+	must(t, os.WriteFile(filepath.Join(dir, "real", "x"), []byte("x"), 0o644))
+	link := filepath.Join(dir, "link")
+	must(t, os.Symlink("real", link))
+	r, err := OS{}.OpenRoot(link)
+	must(t, err)
+	defer r.Close()
+	got, err := r.ReadFile("x")
+	must(t, err)
+	if string(got) != "x" {
+		t.Errorf("got %q", got)
+	}
 }
 
 // A FIFO at the root path is refused without being opened, which would block.
