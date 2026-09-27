@@ -1,9 +1,14 @@
+//go:build linux && (amd64 || arm64)
+
 package errs
 
 import "syscall"
 
 // errnoNames maps each linux errno to its symbolic name. The syscall constants
-// carry this platform's numbers.
+// carry this platform's numbers. Only the supported architectures build it
+// (design-spec.md, Supported platforms): numbers differ elsewhere (on mips,
+// 133 is EISCONN and EDEADLOCK has its own number), so a build on another
+// linux architecture fails for want of errnoNames rather than misnaming.
 //
 // Aliases sharing a number get one fixed name on both platforms: EAGAIN
 // (not EWOULDBLOCK), ENOTSUP (not EOPNOTSUPP), EDEADLK (not EDEADLOCK).

@@ -36,11 +36,13 @@ func Operations() []string {
 	return slices.Sorted(maps.Keys(decoders))
 }
 
-// Decode checks the input of operation op, already read by jsonio (repeated
-// keys rejected there), and returns its typed form and every problem found.
-// The input is meaningful only when there are none. The caller reports
-// problems as one invalid-input error, after adding any from checks that
-// need the filesystem (init's; see implementation-spec.md, Where it happens).
+// Decode checks the input of operation op, already read by jsonio, and returns
+// its typed form and every problem found. The input is meaningful only when
+// there are none. The caller reports problems as one invalid-input error,
+// after adding any from checks that need the filesystem (init's; see
+// implementation-spec.md, Where it happens). Repeated keys are not checked
+// here: jsonio returns them beside the tree, and the caller must reject the
+// input (invalid-input, field the repeated key's pointer) before calling Decode.
 func Decode(op string, input *jsonio.Object) (any, *model.Problems, *errs.Error) {
 	d, ok := decoders[op]
 	if !ok {

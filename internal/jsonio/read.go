@@ -84,6 +84,15 @@ func ParseObject(data []byte) (*Object, []string, error) {
 // Pointer of each key repeated within an object, once per key and object, in
 // document order; the tree keeps every member, repeats included.
 func ParseValue(data []byte) (value any, repeated []string, err error) {
+	return ParseValueAt(data, 0)
+}
+
+// ParseValueAt is ParseValue for a value that will sit depth levels deep in
+// an input (e.g. 1 for --extra, at /extra), so the whole input stays within
+// maxDepth: the value may nest only maxDepth-depth levels. Without the budget,
+// a value read at the full limit would be written into a file its own reader
+// then rejects.
+func ParseValueAt(data []byte, depth int) (value any, repeated []string, err error) {
 	// Checked before decoding: the decoder silently replaces invalid bytes
 	// with U+FFFD, and yields no tokens for empty input.
 	if !utf8.Valid(data) {
@@ -105,8 +114,8 @@ func ParseValue(data []byte) (value any, repeated []string, err error) {
 			return nil, nil, syntaxError(err)
 		}
 		b.add(tok)
-		if len(b.stack) > maxDepth {
-			return nil, nil, &ReadError{Failure: FailSyntax, Detail: fmt.Sprintf("nested deeper than %d (at byte %d)", maxDepth, dec.InputOffset())}
+		if len(b.stack) > maxDepth-depth {
+			return nil, nil, &ReadError{Failure: FailSyntax, Detail: fmt.Sprintf("nested deeper than %d (at byte %d)", maxDepth-depth, dec.InputOffset())}
 		}
 	}
 	if _, err := dec.Token(); err != io.EOF {

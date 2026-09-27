@@ -165,6 +165,28 @@ func TestParseDeepNesting(t *testing.T) {
 	}
 }
 
+// A value read at depth d nests at most maxDepth-d levels, so wrapped in d
+// levels (as --extra is at /extra) it reads back as a whole.
+func TestParseValueAtDepthBudget(t *testing.T) {
+	arrays := func(depth int) []byte {
+		return append(bytes.Repeat([]byte("["), depth), bytes.Repeat([]byte("]"), depth)...)
+	}
+	v, _, err := ParseValueAt(arrays(maxDepth-1), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := MarshalFile(&Object{Members: []Member{{"extra", v}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := ParseObject(file); err != nil {
+		t.Fatalf("written back: %v", err)
+	}
+	if _, _, err := ParseValueAt(arrays(maxDepth), 1); failureOf(err) != FailSyntax {
+		t.Fatalf("depth %d at 1: %v, want a syntax failure", maxDepth, err)
+	}
+}
+
 // Many repeats deep down are reported in time linear in their pointers.
 func TestParseDeepRepeats(t *testing.T) {
 	const depth, n = 2000, 2000

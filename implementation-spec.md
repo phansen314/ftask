@@ -40,7 +40,7 @@ The reader builds an **ordered tree**: objects as ordered lists of members, arra
 How a failure is reported:
 
 - **Operation input:** `invalid-input`, and nothing further is checked. `field` is `""`, except for a repeated key, where it is the pointer of that key (e.g. `/extra/status`).
-- **A JSON option value** (e.g. `--extra`): reported at the option's field, with any inner pointer prefixed by it (a repeated key `status` in `--extra` is `/extra/status`), and other checks still run (see [Conversion](#conversion)).
+- **A JSON option value** (e.g. `--extra`): reported at the option's field, with any inner pointer prefixed by it (a repeated key `status` in `--extra` is `/extra/status`), and other checks still run (see [Conversion](#conversion)). Its nesting counts from the input it sits in: `--extra` (at `/extra`) may nest 9,989 levels, `--extra-merge` (at `/extra/merge`) 9,988, so the input as a whole — and the task file written from it — stays within the limit.
 - **A file:** a repeated key is a file-level rule, not a parse failure, so it must not pre-empt the version check ([File validity](design-spec.md#file-validity) step 2). The reader records it and keeps going; it is reported after the version check, as `corrupt` (`reason`: `invalid`). Every other failure above makes the file `corrupt` (`reason`: `not-json`).
 
 **Adapters** then turn the tree into domain types (one per operation input, plus the task file and `ftask.json`), validating as they go (see [Validation](#validation)).
