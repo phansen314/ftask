@@ -8,10 +8,11 @@ import (
 	"testing"
 
 	"github.com/phansen314/ftask/internal/fsys"
+	"github.com/phansen314/ftask/internal/schematest"
 )
 
 // Inspect's output for each root state, as info reports it (JSON, so null
-// and absent pointers are visible).
+// and absent pointers are visible), and that it matches info-output.
 func TestInspect(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -74,6 +75,9 @@ func TestInspect(t *testing.T) {
 			}
 			if string(got) != want {
 				t.Errorf("got  %s\nwant %s", got, want)
+			}
+			if ok, f := schematest.Check(t, "info-output", got); !ok {
+				t.Errorf("info-output rejects at %s: %s", f, got)
 			}
 		})
 	}

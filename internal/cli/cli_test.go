@@ -91,6 +91,22 @@ func TestVersion(t *testing.T) {
 	}
 }
 
+// info reports an unlocatable config as state: ok, exit 0.
+func TestInfo(t *testing.T) {
+	r := run(t, commands, "", "info")
+	if r.code != ExitOK || r.envelope["ok"] != true {
+		t.Fatalf("exit %d: %s", r.code, r.raw)
+	}
+	res, _ := json.Marshal(r.envelope["result"])
+	if ok, f := schematest.Check(t, "info-output", res); !ok {
+		t.Errorf("info-output rejects at %s: %s", f, res)
+	}
+	config := r.envelope["result"].(map[string]any)["config"].(map[string]any)
+	if config["path"] != nil || config["state"] != "missing" {
+		t.Errorf("config %v, want path null and state missing", config)
+	}
+}
+
 func TestInputFile(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, content string) string {

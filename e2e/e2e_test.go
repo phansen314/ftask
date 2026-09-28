@@ -5,6 +5,7 @@ package e2e
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -148,6 +149,49 @@ func TestClosedPipe(t *testing.T) {
 	r := run(t, cmd)
 	if r.code != 3 || !strings.HasPrefix(r.stderr, "ftask: result not delivered: ") {
 		t.Errorf("exit %d, stderr %q; want 3 and the notice", r.code, r.stderr)
+	}
+}
+
+// info locates the config from the real environment, and reports a machine
+// with nothing set up, or no usable HOME, as state: exit 0.
+func TestInfo(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		unset bool   // no HOME and no XDG_CONFIG_HOME
+		path  string // want config.path, relative to XDG_CONFIG_HOME
+	}{
+		{"fresh home", false, "ftask/config.toml"},
+		{"no home", true, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := ftask(t, "info")
+			var want any // config.path: null when it can't be located
+			for _, kv := range cmd.Env {
+				if x, ok := strings.CutPrefix(kv, "XDG_CONFIG_HOME="); ok && !tc.unset {
+					want = filepath.Join(x, tc.path)
+				}
+			}
+			if tc.unset {
+				cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
+			}
+			r := run(t, cmd)
+			if r.code != 0 {
+				t.Fatalf("exit %d: %s%s", r.code, r.stdout, r.stderr)
+			}
+			envelope(t, r)
+			var env struct {
+				Result struct {
+					Config      map[string]any `json:"config"`
+					Initialized bool           `json:"initialized"`
+				} `json:"result"`
+			}
+			if err := json.Unmarshal([]byte(r.stdout), &env); err != nil {
+				t.Fatal(err)
+			}
+			if c := env.Result.Config; c["path"] != want || c["state"] != "missing" || env.Result.Initialized {
+				t.Errorf("got %s; want config.path %v, state missing, not initialized", r.stdout, want)
+			}
+		})
 	}
 }
 
