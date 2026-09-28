@@ -1,0 +1,245 @@
+package cli
+
+import (
+	"bytes"
+	"errors"
+	"fmt"
+	"io"
+	"strings"
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+
+	"github.com/phansen314/ftask/internal/errs"
+	"github.com/phansen314/ftask/internal/jsonio"
+	"github.com/phansen314/ftask/internal/ops"
+)
+
+// Env is what one invocation reads and writes besides the operation's own
+// environment.
+type Env struct {
+	Ops    ops.Env
+	Stdin  io.Reader // read only when a value names it (--input -)
+	Stdout io.Writer // closed after the one write, if it is an io.Closer
+	Stderr io.Writer // only for the notice when the result is not delivered
+}
+
+// Exit codes (cli-spec.md, Exit codes).
+const (
+	ExitOK           = 0
+	ExitError        = 1
+	ExitUsage        = 2
+	ExitNotDelivered = 3
+)
+
+// Run runs the command line args, without the program name, and returns the
+// exit code. It writes exactly one envelope line, or help text, to stdout.
+func Run(args []string, env Env) int {
+	out, code := execute(commands, args, env)
+	return deliver(env, out, code)
+}
+
+// execute runs args against cmds and returns what to write and the exit code.
+func execute(cmds []Command, args []string, env Env) ([]byte, int) {
+	var help bytes.Buffer
+	var result *ops.Envelope
+	root := newRoot(cmds, env, &result)
+	root.SetArgs(args)
+	root.SetIn(env.Stdin)
+	root.SetOut(&help)
+	root.SetErr(io.Discard)
+	err := root.Execute()
+	switch {
+	case result != nil:
+		return envelopeLine(*result)
+	case err != nil:
+		return envelopeLine(ops.Failed(usage(err)))
+	}
+	return help.Bytes(), ExitOK // --help, or cobra's own help and completion
+}
+
+func newRoot(cmds []Command, env Env, result **ops.Envelope) *cobra.Command {
+	root := &cobra.Command{
+		Use:           "ftask",
+		Short:         "Local, file-based task management with JSON output",
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		// Bare ftask is a usage error, and an unknown command is reported
+		// here rather than by cobra so its problem names the token.
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return usageErr(nil, "missing command")
+			}
+			reason := "unknown command"
+			if s := cmd.SuggestionsFor(args[0]); len(s) > 0 {
+				reason += "; did you mean " + strings.Join(s, " or ") + "?"
+			}
+			return usageErr(&args[0], reason)
+		},
+		RunE:                       func(*cobra.Command, []string) error { return nil },
+		SuggestionsMinimumDistance: 2,
+	}
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return err })
+	for i := range cmds {
+		root.AddCommand(newCommand(&cmds[i], env, result))
+	}
+	return root
+}
+
+func newCommand(c *Command, env Env, result **ops.Envelope) *cobra.Command {
+	use := c.Name
+	for _, a := range c.Args {
+		use += " <" + a.Name + ">"
+	}
+	cmd := &cobra.Command{
+		Use:     use,
+		Short:   c.Summary,
+		Example: c.Example,
+		Args: func(cmd *cobra.Command, args []string) error {
+			want := len(c.Args)
+			if cmd.Flags().Changed("input") {
+				want = 0
+			}
+			switch {
+			case len(args) > want && cmd.Flags().Changed("input"):
+				return usageErr(&args[0], "--input cannot be combined with arguments")
+			case len(args) > want:
+				return usageErr(&args[want], "unexpected argument")
+			case len(args) < want:
+				return usageErr(nil, "missing argument <"+c.Args[len(args)].Name+">")
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if e := checkShape(c, cmd); e != nil {
+				return e
+			}
+			env := runCommand(c, cmd, args, env)
+			*result = &env
+			return nil
+		},
+	}
+	fs := cmd.Flags()
+	fs.SortFlags = false
+	for _, o := range c.Options {
+		switch o.Type {
+		case Bool:
+			fs.BoolP(o.Name, o.Short, false, o.Help)
+		case IDList, TagList, Repeated:
+			fs.StringArrayP(o.Name, o.Short, nil, o.Help)
+		default:
+			fs.StringP(o.Name, o.Short, "", o.Help)
+		}
+	}
+	fs.StringP("input", "i", "", "read the whole operation input from `file` (- for stdin)")
+	return cmd
+}
+
+// checkShape reports what cobra cannot: --input together with a field
+// option, and a missing required option.
+func checkShape(c *Command, cmd *cobra.Command) error {
+	input := cmd.Flags().Changed("input")
+	for _, o := range c.Options {
+		given := cmd.Flags().Changed(o.Name)
+		switch {
+		case input && given && o.Field != "":
+			arg := "--" + o.Name
+			return usageErr(&arg, "--input cannot be combined with options that set input fields")
+		case !input && !given && o.Required:
+			return usageErr(nil, "missing required option --"+o.Name)
+		}
+	}
+	return nil
+}
+
+// runCommand builds the operation's input and runs it.
+func runCommand(c *Command, cmd *cobra.Command, args []string, env Env) ops.Envelope {
+	if cmd.Flags().Changed("input") {
+		path, _ := cmd.Flags().GetString("input")
+		in, e := readInput(path, env)
+		if e != nil {
+			return ops.Failed(e)
+		}
+		return runOp(c.Op, in, nil, env.Ops)
+	}
+	in, problems := buildInput(c, cmd, args)
+	return runOp(c.Op, in, problems, env.Ops)
+}
+
+// runOp runs an operation; tests replace it to see the input built.
+var runOp = ops.Run
+
+// usageError is a usage problem found by ftask rather than cobra.
+type usageError struct{ problem errs.UsageProblem }
+
+func (e *usageError) Error() string { return e.problem.Reason }
+
+func usageErr(arg *string, reason string) error {
+	return &usageError{errs.UsageProblem{Argument: arg, Reason: reason}}
+}
+
+// usage turns an error from cobra's Execute into a usage error, naming the
+// offending token where the error says which it was.
+func usage(err error) *errs.Error {
+	var ue *usageError
+	if errors.As(err, &ue) {
+		return errs.Usage([]errs.UsageProblem{ue.problem})
+	}
+	p := errs.UsageProblem{Reason: err.Error()}
+	var notExist *pflag.NotExistError
+	var noValue *pflag.ValueRequiredError
+	var badValue *pflag.InvalidValueError
+	switch {
+	case errors.As(err, &notExist):
+		p.Argument = flagToken(notExist.GetSpecifiedName(), notExist.GetSpecifiedShortnames())
+	case errors.As(err, &noValue):
+		p.Argument = flagToken(noValue.GetSpecifiedName(), noValue.GetSpecifiedShortnames())
+	case errors.As(err, &badValue):
+		arg := "--" + badValue.GetFlag().Name
+		p.Argument = &arg
+	}
+	return errs.Usage([]errs.UsageProblem{p})
+}
+
+// flagToken is the token pflag faults: a group of short options (without
+// its "-"), else a long option's name.
+func flagToken(name, shorts string) *string {
+	t := "--" + name
+	if shorts != "" {
+		t = "-" + shorts
+	}
+	return &t
+}
+
+// envelopeLine encodes env as the one output line, with its exit code.
+func envelopeLine(env ops.Envelope) ([]byte, int) {
+	b, err := jsonio.MarshalLine(env)
+	if err != nil {
+		env = ops.Failed(errs.Internal("encoding the envelope: " + err.Error()))
+		if b, err = jsonio.MarshalLine(env); err != nil {
+			panic(err) // a crash: outcome unknown
+		}
+	}
+	switch {
+	case env.OK:
+		return b, ExitOK
+	case env.Error.Kind == errs.KindUsage:
+		return b, ExitUsage
+	}
+	return b, ExitError
+}
+
+// deliver writes out in one write and closes stdout; exit codes 0-2 are
+// reported only once both succeed (implementation-spec.md, Writing the
+// envelope).
+func deliver(env Env, out []byte, code int) int {
+	_, err := env.Stdout.Write(out)
+	if c, ok := env.Stdout.(io.Closer); ok && err == nil {
+		err = c.Close()
+	}
+	if err != nil {
+		fmt.Fprintf(env.Stderr, "ftask: result not delivered: %v\n", err)
+		return ExitNotDelivered
+	}
+	return code
+}
