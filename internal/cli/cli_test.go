@@ -531,3 +531,29 @@ func TestCreateInput(t *testing.T) {
 		}
 	}
 }
+
+// create-folder's input: the folder argument and -p.
+func TestCreateFolderInput(t *testing.T) {
+	saved := runOp
+	t.Cleanup(func() { runOp = saved })
+	var got string
+	runOp = func(_ string, in *jsonio.Object, _ []errs.Problem, _ ops.Env) ops.Envelope {
+		b, _ := json.Marshal(in)
+		got = string(b)
+		return ops.Envelope{OK: true, Result: struct{}{}, Warnings: []errs.Warning{}}
+	}
+	for _, tc := range []struct {
+		args        []string
+		stdin, want string
+	}{
+		{[]string{"create-folder", "/proj"}, "", `{"folder":"/proj"}`},
+		{[]string{"create-folder", "-p", "/proj/travel/2026"}, "", `{"folder":"/proj/travel/2026","parents":true}`},
+		{[]string{"create-folder", "/proj", "--parents=false"}, "", `{"folder":"/proj","parents":false}`},
+		{[]string{"create-folder", "-i", "-"}, `{"folder": "/a", "parents": true}`, `{"folder":"/a","parents":true}`},
+	} {
+		got = ""
+		if r := run(t, commands, tc.stdin, tc.args...); r.code != ExitOK || got != tc.want {
+			t.Errorf("%q: exit %d, input %s, want %s", tc.args, r.code, got, tc.want)
+		}
+	}
+}

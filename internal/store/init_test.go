@@ -86,7 +86,10 @@ func TestInit(t *testing.T) {
 			"created 0 root_created=false metadata_created=true", newMeta, ""},
 		{"not empty", func(f *initFixture) { f.write("tasks/notes.txt", "") }, "tasks", false,
 			`conflict {"rule":"root-not-empty","ids":[]} root_created=false metadata_created=false`, "<none>", "<none>"},
-		{"existing tree", func(f *initFixture) { f.write("tasks/ftask.json", `{"schema": 1, "last_id": 5}`); f.write("tasks/3.json", "x") }, "tasks", false,
+		{"existing tree", func(f *initFixture) {
+			f.write("tasks/ftask.json", `{"schema": 1, "last_id": 5}`)
+			f.write("tasks/3.json", "x")
+		}, "tasks", false,
 			"attached 5 root_created=false metadata_created=false", `{"schema": 1, "last_id": 5}`, `root = "~/tasks"` + "\n"},
 		{"corrupt ftask.json", func(f *initFixture) { f.write("tasks/ftask.json", `{"schema": 1}`) }, "tasks", false,
 			`corrupt {"path":"~/tasks/ftask.json","reason":"invalid"} root_created=false metadata_created=false`, "", "<none>"},

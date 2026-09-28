@@ -29,6 +29,17 @@ var commands = []Command{
 		Resolve: resolveRoot,
 	},
 	{
+		Name:    "create-folder",
+		Op:      "create-folder",
+		Summary: "Create a folder, and optionally any missing parent folders",
+		Args:    []Arg{{Name: "folder", Field: "/folder", Type: String}},
+		Options: []Option{
+			{Name: "parents", Short: "p", Field: "/parents", Type: Bool, Help: "create missing parent folders"},
+		},
+		Example: `  ftask create-folder /proj
+  ftask create-folder -p /proj/travel/2026 | jq -r '.result.created[]'`,
+	},
+	{
 		Name:    "create",
 		Op:      "create",
 		Summary: "Create a new, open task",

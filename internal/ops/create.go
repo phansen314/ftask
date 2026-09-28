@@ -1,8 +1,6 @@
 package ops
 
 import (
-	"strings"
-
 	"github.com/phansen314/ftask/internal/errs"
 	"github.com/phansen314/ftask/internal/jsonio"
 	"github.com/phansen314/ftask/internal/model"
@@ -67,8 +65,8 @@ func runCreate(env Env, in CreateInput, w *errs.Collector) (any, *errs.Error) {
 		if e != nil {
 			return e
 		}
-		if segs := in.Folder.Segments(); n < len(segs) {
-			missingFolder = []string{"/" + strings.Join(segs[:n+1], "/")}
+		if n < len(in.Folder.Segments()) {
+			missingFolder = []string{string(folderPrefix(in.Folder, n+1))}
 		}
 		var found map[model.ID][]*store.Loaded
 		var missingIDs []int64

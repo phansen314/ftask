@@ -31,11 +31,12 @@ type runner func(env Env, in any, w *errs.Collector) (any, *errs.Error)
 // runners holds each implemented operation, by operation name; every name is
 // also in decoders.
 var runners = map[string]runner{
-	"version": typed(runVersion),
-	"info":    typed(runInfo),
-	"show":    typed(runShow),
-	"init":    typed(runInit),
-	"create":  typed(runCreate),
+	"version":       typed(runVersion),
+	"info":          typed(runInfo),
+	"show":          typed(runShow),
+	"init":          typed(runInit),
+	"create":        typed(runCreate),
+	"create-folder": typed(runCreateFolder),
 }
 
 // typed adapts an operation's function over its own input type to a runner.

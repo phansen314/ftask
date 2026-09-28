@@ -306,6 +306,34 @@ func TestCreate(t *testing.T) {
 	}
 }
 
+// create-folder makes the folders create then files tasks in.
+func TestCreateFolder(t *testing.T) {
+	first := ftask(t, "init", "~/tasks")
+	same := func(args ...string) *exec.Cmd {
+		cmd := exec.Command(binary, args...)
+		cmd.Env = first.Env
+		return cmd
+	}
+	for _, step := range []struct {
+		cmd  *exec.Cmd
+		code int
+		want string
+	}{
+		{first, 0, `"action":"created"`},
+		{same("create-folder", "/proj/travel"), 1, `"folders":["/proj"]`},
+		{same("create-folder", "-p", "/proj/travel"), 0, `"result":{"folder":"/proj/travel","created":["/proj","/proj/travel"]}`},
+		{same("create-folder", "-p", "/proj/travel"), 0, `"created":[]`},
+		{same("create", "Book flights", "--folder", "/proj/travel"), 0, `"id":1,`},
+		{same("show", "1"), 0, `"folder":"/proj/travel"`},
+	} {
+		r := run(t, step.cmd)
+		envelope(t, r)
+		if r.code != step.code || !strings.Contains(r.stdout, step.want) {
+			t.Fatalf("%q: exit %d, want %d and %s: %s", step.cmd.Args[1:], r.code, step.code, step.want, r.stdout)
+		}
+	}
+}
+
 // A relative root is resolved against the working directory as the shell
 // reports it: through a symlink, not with it resolved.
 func TestInitRelative(t *testing.T) {

@@ -181,9 +181,17 @@ func TestCreateCases(t *testing.T) {
 			`corrupt {"path":"~/tasks/p/1.json","reason":"not-json"}`, nil},
 		{"blocker vanished", func(f *fixture) { f.task("", 1, false); f.fail(fsys.OpReadFile, "1.json", syscall.ENOENT) }, `{"title": "x", "blocked_by": [1]}`,
 			`not-found {"folders":[],"ids":[1],"paths":[]}`, nil},
-		{"one copy vanished", func(f *fixture) { f.task("", 1, false); f.task("p", 1, false); f.fail(fsys.OpReadFile, "p/1.json", syscall.ENOENT) }, `{"title": "x", "blocked_by": [1]}`,
+		{"one copy vanished", func(f *fixture) {
+			f.task("", 1, false)
+			f.task("p", 1, false)
+			f.fail(fsys.OpReadFile, "p/1.json", syscall.ENOENT)
+		}, `{"title": "x", "blocked_by": [1]}`,
 			`/ 101`, nil},
-		{"unlistable folder with blockers", func(f *fixture) { f.task("", 1, false); f.mkdir("tasks/p"); f.fail(fsys.OpReadDir, "p", syscall.EACCES) }, `{"title": "x", "blocked_by": [1]}`,
+		{"unlistable folder with blockers", func(f *fixture) {
+			f.task("", 1, false)
+			f.mkdir("tasks/p")
+			f.fail(fsys.OpReadDir, "p", syscall.EACCES)
+		}, `{"title": "x", "blocked_by": [1]}`,
 			`io {"path":"~/tasks/p","code":"EACCES"}`, nil},
 		{"unlistable folder, no blockers: no walk", func(f *fixture) { f.mkdir("tasks/p"); f.fail(fsys.OpReadDir, "p", syscall.EACCES) }, `{"title": "x"}`,
 			`/ 101`, nil},
