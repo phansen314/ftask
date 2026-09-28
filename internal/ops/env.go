@@ -3,6 +3,7 @@ package ops
 import (
 	"time"
 
+	"github.com/phansen314/ftask/internal/fsys"
 	"github.com/phansen314/ftask/internal/store"
 )
 
@@ -12,6 +13,14 @@ import (
 type Env struct {
 	store.Env
 	Clock Clock
+}
+
+// NewEnv is the process's environment: the real filesystem, the home and
+// config directories located from getenv (design-spec.md, Config file), and
+// the real clock. goos is runtime.GOOS.
+func NewEnv(getenv func(string) string, goos string) Env {
+	home, configDir := store.Locate(getenv, goos)
+	return Env{Env: store.Env{FS: fsys.OS{}, Home: home, ConfigDir: configDir}, Clock: RealClock}
 }
 
 // Clock returns the current time. Operations stamp files with it, so tests

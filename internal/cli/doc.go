@@ -1,2 +1,4 @@
-// Package cli parses the command line from command tables, writes --help, and writes the output envelope and exit code. It never imports model or store.
+// Package cli builds cobra commands from command tables, turns a command line
+// into an operation input, and writes the output envelope and exit code. It
+// never imports model or store.
 package cli

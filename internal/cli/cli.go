@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -31,6 +33,17 @@ const (
 	ExitUsage        = 2
 	ExitNotDelivered = 3
 )
+
+// Main runs ftask as this process: the real environment and the standard
+// streams. args exclude the program name.
+func Main(args []string) int {
+	return Run(args, Env{
+		Ops:    ops.NewEnv(os.Getenv, runtime.GOOS),
+		Stdin:  os.Stdin,
+		Stdout: os.Stdout,
+		Stderr: os.Stderr,
+	})
+}
 
 // Run runs the command line args, without the program name, and returns the
 // exit code. It writes exactly one envelope line, or help text, to stdout.
