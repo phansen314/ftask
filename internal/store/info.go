@@ -83,13 +83,14 @@ func Inspect(env Env) Info {
 
 func inspectTree(env Env, root string) *TreeInfo {
 	t := &TreeInfo{Metadata: MetaMissing}
-	if fi, err := env.FS.Stat(root); err != nil || !fi.IsDir() {
-		return t
-	}
+	// Classified as openRoot does, so info agrees with Root states: only a
+	// root that is absent, or leads to something other than a directory, is
+	// missing. Any other error (EACCES on a parent, say) leaves the root
+	// present but unreadable.
 	r, err := env.FS.OpenRoot(root)
 	if err != nil {
 		if isErrno(err, syscall.ENOENT) || isErrno(err, syscall.ENOTDIR) {
-			return t // gone since the Stat
+			return t
 		}
 		t.RootExists, t.Metadata = true, MetaUnreadable
 		return t

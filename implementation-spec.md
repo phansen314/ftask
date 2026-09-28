@@ -140,7 +140,7 @@ Operations that must find an ID, prove it absent, or return a collection walk th
 
 ### Loading task files
 
-Task files are loaded on first use and cached for the rest of the invocation. A load runs [File validity](design-spec.md#file-validity) through [JSON reading](#json-reading) and [Validation](#validation) and ends in either a usable task or an unusable one with its reason (`unreadable` with its errno, `corrupt` with its reason, or `unsupported-format`).
+Task files are loaded on first use and cached for the rest of the operation — in a composed command, until the next operation starts (see [Operations and transactions](#operations-and-transactions)). A load runs [File validity](design-spec.md#file-validity) through [JSON reading](#json-reading) and [Validation](#validation) and ends in either a usable task or an unusable one with its reason (`unreadable` with its errno, `corrupt` with its reason, or `unsupported-format`).
 
 ### Queries
 
@@ -185,7 +185,7 @@ Implements [`block`](operations.md#block)'s cycle check: adding "`id` is blocked
 
 ### Phase 1: load the reachable subgraph
 
-Starting from the new blockers (those not already in `id`'s `blocked_by`), follow `blocked_by` through the [index](#the-index), loading each task file once through the per-invocation cache and never expanding `id`:
+Starting from the new blockers (those not already in `id`'s `blocked_by`), follow `blocked_by` through the [index](#the-index), loading each task file once through the [task-file cache](#loading-task-files) and never expanding `id`:
 
 - A node's edges are the union of all its copies' `blocked_by`, sorted ascending, without repeats.
 - An ID with no task file is a node with no edges, skipped silently.
@@ -337,7 +337,7 @@ errs and jsonio may be imported by any package, and import none of ftask's own.
 
 ### Operations and transactions
 
-An operation is a function over a transaction: `func(tx *store.Tx, in Input) (Result, error)`. `store.Read(fn)` runs it without the lock; `store.Write(fn)` runs it holding the write lock, after re-reading `ftask.json`. A composed command is several operation functions inside one `store.Write` — the operations spec's "several operations under a single write lock" — so composition needs no change to this structure.
+An operation is a function over a transaction: `func(tx *store.Tx, in Input) (Result, error)`. `store.Read(fn)` runs it without the lock; `store.Write(fn)` runs it holding the write lock, after re-reading `ftask.json`. A composed command is several operation functions inside one `store.Write` — the operations spec's "several operations under a single write lock" — so composition needs no change to this structure, with one exception. The transaction's [index](#the-index) and [task-file cache](#loading-task-files) never see its own writes, so the composition calls `tx.NextStep()` before each operation after the first. That drops both, keeping the lock and the open root, and the next operation sees what the earlier ones wrote.
 
 ### Environment
 

@@ -38,6 +38,16 @@ func TestInspect(t *testing.T) {
 			`{"config":{"path":"CFG","state":"ok","root":"ROOT"},"tree":{"root_exists":false,"metadata":"missing","schema":null,"last_id":null},"initialized":false,"usable":false,"compatible":null}`},
 		{"root is a file", func(f *fixture) Env { must(t, os.RemoveAll(f.root)); f.write("tasks", ""); return f.env },
 			`{"config":{"path":"CFG","state":"ok","root":"ROOT"},"tree":{"root_exists":false,"metadata":"missing","schema":null,"last_id":null},"initialized":false,"usable":false,"compatible":null}`},
+		{"root is a symlink to a directory", func(f *fixture) Env {
+			must(t, os.Rename(f.root, f.path("real")))
+			must(t, os.Symlink("real", f.root))
+			return f.env
+		}, `{"config":{"path":"CFG","state":"ok","root":"ROOT"},"tree":{"root_exists":true,"metadata":"ok","schema":1,"last_id":100},"initialized":true,"usable":true,"compatible":true}`},
+		{"root is a dangling symlink", func(f *fixture) Env {
+			must(t, os.RemoveAll(f.root))
+			must(t, os.Symlink("gone", f.root))
+			return f.env
+		}, `{"config":{"path":"CFG","state":"ok","root":"ROOT"},"tree":{"root_exists":false,"metadata":"missing","schema":null,"last_id":null},"initialized":false,"usable":false,"compatible":null}`},
 		{"root cannot be opened", func(f *fixture) Env {
 			return f.withFault(fsys.ErrnoAt(fsys.OpOpenRoot, "", 1, syscall.EACCES))
 		}, `{"config":{"path":"CFG","state":"ok","root":"ROOT"},"tree":{"root_exists":true,"metadata":"unreadable","schema":null,"last_id":null},"initialized":true,"usable":false,"compatible":null}`},

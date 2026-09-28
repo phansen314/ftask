@@ -13,6 +13,11 @@ import (
 // root: every call goes through the one fsys.Root opened for it
 // (implementation-spec.md, Filesystem access). It is not safe for concurrent
 // use.
+//
+// Its index and task-file cache are built on first use and never see its own
+// writes: Create, Replace, and Mkdir leave them as they were. A composed
+// command therefore calls NextStep before each operation after the first, so
+// that operation starts fresh and sees what the earlier ones wrote.
 type Tx struct {
 	root     fsys.Root
 	rootPath string // the root as reported: as stored, cleaned, "~/" expanded
@@ -77,6 +82,14 @@ func begin(env Env, w *errs.Collector) (*Tx, *errs.Error) {
 		return nil, e
 	}
 	return &Tx{root: r, rootPath: rootPath, meta: ms.meta, warn: w, cache: map[Location]*Loaded{}}, nil
+}
+
+// NextStep starts the next operation of a composed command: it drops the
+// index and the task-file cache, which the previous operation's writes have
+// made stale. The lock and the root stay as they are, and Meta stays current.
+func (tx *Tx) NextStep() {
+	tx.index = nil
+	tx.cache = map[Location]*Loaded{}
 }
 
 // Meta is ftask.json's content as last read or written.

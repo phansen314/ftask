@@ -111,6 +111,33 @@ func TestLoadCached(t *testing.T) {
 	}
 }
 
+// NextStep drops the index and the cache, so a composed command's next
+// operation sees what the earlier ones wrote.
+func TestNextStep(t *testing.T) {
+	f := newFixture(t)
+	f.task("", 1, false)
+	data, err := os.ReadFile(f.root + "/1.json")
+	must(t, err)
+	writeTx(t, f.env, nil, func(tx *Tx) {
+		if got := tx.Index().Locations(2); got != nil {
+			t.Fatalf("2 indexed before it exists: %v", got)
+		}
+		tx.Load(Location{"/", 1})
+		wantNoErr(t, tx.Create("2.json", data))
+		wantNoErr(t, tx.Replace("1.json", []byte("not json")))
+		if tx.Index().Locations(2) != nil || tx.Load(Location{"/", 1}).State != Usable {
+			t.Fatal("writes seen before NextStep")
+		}
+		tx.NextStep()
+		if got := tx.Index().Locations(2); len(got) != 1 {
+			t.Errorf("2 after NextStep: %v", got)
+		}
+		if ld := tx.Load(Location{"/", 1}); ld.State != Corrupt {
+			t.Errorf("1 after NextStep: %+v", ld)
+		}
+	})
+}
+
 // A symlink swapped in for a task file is unreadable (ELOOP), not followed.
 func TestLoadSymlink(t *testing.T) {
 	f := newFixture(t)

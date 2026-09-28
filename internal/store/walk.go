@@ -127,7 +127,7 @@ var (
 )
 
 // Index walks the whole tree once, on first use, and returns the same index
-// for the rest of the transaction. Folders that cannot be listed are
+// until NextStep. Folders that cannot be listed are
 // recorded, not returned: whether one is an error or a warning is the
 // operation's call (see RequireWholeTree, WarnUnreadable).
 func (tx *Tx) Index() *Index {

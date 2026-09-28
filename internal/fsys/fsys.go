@@ -20,7 +20,7 @@ type FS interface {
 	// a symlink into a dotfiles checkout.
 	ReadFile(path string) ([]byte, error)
 	// Stat follows symlinks: whether the root path leads to a directory
-	// (info's root_exists, init's check of an existing root).
+	// (init's check of an existing root).
 	Stat(path string) (fs.FileInfo, error)
 }
 

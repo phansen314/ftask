@@ -38,8 +38,8 @@ type Loaded struct {
 	Found  int64
 }
 
-// Load reads and checks the task file at l, once per transaction: later
-// calls return the cached result.
+// Load reads and checks the task file at l, once per operation: later calls
+// return the cached result until NextStep.
 func (tx *Tx) Load(l Location) *Loaded {
 	if ld, ok := tx.cache[l]; ok {
 		return ld
