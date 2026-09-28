@@ -334,6 +334,36 @@ func TestCreateFolder(t *testing.T) {
 	}
 }
 
+// complete makes a dependent ready; completing again changes nothing.
+func TestComplete(t *testing.T) {
+	first := ftask(t, "init", "~/tasks")
+	same := func(args ...string) *exec.Cmd {
+		cmd := exec.Command(binary, args...)
+		cmd.Env = first.Env
+		return cmd
+	}
+	for _, step := range []struct {
+		cmd  *exec.Cmd
+		code int
+		want string
+	}{
+		{first, 0, `"action":"created"`},
+		{same("create", "Book flights"), 0, `"id":1,`},
+		{same("create", "Pack bags", "--blocked-by", "1"), 0, `"id":2,`},
+		{same("show", "2"), 0, `"readiness":"blocked","blocking":[1]`},
+		{same("complete", "1"), 0, `"changed":true`},
+		{same("show", "2"), 0, `"readiness":"ready","blocking":[]`},
+		{same("complete", "1"), 0, `"changed":false`},
+		{same("complete", "9"), 1, `"ids":[9]`},
+	} {
+		r := run(t, step.cmd)
+		envelope(t, r)
+		if r.code != step.code || !strings.Contains(r.stdout, step.want) {
+			t.Fatalf("%q: exit %d, want %d and %s: %s", step.cmd.Args[1:], r.code, step.code, step.want, r.stdout)
+		}
+	}
+}
+
 // A relative root is resolved against the working directory as the shell
 // reports it: through a symlink, not with it resolved.
 func TestInitRelative(t *testing.T) {

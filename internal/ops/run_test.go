@@ -87,7 +87,7 @@ func TestRunInvalidInput(t *testing.T) {
 		{"caller covers field", "init", `{"root": "~bob/t", "x": 1}`, []errs.Problem{{Field: "/root", Reason: "~user/"}}, []string{"/root", "/x"}},
 		{"caller covers missing", "show", `{}`, []errs.Problem{{Field: "/id", Reason: "must be UTF-8"}}, []string{"/id"}},
 		// Validation comes before anything else, implemented or not.
-		{"unimplemented", "complete", `{"id": 0}`, nil, []string{"/id"}},
+		{"unimplemented", "reopen", `{"id": 0}`, nil, []string{"/id"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := Run(tc.op, parse(t, tc.doc), tc.caller, Env{})
@@ -110,7 +110,7 @@ func TestRunInternal(t *testing.T) {
 
 	for _, tc := range []struct{ name, op, doc string }{
 		{"no such operation", "nosuch", `{}`},
-		{"not implemented", "complete", `{"id": 1}`},
+		{"not implemented", "reopen", `{"id": 1}`},
 		{"no result", "version", `{}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

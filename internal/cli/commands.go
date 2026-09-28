@@ -69,4 +69,12 @@ var commands = []Command{
   cat "$(ftask show 42 | jq -r '.result.tasks[0].notes_path')"
   for id in 41 42 43; do ftask show "$id"; done | jq -s '[.[].result.tasks[]?]'`,
 	},
+	{
+		Name:    "complete",
+		Op:      "complete",
+		Summary: "Mark a task complete; completing a complete task changes nothing",
+		Args:    []Arg{{Name: "id", Field: "/id", Type: Int}},
+		Example: `  ftask complete 42 | jq .result.changed
+  for id in 41 42; do ftask complete "$id"; done | jq -c '{id: .result.id, changed: .result.changed}'`,
+	},
 }

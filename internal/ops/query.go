@@ -165,3 +165,18 @@ func requireIDs(tx *store.Tx, found map[model.ID][]*store.Loaded) *errs.Error {
 	}
 	return nil
 }
+
+// findOne finds id's one task file for a write that changes it
+// (implementation-spec.md, Queries: find exactly one): findCopies' errors,
+// then conflict (duplicate-id) if several copies remain, since a write must
+// know which task it changes.
+func findOne(tx *store.Tx, id model.ID) (*store.Loaded, *errs.Error) {
+	copies, e := findCopies(tx, id)
+	if e != nil {
+		return nil, e
+	}
+	if len(copies) > 1 {
+		return nil, errs.Conflict(errs.RuleDuplicateID, []int64{int64(id)})
+	}
+	return copies[0], nil
+}

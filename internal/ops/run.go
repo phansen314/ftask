@@ -37,6 +37,7 @@ var runners = map[string]runner{
 	"init":          typed(runInit),
 	"create":        typed(runCreate),
 	"create-folder": typed(runCreateFolder),
+	"complete":      typed(runComplete),
 }
 
 // typed adapts an operation's function over its own input type to a runner.
