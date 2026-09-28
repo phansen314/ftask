@@ -368,6 +368,37 @@ func TestCompleteReopen(t *testing.T) {
 	}
 }
 
+// update changes only what it names; the same update again changes nothing.
+func TestUpdate(t *testing.T) {
+	first := ftask(t, "init", "~/tasks")
+	same := func(args ...string) *exec.Cmd {
+		cmd := exec.Command(binary, args...)
+		cmd.Env = first.Env
+		return cmd
+	}
+	for _, step := range []struct {
+		cmd  *exec.Cmd
+		code int
+		want string
+	}{
+		{first, 0, `"action":"created"`},
+		{same("create", "Book flights", "--tags", "travel", "--extra", `{"status":"new"}`), 0, `"id":1,`},
+		{same("update", "1", "--priority", "2", "--tags-add", "urgent", "--extra-merge", `{"status":"waiting"}`), 0,
+			`"priority":2,"created_at":`},
+		{same("show", "1"), 0, `"tags":["travel","urgent"],"extra":{"status":"waiting"}`},
+		{same("update", "1", "--priority", "2", "--tags-add", "urgent", "--extra-merge", `{"status":"waiting"}`), 0, `"changed":[]`},
+		{same("update", "1"), 1, `"kind":"invalid-input"`},
+		{same("update", "1", "--tags-add", "x", "--tags-replace-all", "y"), 1, `"field":"/tags/add"`},
+		{same("update", "9", "--title", "x"), 1, `"ids":[9]`},
+	} {
+		r := run(t, step.cmd)
+		envelope(t, r)
+		if r.code != step.code || !strings.Contains(r.stdout, step.want) {
+			t.Fatalf("%q: exit %d, want %d and %s: %s", step.cmd.Args[1:], r.code, step.code, step.want, r.stdout)
+		}
+	}
+}
+
 // A relative root is resolved against the working directory as the shell
 // reports it: through a symlink, not with it resolved.
 func TestInitRelative(t *testing.T) {

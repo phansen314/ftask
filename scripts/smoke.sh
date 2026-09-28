@@ -132,6 +132,24 @@ check "reopen 2 again: nothing changes" 0 '.result.changed == false' -- reopen 2
 check "complete: not found" 1 '.error.details.ids == [99]' -- complete 99
 check "reopen: not found" 1 '.error.details.ids == [99]' -- reopen 99
 
+echo "== update"
+check "update 7: several fields" 0 '.result | .changed == ["title", "priority", "tags", "extra"] and .title == "Water the plants" and .priority == 3 and .tags == ["home", "weekly"] and .extra == {room: "kitchen"}' \
+	-- update 7 --title 'Water the plants' --priority 3 --tags-add weekly,home --extra-merge '{"room":"kitchen"}'
+check "same update again: nothing changes" 0 '.result.changed == []' \
+	-- update 7 --title 'Water the plants' --priority 3 --tags-add weekly,home --extra-merge '{"room":"kitchen"}'
+check "a subset of the same values: no change" 0 '.result.changed == []' -- update 7 --extra-merge '{"room":"kitchen"}' --priority 3
+check "clear priority, remove a tag and a key" 0 '.result | .changed == ["priority", "tags", "extra"] and .priority == null and .tags == ["weekly"] and .extra == {}' \
+	-- update 7 --priority null --tags-remove home --extra-remove room
+check "replace all tags" 0 '.result | .changed == ["tags"] and .tags == ["a", "b"]' -- update 7 --tags-replace-all b,a
+check "clear all tags" 0 '.result.tags == []' -- update 7 --tags-replace-all ''
+check "merge replaces a value whole" 0 '.result.extra == {status: {since: "monday"}}' -- update 4 --extra-merge '{"status":{"since":"monday"}}'
+check "a complete task can be updated" 0 '.result | .changed == ["title"] and .completed_at != null' -- update 1 --title 'Renew passport (done)'
+check "nothing to change" 1 '.error.kind == "invalid-input"' -- update 7
+check "add and remove the same tag" 1 '.error.details.problems[0].field == "/tags/remove/0"' -- update 7 --tags-add x --tags-remove x
+check "replace_all with add" 1 '.error.kind == "invalid-input"' -- update 7 --tags-add x --tags-replace-all y
+check "update: not found" 1 '.error.details.ids == [99]' -- update 99 --title x
+check "show sees the update" 0 '.result.tasks[0] | .title == "Water the plants" and .tags == []' -- show 7
+
 echo "== end state"
 check "last_id counts every task" 0 '.result.tree.last_id == 7' -- info
 

@@ -1,10 +1,13 @@
 package ops
 
 import (
+	"slices"
 	"strconv"
 
+	"github.com/phansen314/ftask/internal/errs"
 	"github.com/phansen314/ftask/internal/jsonio"
 	"github.com/phansen314/ftask/internal/model"
+	"github.com/phansen314/ftask/internal/store"
 )
 
 // UpdateInput is update's input. A nil field is left unchanged.
@@ -197,4 +200,106 @@ func keySet(p *model.Problems, v any, ptr string) ([]string, bool) {
 		allValid = allValid && valid[i]
 	}
 	return keys, model.Unique(p, keys, valid, ptr) && allValid
+}
+
+// UpdateOutput is update's result (update-output): the task after the
+// operation, plus the fields whose value changed, in updateFields' order.
+type UpdateOutput struct {
+	model.Task
+	Changed []string `json:"changed"`
+}
+
+// runUpdate finds the one task with id, under the write lock, and applies
+// each named field. A field whose new value equals its old one as a JSON
+// value keeps its old form, so the file changes only where a value did; if
+// none did, the file is not rewritten. Otherwise it is replaced in one
+// rename, every other field and the .md as they were.
+func runUpdate(env Env, in UpdateInput, w *errs.Collector) (any, *errs.Error) {
+	out := UpdateOutput{Changed: []string{}}
+	e := store.Write(env.Env, w, func(tx *store.Tx) *errs.Error {
+		ld, e := findOne(tx, in.ID)
+		if e != nil {
+			return e
+		}
+		t := &ld.Task
+		if in.Title != nil && *in.Title != t.Title {
+			t.Title = *in.Title
+			out.Changed = append(out.Changed, "title")
+		}
+		if in.Priority != nil && !equalPriority(in.Priority.Value, t.Priority) {
+			t.Priority = in.Priority.Value
+			out.Changed = append(out.Changed, "priority")
+		}
+		if in.Tags != nil {
+			if tags := in.Tags.apply(t.Tags); !equalTags(tags, t.Tags) {
+				t.Tags = tags
+				out.Changed = append(out.Changed, "tags")
+			}
+		}
+		if in.Extra != nil {
+			if extra := in.Extra.apply(t.Extra); !jsonio.Equal(extra, t.Extra) {
+				t.Extra = extra
+				out.Changed = append(out.Changed, "extra")
+			}
+		}
+		if len(out.Changed) > 0 {
+			data, err := t.Encode()
+			if err != nil {
+				return errs.Internal("encoding the task file: " + err.Error())
+			}
+			if e := tx.Replace(ld.Loc.Rel(), data); e != nil {
+				return e
+			}
+		}
+		out.Task = tx.Task(ld)
+		return nil
+	})
+	if e != nil {
+		return nil, e
+	}
+	return out, nil
+}
+
+func equalPriority(a, b *int64) bool {
+	return a == nil && b == nil || a != nil && b != nil && *a == *b
+}
+
+// equalTags compares two tag sets.
+func equalTags(a, b []model.Tag) bool {
+	a, b = slices.Clone(a), slices.Clone(b)
+	slices.Sort(a)
+	slices.Sort(b)
+	return slices.Equal(a, b)
+}
+
+// apply returns the tag set old becomes: ReplaceAll, or old plus Add minus
+// Remove. Order is left to TaskFile.Normalize.
+func (c *TagsChange) apply(old []model.Tag) []model.Tag {
+	if c.Replace {
+		return slices.Clone(c.ReplaceAll)
+	}
+	var tags []model.Tag
+	for _, t := range slices.Concat(old, c.Add) {
+		if !slices.Contains(c.Remove, t) && !slices.Contains(tags, t) {
+			tags = append(tags, t)
+		}
+	}
+	return tags
+}
+
+// apply returns the map old becomes: ReplaceAll, or old with each Merge key
+// set — an existing key keeps its position, a new one is appended in the
+// order given — and each Remove key deleted. old is not modified.
+func (c *ExtraChange) apply(old *jsonio.Object) *jsonio.Object {
+	if c.ReplaceAll != nil {
+		return c.ReplaceAll
+	}
+	extra := &jsonio.Object{Members: old.Members} // Set and Delete never write to Members
+	for _, m := range c.Merge.Members {
+		extra.Set(m.Key, m.Value)
+	}
+	for _, k := range c.Remove {
+		extra.Delete(k)
+	}
+	return extra
 }

@@ -84,4 +84,24 @@ var commands = []Command{
 		Args:    []Arg{{Name: "id", Field: "/id", Type: Int}},
 		Example: "  ftask reopen 42 | jq -r .result.completed_at   # null",
 	},
+	{
+		Name:    "update",
+		Op:      "update",
+		Summary: "Change a task's title, priority, tags, or extra",
+		Args:    []Arg{{Name: "id", Field: "/id", Type: Int}},
+		Options: []Option{
+			{Name: "title", Field: "/title", Type: String, Help: "replace the title with `text`"},
+			{Name: "priority", Field: "/priority", Type: NullableInt, Help: "set the priority, an `int`; null clears it"},
+			{Name: "tags-add", Field: "/tags/add", Type: TagList, Help: "comma-separated `tags` to add"},
+			{Name: "tags-remove", Field: "/tags/remove", Type: TagList, Help: "comma-separated `tags` to remove"},
+			{Name: "tags-replace-all", Field: "/tags/replace_all", Type: TagList, Help: "the complete new `tags`; '' clears them"},
+			{Name: "extra-merge", Field: "/extra/merge", Type: JSON, Help: "keys to set, a JSON `object`"},
+			{Name: "extra-remove", Field: "/extra/remove", Type: Repeated, Help: "a `key` to delete; repeatable"},
+			{Name: "extra-replace-all", Field: "/extra/replace_all", Type: JSON, Help: "the complete new extra, a JSON `object`; {} clears it"},
+		},
+		Example: `  ftask update 42 --priority 3 --tags-add urgent
+  ftask update 42 --extra-merge '{"status":"waiting"}' | jq .result.changed
+  ftask update 42 --priority null --tags-remove urgent --extra-remove status
+  ftask update 42 --tags-replace-all ''`,
+	},
 }

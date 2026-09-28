@@ -560,3 +560,32 @@ func TestCreateFolderInput(t *testing.T) {
 		}
 	}
 }
+
+// update's input: each option at its field, nested ones included.
+func TestUpdateInput(t *testing.T) {
+	saved := runOp
+	t.Cleanup(func() { runOp = saved })
+	var got string
+	runOp = func(_ string, in *jsonio.Object, _ []errs.Problem, _ ops.Env) ops.Envelope {
+		b, _ := json.Marshal(in)
+		got = string(b)
+		return ops.Envelope{OK: true, Result: struct{}{}, Warnings: []errs.Warning{}}
+	}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"update", "42", "--priority", "3", "--tags-add", "urgent"}, `{"id":42,"priority":3,"tags":{"add":["urgent"]}}`},
+		{[]string{"update", "42", "--extra-merge", `{"status":"waiting"}`}, `{"id":42,"extra":{"merge":{"status":"waiting"}}}`},
+		{[]string{"update", "42", "--priority", "null", "--tags-remove", "urgent", "--extra-remove", "status", "--extra-remove", "a,b"},
+			`{"id":42,"priority":null,"tags":{"remove":["urgent"]},"extra":{"remove":["status","a,b"]}}`},
+		{[]string{"update", "42", "--tags-replace-all", ""}, `{"id":42,"tags":{"replace_all":[]}}`},
+		{[]string{"update", "42", "--title", "New", "--extra-replace-all", "{}"}, `{"id":42,"title":"New","extra":{"replace_all":{}}}`},
+		{[]string{"update", "42"}, `{"id":42}`}, // the operation reports that nothing is to change
+	} {
+		got = ""
+		if r := run(t, commands, "", tc.args...); r.code != ExitOK || got != tc.want {
+			t.Errorf("%q: exit %d, input %s\nwant %s", tc.args, r.code, got, tc.want)
+		}
+	}
+}
