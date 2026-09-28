@@ -80,8 +80,9 @@ func TestRunInvalidInput(t *testing.T) {
 		{"caller only", "version", `{}`, caller, []string{"/a", "/z"}},
 		{"merged and sorted", "version", `{"x": 1}`, caller, []string{"/a", "/x", "/z"}},
 		{"info", "info", `{"x": 1}`, nil, []string{"/x"}},
+		{"show", "show", `{"id": 1, "x": 1}`, nil, []string{"/x"}},
 		// Validation comes before anything else, implemented or not.
-		{"unimplemented", "show", `{"id": 0}`, nil, []string{"/id"}},
+		{"unimplemented", "complete", `{"id": 0}`, nil, []string{"/id"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := Run(tc.op, parse(t, tc.doc), tc.caller, Env{})
@@ -104,7 +105,7 @@ func TestRunInternal(t *testing.T) {
 
 	for _, tc := range []struct{ name, op, doc string }{
 		{"no such operation", "nosuch", `{}`},
-		{"not implemented", "show", `{"id": 1}`},
+		{"not implemented", "complete", `{"id": 1}`},
 		{"no result", "version", `{}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

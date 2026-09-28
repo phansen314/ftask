@@ -195,6 +195,45 @@ func TestInfo(t *testing.T) {
 	}
 }
 
+// show against the real filesystem: not-initialized in a fresh home (exit
+// 1), and a task found in a tree written by hand (init comes later).
+func TestShow(t *testing.T) {
+	cmd := ftask(t, "show", "1")
+	r := run(t, cmd)
+	envelope(t, r)
+	if r.code != 1 || !strings.Contains(r.stdout, `"missing":"config"`) {
+		t.Fatalf("fresh home: exit %d: %s", r.code, r.stdout)
+	}
+
+	cmd = ftask(t, "show", "1")
+	var xdg string
+	for _, kv := range cmd.Env {
+		if x, ok := strings.CutPrefix(kv, "XDG_CONFIG_HOME="); ok {
+			xdg = x
+		}
+	}
+	root := filepath.Join(filepath.Dir(xdg), "tasks")
+	for p, content := range map[string]string{
+		filepath.Join(xdg, "ftask", "config.toml"): `root = "` + root + "\"\n",
+		filepath.Join(root, "ftask.json"):          `{"schema": 1, "last_id": 1}`,
+		filepath.Join(root, "proj", "1.json"):      `{"schema": 1, "id": 1, "title": "t", "priority": null, "created_at": "2026-09-27T00:00:00Z", "completed_at": null, "blocked_by": [2], "tags": [], "extra": {}}`,
+	} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r = run(t, cmd)
+	envelope(t, r)
+	for _, want := range []string{`"folder":"/proj"`, `"readiness":"blocked"`, `"kind":"dangling-reference"`} {
+		if r.code != 0 || !strings.Contains(r.stdout, want) {
+			t.Errorf("exit %d, want %s: %s", r.code, want, r.stdout)
+		}
+	}
+}
+
 func TestFullDisk(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("/dev/full is Linux-only")

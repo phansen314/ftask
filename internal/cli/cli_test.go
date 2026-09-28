@@ -107,6 +107,33 @@ func TestInfo(t *testing.T) {
 	}
 }
 
+// show's argument reaches /id as an integer: a non-integer fails there, a
+// valid ID gets as far as locating the config (none in testEnv).
+func TestShow(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		code int
+		kind string
+	}{
+		{[]string{"show"}, ExitUsage, "usage"},
+		{[]string{"show", "abc"}, ExitError, "invalid-input"},
+		{[]string{"show", "042"}, ExitError, "invalid-input"},
+		{[]string{"show", "42"}, ExitError, "environment"},
+		{[]string{"show", "-i", "-"}, ExitError, "environment"},
+	} {
+		r := run(t, commands, `{"id": 42}`, tc.args...)
+		if r.code != tc.code || r.kind() != tc.kind {
+			t.Errorf("%q: exit %d kind %q, want %d %s: %s", tc.args, r.code, r.kind(), tc.code, tc.kind, r.raw)
+		}
+	}
+	if arg, reason := run(t, commands, "", "show").usageProblem(t); arg != "" || reason != "missing argument <id>" {
+		t.Errorf("bare show: %q %q", arg, reason)
+	}
+	if r := run(t, commands, "", "show", "abc"); !strings.Contains(r.raw, `"field":"/id"`) {
+		t.Errorf("show abc: want a problem at /id: %s", r.raw)
+	}
+}
+
 func TestInputFile(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, content string) string {
