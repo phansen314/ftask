@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/phansen314/ftask/internal/errs"
@@ -25,6 +26,7 @@ func testEnv(stdin string) (Env, *bytes.Buffer, *bytes.Buffer) {
 		Stdin:  strings.NewReader(stdin),
 		Stdout: &out,
 		Stderr: &errOut,
+		Getwd:  func() (string, error) { return "/work", nil },
 	}, &out, &errOut
 }
 
@@ -376,6 +378,82 @@ func TestCommandsRunOperations(t *testing.T) {
 	for _, c := range commands {
 		if !slices.Contains(ops.Operations(), c.Op) {
 			t.Errorf("command %s runs unknown operation %s", c.Name, c.Op)
+		}
+	}
+}
+
+// init's root, resolved as cli-spec.md, init, Input says.
+func TestResolveRoot(t *testing.T) {
+	cwd := func() (string, error) { return "/work/dir", nil }
+	for _, tc := range []struct {
+		name  string
+		in    string
+		home  string
+		getwd func() (string, error)
+		want  string // the input after, or the problem or error
+	}{
+		{"absolute", `{"root":"/a/../b"}`, "/h", cwd, `{"root":"/a/../b"}`},
+		{"home", `{"root":"~/t"}`, "/h", cwd, `{"root":"/h/t"}`},
+		{"bare ~", `{"root":"~"}`, "/h", cwd, `{"root":"/h"}`},
+		{"home at /", `{"root":"~/t"}`, "/", cwd, `{"root":"//t"}`},
+		{"no home", `{"root":"~/t"}`, "", cwd, `environment`},
+		{"~user", `{"root":"~bob/t"}`, "/h", cwd, `problem /root: ~user/ is not supported: use ~/ or an absolute path`},
+		{"relative", `{"root":"t"}`, "/h", cwd, `{"root":"/work/dir/t"}`},
+		{"dot-dot kept", `{"root":"../t"}`, "/h", cwd, `{"root":"/work/dir/../t"}`},
+		{"cwd is /", `{"root":"t"}`, "/h", func() (string, error) { return "/", nil }, `{"root":"/t"}`},
+		{"no working directory", `{"root":"t"}`, "/h", func() (string, error) { return "", &os.PathError{Op: "getwd", Path: ".", Err: syscall.ENOENT} }, `io {"path":".","code":"ENOENT"}`},
+		{"empty", `{"root":""}`, "/h", cwd, `{"root":""}`},
+		{"not a string", `{"root":5}`, "/h", cwd, `{"root":5}`},
+		{"absent", `{}`, "/h", cwd, `{}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in, _, err := jsonio.ParseObject([]byte(tc.in))
+			if err != nil {
+				t.Fatal(err)
+			}
+			env, _, _ := testEnv("")
+			env.Ops.Home, env.Getwd = tc.home, tc.getwd
+			ps, e := resolveRoot(in, env)
+			var got string
+			switch {
+			case e != nil && e.Kind == errs.KindEnvironment:
+				got = "environment"
+			case e != nil:
+				d, _ := json.Marshal(e.Details)
+				got = string(e.Kind) + " " + string(d)
+			case len(ps) > 0:
+				got = "problem " + ps[0].Field + ": " + ps[0].Reason
+			default:
+				b, _ := json.Marshal(in)
+				got = string(b)
+			}
+			if got != tc.want {
+				t.Errorf("got  %s\nwant %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// Both ways of giving init's root are resolved; the option maps too.
+func TestInitInput(t *testing.T) {
+	saved := runOp
+	t.Cleanup(func() { runOp = saved })
+	var got string
+	runOp = func(_ string, in *jsonio.Object, _ []errs.Problem, _ ops.Env) ops.Envelope {
+		b, _ := json.Marshal(in)
+		got = string(b)
+		return ops.Envelope{OK: true, Result: struct{}{}, Warnings: []errs.Warning{}}
+	}
+	for _, tc := range []struct {
+		args        []string
+		stdin, want string
+	}{
+		{[]string{"init", "t"}, "", `{"root":"/work/t"}`},
+		{[]string{"init", "t", "--replace-config"}, "", `{"root":"/work/t","replace_config":true}`},
+		{[]string{"init", "-i", "-"}, `{"root": "t", "replace_config": false}`, `{"root":"/work/t","replace_config":false}`},
+	} {
+		if r := run(t, commands, tc.stdin, tc.args...); r.code != ExitOK || got != tc.want {
+			t.Errorf("%q: exit %d, input %s, want %s", tc.args, r.code, got, tc.want)
 		}
 	}
 }

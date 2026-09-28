@@ -3,6 +3,7 @@ package ops
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/phansen314/ftask/internal/errs"
 	"github.com/phansen314/ftask/internal/jsonio"
@@ -33,6 +34,7 @@ var runners = map[string]runner{
 	"version": typed(runVersion),
 	"info":    typed(runInfo),
 	"show":    typed(runShow),
+	"init":    typed(runInit),
 }
 
 // typed adapts an operation's function over its own input type to a runner.
@@ -50,7 +52,10 @@ func typed[I any](fn func(Env, I, *errs.Collector) (any, *errs.Error)) runner {
 // returns its envelope. problems are invalid-input problems the caller found
 // while building input — a JSON option value that is not valid JSON, input
 // resolution — which are reported together with the adapter's in one
-// invalid-input. Input that could not be read at all (jsonio failed, or a
+// invalid-input; an adapter problem at a field the caller reported, or
+// within it, is dropped, since the caller's says what is wrong there (a
+// value left out for not being UTF-8 is not also "required"). Input that
+// could not be read at all (jsonio failed, or a
 // repeated key) never reaches Run: the caller reports it with Failed.
 func Run(name string, input *jsonio.Object, problems []errs.Problem, env Env) Envelope {
 	var w errs.Collector
@@ -69,7 +74,7 @@ func run(name string, input *jsonio.Object, problems []errs.Problem, env Env, w 
 	if e != nil {
 		return nil, e
 	}
-	if all := append(slices.Clone(problems), p.List()...); len(all) > 0 {
+	if all := append(slices.Clone(problems), unreported(p.List(), problems)...); len(all) > 0 {
 		return nil, errs.InvalidInput(all)
 	}
 	r, ok := runners[name]
@@ -77,4 +82,18 @@ func run(name string, input *jsonio.Object, problems []errs.Problem, env Env, w 
 		return nil, errs.Internal("operation " + name + " is not implemented")
 	}
 	return r(env, in, w)
+}
+
+// unreported returns the adapter's problems at fields the caller's problems
+// do not cover: not the same field, and not within it.
+func unreported(adapter, caller []errs.Problem) []errs.Problem {
+	var out []errs.Problem
+	for _, a := range adapter {
+		if !slices.ContainsFunc(caller, func(c errs.Problem) bool {
+			return a.Field == c.Field || strings.HasPrefix(a.Field, c.Field+"/")
+		}) {
+			out = append(out, a)
+		}
+	}
+	return out
 }

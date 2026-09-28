@@ -1,5 +1,10 @@
 package cli
 
+import (
+	"github.com/phansen314/ftask/internal/errs"
+	"github.com/phansen314/ftask/internal/jsonio"
+)
+
 // Type is how an argument's or option's value becomes its input field
 // (implementation-spec.md, Conversion).
 type Type int
@@ -33,6 +38,10 @@ type Command struct {
 	Args    []Arg  // all required, in order
 	Options []Option
 	Example string
+	// Resolve, if set, completes the input before the operation runs, doing
+	// what the operation leaves to its caller (init's root). Its problems
+	// are reported with the adapter's; its error stops the command.
+	Resolve func(in *jsonio.Object, env Env) ([]errs.Problem, *errs.Error)
 }
 
 // Arg is a positional argument. Every argument is required.

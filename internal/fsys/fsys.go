@@ -22,6 +22,10 @@ type FS interface {
 	// Stat follows symlinks: whether the root path leads to a directory
 	// (init's check of an existing root).
 	Stat(path string) (fs.FileInfo, error)
+	// Lstat does not follow a final symlink: whether anything is at the root
+	// path at all, so init can tell a dangling symlink from nothing, and
+	// whether a config exists.
+	Lstat(path string) (fs.FileInfo, error)
 }
 
 // Root is a directory opened once, through which every call is made. Names

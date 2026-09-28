@@ -234,6 +234,68 @@ func TestShow(t *testing.T) {
 	}
 }
 
+// envHome is the home directory ftask gives cmd.
+func envHome(cmd *exec.Cmd) string {
+	for _, kv := range cmd.Env {
+		if h, ok := strings.CutPrefix(kv, "HOME="); ok {
+			return h
+		}
+	}
+	return ""
+}
+
+// init creates a tree the other commands then use; a second init refuses.
+// ~/ is expanded by ftask itself, as with no shell in between.
+func TestInit(t *testing.T) {
+	first := ftask(t, "init", "~/tasks")
+	home := envHome(first)
+	same := func(args ...string) *exec.Cmd {
+		cmd := exec.Command(binary, args...)
+		cmd.Env = first.Env
+		return cmd
+	}
+	for _, step := range []struct {
+		cmd  *exec.Cmd
+		code int
+		want string
+	}{
+		{first, 0, `"result":{"root":"` + home + `/tasks","action":"created","last_id":0}`},
+		{same("info"), 0, `"usable":true`},
+		{same("show", "1"), 1, `"kind":"not-found"`},
+		{same("init", home+"/other"), 1, `"rule":"config-exists"`},
+	} {
+		r := run(t, step.cmd)
+		envelope(t, r)
+		if r.code != step.code || !strings.Contains(r.stdout, step.want) {
+			t.Fatalf("%q: exit %d, want %d and %s: %s", step.cmd.Args[1:], r.code, step.code, step.want, r.stdout)
+		}
+	}
+}
+
+// A relative root is resolved against the working directory as the shell
+// reports it: through a symlink, not with it resolved.
+func TestInitRelative(t *testing.T) {
+	cmd := ftask(t, "init", "tasks")
+	home := envHome(cmd)
+	if err := os.Mkdir(filepath.Join(home, "real"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(home, "link")
+	if err := os.Symlink(filepath.Join(home, "real"), link); err != nil {
+		t.Fatal(err)
+	}
+	cmd.Dir = link
+	cmd.Env = append(cmd.Env, "PWD="+link)
+	r := run(t, cmd)
+	envelope(t, r)
+	if r.code != 0 || !strings.Contains(r.stdout, `"root":"`+link+`/tasks"`) {
+		t.Fatalf("exit %d: %s", r.code, r.stdout)
+	}
+	if _, err := os.Stat(filepath.Join(home, "real", "tasks", "ftask.json")); err != nil {
+		t.Error(err)
+	}
+}
+
 func TestFullDisk(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("/dev/full is Linux-only")

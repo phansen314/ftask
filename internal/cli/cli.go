@@ -21,9 +21,10 @@ import (
 // environment.
 type Env struct {
 	Ops    ops.Env
-	Stdin  io.Reader // read only when a value names it (--input -)
-	Stdout io.Writer // closed after the one write, if it is an io.Closer
-	Stderr io.Writer // only for the notice when the result is not delivered
+	Stdin  io.Reader              // read only when a value names it (--input -)
+	Stdout io.Writer              // closed after the one write, if it is an io.Closer
+	Stderr io.Writer              // only for the notice when the result is not delivered
+	Getwd  func() (string, error) // the working directory, for a relative path
 }
 
 // Exit codes (cli-spec.md, Exit codes).
@@ -42,6 +43,7 @@ func Main(args []string) int {
 		Stdin:  os.Stdin,
 		Stdout: os.Stdout,
 		Stderr: os.Stderr,
+		Getwd:  os.Getwd, // $PWD when it names the working directory: as the shell reports it
 	})
 }
 
@@ -167,15 +169,24 @@ func checkShape(c *Command, cmd *cobra.Command) error {
 
 // runCommand builds the operation's input and runs it.
 func runCommand(c *Command, cmd *cobra.Command, args []string, env Env) ops.Envelope {
+	var in *jsonio.Object
+	var problems []errs.Problem
 	if cmd.Flags().Changed("input") {
 		path, _ := cmd.Flags().GetString("input")
-		in, e := readInput(path, env)
+		var e *errs.Error
+		if in, e = readInput(path, env); e != nil {
+			return ops.Failed(e)
+		}
+	} else {
+		in, problems = buildInput(c, cmd, args)
+	}
+	if c.Resolve != nil {
+		ps, e := c.Resolve(in, env)
 		if e != nil {
 			return ops.Failed(e)
 		}
-		return runOp(c.Op, in, nil, env.Ops)
+		problems = append(problems, ps...)
 	}
-	in, problems := buildInput(c, cmd, args)
 	return runOp(c.Op, in, problems, env.Ops)
 }
 

@@ -444,3 +444,15 @@ func TestFSStatFollowsSymlink(t *testing.T) {
 	_, err = OS{}.Stat(filepath.Join(dir, "missing"))
 	wantErrno(t, err, syscall.ENOENT)
 }
+
+func TestFSLstatSeesDanglingSymlink(t *testing.T) {
+	dir := t.TempDir()
+	must(t, os.Symlink("nowhere", filepath.Join(dir, "link")))
+	fi, err := OS{}.Lstat(filepath.Join(dir, "link"))
+	must(t, err)
+	if fi.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("mode %v, want a symlink", fi.Mode())
+	}
+	_, err = OS{}.Stat(filepath.Join(dir, "link"))
+	wantErrno(t, err, syscall.ENOENT)
+}

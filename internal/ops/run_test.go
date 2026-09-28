@@ -81,6 +81,11 @@ func TestRunInvalidInput(t *testing.T) {
 		{"merged and sorted", "version", `{"x": 1}`, caller, []string{"/a", "/x", "/z"}},
 		{"info", "info", `{"x": 1}`, nil, []string{"/x"}},
 		{"show", "show", `{"id": 1, "x": 1}`, nil, []string{"/x"}},
+		{"init relative", "init", `{"root": "tasks"}`, nil, []string{"/root"}},
+		{"init dot-dot", "init", `{"root": "/a/../b", "replace_config": 1}`, nil, []string{"/replace_config", "/root"}},
+		// The caller's problem at a field replaces the adapter's there.
+		{"caller covers field", "init", `{"root": "~bob/t", "x": 1}`, []errs.Problem{{Field: "/root", Reason: "~user/"}}, []string{"/root", "/x"}},
+		{"caller covers missing", "show", `{}`, []errs.Problem{{Field: "/id", Reason: "must be UTF-8"}}, []string{"/id"}},
 		// Validation comes before anything else, implemented or not.
 		{"unimplemented", "complete", `{"id": 0}`, nil, []string{"/id"}},
 	} {

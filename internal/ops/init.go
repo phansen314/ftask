@@ -3,7 +3,9 @@ package ops
 import (
 	"strings"
 
+	"github.com/phansen314/ftask/internal/errs"
 	"github.com/phansen314/ftask/internal/model"
+	"github.com/phansen314/ftask/internal/store"
 )
 
 // InitInput is init's input. Root is absolute, cleaned, and has no ".."
@@ -23,6 +25,35 @@ func decodeInit(f *model.Fields, p *model.Problems) any {
 	}
 	in.ReplaceConfig = optionalBool(f, p, "replace_config", false)
 	return in
+}
+
+// InitOutput is init's result (init-output).
+type InitOutput struct {
+	Root   string           `json:"root"`
+	Action store.InitAction `json:"action"`
+	LastID int64            `json:"last_id"`
+}
+
+// InitPartial is init's partial result (init-partial): what it created
+// before failing, which stays; rerunning init with the same input completes
+// it.
+type InitPartial struct {
+	RootCreated     bool `json:"root_created"`
+	MetadataCreated bool `json:"metadata_created"`
+}
+
+// runInit runs store.Init, which follows init's own precedence order. An
+// error after the root directory or ftask.json was created carries the
+// partial result.
+func runInit(env Env, in InitInput, _ *errs.Collector) (any, *errs.Error) {
+	res, e := store.Init(env.Env, in.Root, in.ReplaceConfig)
+	if e != nil {
+		if res.RootCreated || res.MetaCreated {
+			e = e.WithPartial(InitPartial{RootCreated: res.RootCreated, MetadataCreated: res.MetaCreated})
+		}
+		return nil, e
+	}
+	return InitOutput{Root: in.Root, Action: res.Action, LastID: res.LastID}, nil
 }
 
 // cleanRoot cleans root lexically — no trailing "/", no empty or "."

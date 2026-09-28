@@ -15,6 +15,20 @@ var commands = []Command{
 		Example: "  ftask info | jq -e .result.usable >/dev/null && echo ready\n  ftask info | jq .result.config.root",
 	},
 	{
+		Name:    "init",
+		Op:      "init",
+		Summary: "Create a new tree, or attach an existing one, as this machine's root",
+		Args:    []Arg{{Name: "root", Field: "/root", Type: String}},
+		Options: []Option{
+			{Name: "replace-config", Field: "/replace_config", Type: Bool, Help: "replace an existing config"},
+		},
+		Example: `  ftask init ~/tasks
+  ftask init tasks                    # relative to the working directory
+  ftask init /mnt/usb/tasks --replace-config
+  jq -n '{root: "~/tasks"}' | ftask init -i -`,
+		Resolve: resolveRoot,
+	},
+	{
 		Name:    "show",
 		Op:      "show",
 		Summary: "Return one task by ID, with its readiness and where its notes live",

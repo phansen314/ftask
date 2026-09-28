@@ -111,6 +111,13 @@ func (f Fault) Stat(p string) (fs.FileInfo, error) {
 	return f.FS.Stat(p)
 }
 
+func (f Fault) Lstat(p string) (fs.FileInfo, error) {
+	if err := f.before(Op{Name: OpLstat, Path: p}); err != nil {
+		return nil, err
+	}
+	return f.FS.Lstat(p)
+}
+
 type faultRoot struct {
 	f Fault
 	r Root

@@ -163,3 +163,33 @@ func readInput(path string, env Env) (*jsonio.Object, *errs.Error) {
 	}
 	return obj, nil
 }
+
+// resolveRoot resolves init's root, which the operation leaves to its caller
+// (cli-spec.md, init): "~" and a leading "~/" expand into the home directory,
+// "~user/" is refused, and a relative path is joined to the working
+// directory. Nothing is cleaned, so a ".." segment reaches the operation,
+// which rejects it. A root that is absent, empty, or not a string is left
+// for the operation to judge.
+func resolveRoot(in *jsonio.Object, env Env) ([]errs.Problem, *errs.Error) {
+	v, _ := in.Get("root")
+	s, ok := v.(string)
+	switch {
+	case !ok || s == "" || strings.HasPrefix(s, "/"):
+		return nil, nil
+	case s == "~" || strings.HasPrefix(s, "~/"):
+		if env.Ops.Home == "" {
+			return nil, errs.Environment("HOME")
+		}
+		s = env.Ops.Home + s[1:]
+	case strings.HasPrefix(s, "~"):
+		return []errs.Problem{{Field: "/root", Reason: "~user/ is not supported: use ~/ or an absolute path"}}, nil
+	default:
+		wd, err := env.Getwd()
+		if err != nil {
+			return nil, errs.FromOS(".", err)
+		}
+		s = strings.TrimSuffix(wd, "/") + "/" + s
+	}
+	in.Set("root", s)
+	return nil, nil
+}
