@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -81,8 +82,8 @@ func TestLstatReportsSymlink(t *testing.T) {
 	}
 }
 
-// An entry swapped for a symlink between the Lstat and the open is caught by
-// comparing the opened file with the one Lstat saw, and examining it again.
+// An entry swapped for a symlink just before the open fails with ELOOP: the
+// open itself refuses it.
 func TestReadFileRejectsSwap(t *testing.T) {
 	r, dir := newRoot(t, func(dir string) {
 		must(t, os.WriteFile(filepath.Join(dir, "1.json"), []byte("a"), 0o644))
@@ -98,9 +99,8 @@ func TestReadFileRejectsSwap(t *testing.T) {
 	wantErrno(t, err, syscall.ELOOP)
 }
 
-// A file renamed away and replaced by a symlink to itself between the Lstat
-// and the open passes the comparison — the open follows the symlink to the
-// inode Lstat saw — and is caught by the Lstat after the open.
+// A file renamed away and replaced by a symlink to itself is refused too, not
+// followed back to the same file.
 func TestReadFileRejectsSwapToSameFile(t *testing.T) {
 	r, dir := newRoot(t, func(dir string) {
 		must(t, os.WriteFile(filepath.Join(dir, "1.json"), []byte("a"), 0o644))
@@ -115,8 +115,8 @@ func TestReadFileRejectsSwapToSameFile(t *testing.T) {
 	wantErrno(t, err, syscall.ELOOP)
 }
 
-// A file replaced by a concurrent write between the Lstat and the open is
-// read in its new version, not reported as a symlink.
+// A file replaced by a concurrent write just before the open is read in its
+// new version, not reported as a symlink.
 func TestReadFileFollowsReplacement(t *testing.T) {
 	r, dir := newRoot(t, func(dir string) {
 		must(t, os.WriteFile(filepath.Join(dir, "1.json"), []byte("old"), 0o644))
@@ -136,33 +136,55 @@ func TestReadFileFollowsReplacement(t *testing.T) {
 	if string(got) != "new" {
 		t.Errorf("got %q, want the new version", got)
 	}
-	if calls != 2 {
-		t.Errorf("opened %d times, want 2", calls)
+	if calls != 1 {
+		t.Errorf("opened %d times, want 1", calls)
 	}
 }
 
-// An entry replaced on every attempt fails with EAGAIN.
-func TestReadFileKeepsChanging(t *testing.T) {
+// A file replaced over and over by concurrent renames, as ftask.json is
+// under a burst of writes, is always read whole, in one version or another.
+func TestReadFileUnderConcurrentReplacement(t *testing.T) {
+	const writers = 4
 	r, dir := newRoot(t, func(dir string) {
-		must(t, os.WriteFile(filepath.Join(dir, "1.json"), []byte("0"), 0o644))
+		must(t, os.WriteFile(filepath.Join(dir, "1.json"), []byte("version"), 0o644))
 	})
-	calls := 0
-	beforeOpen = func(name string) {
-		calls++
-		tmp := filepath.Join(dir, "tmp")
-		must(t, os.WriteFile(tmp, []byte{byte('0' + calls)}, 0o644))
-		must(t, os.Rename(tmp, filepath.Join(dir, name)))
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for w := range writers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; ; i++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				tmp := filepath.Join(dir, fmt.Sprintf("tmp%d-%d", w, i))
+				if err := os.WriteFile(tmp, []byte("version"), 0o644); err != nil {
+					t.Error(err)
+					return
+				}
+				if err := os.Rename(tmp, filepath.Join(dir, "1.json")); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		}()
 	}
-	t.Cleanup(func() { beforeOpen = nil })
-	_, err := r.ReadFile("1.json")
-	wantErrno(t, err, syscall.EAGAIN)
-	if calls != openAttempts {
-		t.Errorf("opened %d times, want %d", calls, openAttempts)
+	for range 5000 {
+		got, err := r.ReadFile("1.json")
+		if err != nil || string(got) != "version" {
+			t.Errorf("read %q, %v", got, err)
+			break
+		}
 	}
+	close(stop)
+	wg.Wait()
 }
 
-// A folder swapped for a symlink between the Lstat and the open is caught as
-// a file is.
+// A folder swapped for a symlink just before the open is refused as a file
+// is.
 func TestReadDirRejectsSwap(t *testing.T) {
 	r, dir := newRoot(t, func(dir string) {
 		must(t, os.Mkdir(filepath.Join(dir, "sub"), 0o755))
@@ -199,8 +221,7 @@ func TestReadDirRejectsSwapToSameDir(t *testing.T) {
 	wantErrno(t, err, syscall.ELOOP)
 }
 
-// A folder replaced between the Lstat and the open is listed in its new
-// version.
+// A folder replaced just before the open is listed in its new version.
 func TestReadDirFollowsReplacement(t *testing.T) {
 	r, dir := newRoot(t, func(dir string) {
 		must(t, os.Mkdir(filepath.Join(dir, "sub"), 0o755))
@@ -223,8 +244,8 @@ func TestReadDirFollowsReplacement(t *testing.T) {
 	if len(got) != 1 || got[0].Name() != "y" {
 		t.Errorf("got %v, want [y]", got)
 	}
-	if calls != 2 {
-		t.Errorf("opened %d times, want 2", calls)
+	if calls != 1 {
+		t.Errorf("opened %d times, want 1", calls)
 	}
 }
 

@@ -9,6 +9,8 @@ import (
 	"os"
 	"path"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 // OS is the real filesystem.
@@ -83,79 +85,56 @@ func (r *osRoot) ReadDir(name string) ([]fs.DirEntry, error) {
 	return f.ReadDir(-1)
 }
 
-// beforeOpen, when set by a test, runs between openNoFollow's Lstat and its
-// open, so the test can swap the entry.
+// beforeOpen, when set by a test, runs just before openNoFollow's openat, so
+// the test can swap the entry.
 var beforeOpen func(name string)
 
-// openAttempts bounds openNoFollow's retries when the entry keeps changing
-// between its Lstat and its open.
-const openAttempts = 3
-
 // openNoFollow opens name for reading without following a symlink in its
-// last component. os.Root ignores O_NOFOLLOW: it opens with O_NOFOLLOW
-// itself, and on ELOOP follows the symlink when its target stays inside the
-// root. So the entry is Lstat'ed first — a symlink fails with ELOOP — and
-// Lstat'ed again after the open. The opened file must be the one both saw,
-// and the second Lstat must not see a symlink: a regular file renamed away
-// and replaced by a symlink to it passes the first comparison, since the open
-// follows the symlink to the very inode the first Lstat saw, but the second
-// Lstat sees the symlink and fails with ELOOP. If the files differ, the entry
-// changed in between and is examined again: a file replaced by a concurrent
-// write is read in its new version. An entry that changes on every attempt
-// fails with EAGAIN.
-//
-// os.SameFile compares device and inode only, so an inode reused within the
-// window — a file removed, another created with its number, and a symlink to
-// it swapped in and out again — passes. That is an outside change, outside
-// the contract, and os.Root still keeps the open inside the root.
+// last component: a symlink there fails with ELOOP. os.Root ignores
+// O_NOFOLLOW — it adds the flag itself and, on ELOOP, follows the symlink
+// when its target stays inside the root — so name's folder is opened through
+// the root and name itself with openat(2) and O_NOFOLLOW, from
+// golang.org/x/sys/unix, which has openat on Linux and macOS alike. The one
+// call decides: there is no window between a check and the open, so a file
+// replaced by a concurrent write's rename is simply read in one version or
+// the other.
 //
 // O_NONBLOCK keeps a FIFO from blocking the open. The returned FileInfo is
 // the opened file's.
 func (r *osRoot) openNoFollow(name string) (*os.File, fs.FileInfo, error) {
-	for range openAttempts {
-		before, err := r.lstatNoFollow(name)
-		if err != nil {
-			return nil, nil, err
-		}
-		if beforeOpen != nil {
-			beforeOpen(name)
-		}
-		f, err := r.r.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
-		if err != nil {
-			return nil, nil, err
-		}
-		opened, err := f.Stat()
-		if err != nil {
-			f.Close()
-			return nil, nil, err
-		}
-		if !os.SameFile(before, opened) {
-			f.Close()
-			continue
-		}
-		after, err := r.lstatNoFollow(name)
-		if err != nil {
-			f.Close()
-			return nil, nil, err
-		}
-		if os.SameFile(after, opened) {
-			return f, opened, nil
-		}
-		f.Close()
-	}
-	return nil, nil, &os.PathError{Op: "open", Path: name, Err: syscall.EAGAIN}
-}
-
-// lstatNoFollow Lstats name, failing with ELOOP on a symlink.
-func (r *osRoot) lstatNoFollow(name string) (fs.FileInfo, error) {
-	fi, err := r.r.Lstat(name)
+	d, err := r.r.Open(path.Dir(name))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if fi.Mode()&fs.ModeSymlink != 0 {
-		return nil, &os.PathError{Op: "open", Path: name, Err: syscall.ELOOP}
+	defer d.Close()
+	c, err := d.SyscallConn()
+	if err != nil {
+		return nil, nil, err
 	}
-	return fi, nil
+	if beforeOpen != nil {
+		beforeOpen(name)
+	}
+	fd, oerr := -1, error(nil)
+	if err := c.Control(func(dfd uintptr) {
+		for {
+			fd, oerr = unix.Openat(int(dfd), path.Base(name), unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+			if oerr != unix.EINTR {
+				return
+			}
+		}
+	}); err != nil {
+		return nil, nil, err
+	}
+	if oerr != nil {
+		return nil, nil, &os.PathError{Op: "openat", Path: name, Err: oerr}
+	}
+	f := os.NewFile(uintptr(fd), name)
+	fi, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, nil, err
+	}
+	return f, fi, nil
 }
 
 // TempPrefix begins the name of every temp file ftask creates.
