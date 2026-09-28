@@ -19,8 +19,10 @@ var integer = regexp.MustCompile(`^-?(0|[1-9][0-9]*)$`)
 // buildInput places each given argument and option at its field. Values are
 // judged by the adapters; the problems returned are the CLI's own —
 // non-UTF-8 values and JSON option values that cannot be read — and a field
-// with one is left out of the input (implementation-spec.md, Conversion).
-func buildInput(c *Command, cmd *cobra.Command, args []string) (*jsonio.Object, []errs.Problem) {
+// with one is left out of the input (implementation-spec.md, Conversion). A
+// TextFile option's file that can't be read is the error that stops the
+// command.
+func buildInput(c *Command, cmd *cobra.Command, args []string, env Env) (*jsonio.Object, []errs.Problem, *errs.Error) {
 	in := &jsonio.Object{}
 	var problems []errs.Problem
 	bad := func(field, reason string) { problems = append(problems, errs.Problem{Field: field, Reason: reason}) }
@@ -45,6 +47,18 @@ func buildInput(c *Command, cmd *cobra.Command, args []string) (*jsonio.Object, 
 			continue
 		case IDList, TagList, Repeated:
 			raw, _ = cmd.Flags().GetStringArray(o.Name)
+		case TextFile:
+			name, _ := cmd.Flags().GetString(o.Name)
+			data, e := readText(name, env)
+			switch {
+			case e != nil:
+				return nil, nil, e
+			case !utf8.Valid(data):
+				bad(o.Field, "must be UTF-8")
+			default:
+				setAt(in, o.Field, string(data))
+			}
+			continue
 		default:
 			s, _ := cmd.Flags().GetString(o.Name)
 			raw = []string{s}
@@ -87,7 +101,7 @@ func buildInput(c *Command, cmd *cobra.Command, args []string) (*jsonio.Object, 
 			setAt(in, o.Field, scalar(o.Type, raw[0]))
 		}
 	}
-	return in, problems
+	return in, problems, nil
 }
 
 func itemType(t Type) Type {
@@ -140,15 +154,9 @@ func setAt(obj *jsonio.Object, ptr string, v any) {
 // the input object, or the error that stops the command — io if it cannot
 // be read, invalid-input if it cannot be read as one JSON object.
 func readInput(path string, env Env) (*jsonio.Object, *errs.Error) {
-	var data []byte
-	var err error
-	if path == "-" {
-		data, err = io.ReadAll(env.Stdin)
-	} else {
-		data, err = env.Ops.FS.ReadFile(path)
-	}
-	if err != nil {
-		return nil, errs.FromOS(path, err)
+	data, e := readText(path, env)
+	if e != nil {
+		return nil, e
 	}
 	obj, repeated, err := jsonio.ParseObject(data)
 	if err != nil {
@@ -162,6 +170,21 @@ func readInput(path string, env Env) (*jsonio.Object, *errs.Error) {
 		return nil, errs.InvalidInput(ps)
 	}
 	return obj, nil
+}
+
+// readText reads the file at path, or stdin for "-": io if it can't be read.
+func readText(path string, env Env) ([]byte, *errs.Error) {
+	var data []byte
+	var err error
+	if path == "-" {
+		data, err = io.ReadAll(env.Stdin)
+	} else {
+		data, err = env.Ops.FS.ReadFile(path)
+	}
+	if err != nil {
+		return nil, errs.FromOS(path, err)
+	}
+	return data, nil
 }
 
 // resolveRoot resolves init's root, which the operation leaves to its caller

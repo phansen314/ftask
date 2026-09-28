@@ -272,6 +272,40 @@ func TestInit(t *testing.T) {
 	}
 }
 
+// create writes tasks that show then reads, with notes piped in on stdin.
+func TestCreate(t *testing.T) {
+	first := ftask(t, "init", "~/tasks")
+	home := envHome(first)
+	same := func(stdin string, args ...string) *exec.Cmd {
+		cmd := exec.Command(binary, args...)
+		cmd.Env = first.Env
+		cmd.Stdin = strings.NewReader(stdin)
+		return cmd
+	}
+	for _, step := range []struct {
+		cmd  *exec.Cmd
+		code int
+		want string
+	}{
+		{first, 0, `"action":"created"`},
+		{same("", "create", "Deploy"), 0, `"id":1,"title":"Deploy"`},
+		{same("call first\n", "create", "Fix login bug", "--blocked-by", "1", "--notes-file", "-"), 0, `"id":2,`},
+		{same("", "show", "2"), 0, `"blocked_by":[1],"tags":[],"extra":{},"folder":"/","notes_path":"` + home + `/tasks/2.md","readiness":"blocked","blocking":[1]`},
+		{same("", "create", "x", "--folder", "/nope", "--blocked-by", "9"), 1, `"details":{"folders":["/nope"],"ids":[9],"paths":[]}`},
+		{same("", "create", "x", "--notes", "a", "--notes-file", "-"), 2, `"kind":"usage"`},
+		{same("", "info"), 0, `"last_id":2`},
+	} {
+		r := run(t, step.cmd)
+		envelope(t, r)
+		if r.code != step.code || !strings.Contains(r.stdout, step.want) {
+			t.Fatalf("%q: exit %d, want %d and %s: %s", step.cmd.Args[1:], r.code, step.code, step.want, r.stdout)
+		}
+	}
+	if b, err := os.ReadFile(filepath.Join(home, "tasks", "2.md")); err != nil || string(b) != "call first\n" {
+		t.Errorf("2.md: %q %v", b, err)
+	}
+}
+
 // A relative root is resolved against the working directory as the shell
 // reports it: through a symlink, not with it resolved.
 func TestInitRelative(t *testing.T) {

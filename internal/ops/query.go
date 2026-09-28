@@ -1,6 +1,8 @@
 package ops
 
 import (
+	"slices"
+
 	"github.com/phansen314/ftask/internal/errs"
 	"github.com/phansen314/ftask/internal/graph"
 	"github.com/phansen314/ftask/internal/model"
@@ -106,4 +108,60 @@ func missingBlocker(tx *store.Tx, ref *store.Loaded, id model.ID) graph.BlockerS
 		tx.Warn(errs.DanglingReference(tx.Path(ref.Loc.Rel()), int64(ref.Loc.ID), int64(id)))
 	}
 	return graph.BlockerMissing
+}
+
+// lookupIDs finds each of ids for an operation that requires them to exist
+// (implementation-spec.md, Queries: check existence): io if a folder could
+// not be listed, then each ID's copies loaded, a copy that vanished since the
+// walk treated as never found. It returns the usable-or-not copies of each
+// ID found, and the IDs with none, ascending. Whether the copies are
+// usable is requireIDs', which runs after not-found is reported.
+func lookupIDs(tx *store.Tx, ids []model.ID) (map[model.ID][]*store.Loaded, []int64, *errs.Error) {
+	if e := tx.RequireWholeTree(tx.Index()); e != nil {
+		return nil, nil, e
+	}
+	found := map[model.ID][]*store.Loaded{}
+	var missing []int64
+	for _, id := range ids {
+		locs, e := tx.Copies(id)
+		if e != nil {
+			return nil, nil, e
+		}
+		for _, l := range locs {
+			if ld := tx.Load(l); ld.State != store.Vanished {
+				found[id] = append(found[id], ld)
+			}
+		}
+		if len(found[id]) == 0 {
+			missing = append(missing, int64(id))
+		}
+	}
+	slices.Sort(missing)
+	return found, missing, nil
+}
+
+// requireIDs checks every copy lookupIDs found, all of them needed files:
+// the first unusable one in tree order is the error. Then each ID with
+// several copies is a duplicate-id warning.
+func requireIDs(tx *store.Tx, found map[model.ID][]*store.Loaded) *errs.Error {
+	var all []*store.Loaded
+	for _, copies := range found {
+		all = append(all, copies...)
+	}
+	slices.SortFunc(all, func(a, b *store.Loaded) int { return store.CompareLocations(a.Loc, b.Loc) })
+	for _, ld := range all {
+		if e := tx.Needed(ld); e != nil {
+			return e
+		}
+	}
+	for id, copies := range found {
+		if len(copies) > 1 {
+			locs := make([]store.Location, len(copies))
+			for i, ld := range copies {
+				locs[i] = ld.Loc
+			}
+			duplicateID(tx, id, locs)
+		}
+	}
+	return nil
 }

@@ -29,6 +29,26 @@ var commands = []Command{
 		Resolve: resolveRoot,
 	},
 	{
+		Name:    "create",
+		Op:      "create",
+		Summary: "Create a new, open task",
+		Args:    []Arg{{Name: "title", Field: "/title", Type: String}},
+		Options: []Option{
+			{Name: "folder", Field: "/folder", Type: String, Help: "folder to create the task in, as an exact `path` (default /)"},
+			{Name: "priority", Field: "/priority", Type: NullableInt, Help: "priority, an `int` or null (default null)"},
+			{Name: "tags", Field: "/tags", Type: TagList, Help: "comma-separated `tags`"},
+			{Name: "blocked-by", Field: "/blocked_by", Type: IDList, Help: "comma-separated `ids` of the tasks that block it"},
+			{Name: "extra", Field: "/extra", Type: JSON, Help: "extra fields, a JSON `object`"},
+			{Name: "notes", Field: "/notes", Type: String, Help: "initial notes `text`"},
+			{Name: "notes-file", Field: "/notes", Type: TextFile, Help: "read the initial notes from `file` (- for stdin)"},
+		},
+		Exclusive: [][]string{{"notes", "notes-file"}},
+		Example: `  ftask create 'Book flights' --folder /proj/travel --tags travel,urgent --priority 2
+  ftask create 'Deploy' --blocked-by 41,42 | jq .result.id
+  gh issue view 12 --json body -q .body | ftask create 'Fix login bug' --notes-file -
+  ftask create 'Wait on quote' --extra '{"status":"waiting"}'`,
+	},
+	{
 		Name:    "show",
 		Op:      "show",
 		Summary: "Return one task by ID, with its readiness and where its notes live",

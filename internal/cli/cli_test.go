@@ -457,3 +457,77 @@ func TestInitInput(t *testing.T) {
 		}
 	}
 }
+
+// create's input, including --notes-file (cli-spec.md, create, Input).
+func TestCreateInput(t *testing.T) {
+	dir := t.TempDir()
+	notes := filepath.Join(dir, "notes.md")
+	bad := filepath.Join(dir, "bad.md")
+	if err := os.WriteFile(notes, []byte("line one\nline two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bad, []byte("x\xff"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	saved := runOp
+	t.Cleanup(func() { runOp = saved })
+	var got string
+	var fields []string
+	runOp = func(_ string, in *jsonio.Object, ps []errs.Problem, _ ops.Env) ops.Envelope {
+		b, _ := json.Marshal(in)
+		got, fields = string(b), nil
+		for _, p := range ps {
+			fields = append(fields, p.Field)
+		}
+		return ops.Envelope{OK: true, Result: struct{}{}, Warnings: []errs.Warning{}}
+	}
+	for _, tc := range []struct {
+		name   string
+		args   []string
+		stdin  string
+		want   string
+		fields []string
+	}{
+		{"every option", []string{"create", "Book flights", "--folder", "/proj/travel", "--tags", "travel,urgent", "--priority", "2",
+			"--blocked-by", "41,42", "--extra", `{"status":"waiting"}`, "--notes", "n"},
+			"", `{"title":"Book flights","folder":"/proj/travel","priority":2,"tags":["travel","urgent"],"blocked_by":[41,42],"extra":{"status":"waiting"},"notes":"n"}`, nil},
+		{"notes file, exactly as it is", []string{"create", "t", "--notes-file", notes}, "", `{"title":"t","notes":"line one\nline two\n"}`, nil},
+		{"notes from stdin", []string{"create", "t", "--notes-file", "-"}, "from stdin\n", `{"title":"t","notes":"from stdin\n"}`, nil},
+		{"empty stdin", []string{"create", "t", "--notes-file", "-"}, "", `{"title":"t","notes":""}`, nil},
+		{"notes file not UTF-8", []string{"create", "t", "--notes-file", bad}, "", `{"title":"t"}`, []string{"/notes"}},
+		{"input from stdin", []string{"create", "-i", "-"}, `{"title": "t", "notes": "n"}`, `{"title":"t","notes":"n"}`, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, fields = "", nil
+			if r := run(t, commands, tc.stdin, tc.args...); r.code != ExitOK || got != tc.want || !slices.Equal(fields, tc.fields) {
+				t.Errorf("exit %d, input %s %q\nwant %s %q", r.code, got, fields, tc.want, tc.fields)
+			}
+		})
+	}
+
+	// A notes file that can't be read stops the command with io.
+	for _, tc := range []struct{ name, path, code string }{
+		{"missing", filepath.Join(dir, "nope"), "ENOENT"},
+		{"a directory", dir, "EISDIR"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got = ""
+			r := run(t, commands, "", "create", "t", "--notes-file", tc.path)
+			e, _ := r.envelope["error"].(map[string]any)
+			d, _ := e["details"].(map[string]any)
+			if r.code != ExitError || r.kind() != "io" || d["code"] != tc.code || d["path"] != tc.path || got != "" {
+				t.Errorf("exit %d: %s (operation ran: %v)", r.code, r.raw, got != "")
+			}
+		})
+	}
+
+	// Usage errors: both notes options, or --notes-file with --input.
+	for _, args := range [][]string{
+		{"create", "t", "--notes", "a", "--notes-file", notes},
+		{"create", "-i", "-", "--notes-file", "-"},
+	} {
+		if r := run(t, commands, "{}", args...); r.code != ExitUsage {
+			t.Errorf("%q: exit %d: %s", args, r.code, r.raw)
+		}
+	}
+}

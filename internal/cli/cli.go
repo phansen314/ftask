@@ -147,6 +147,9 @@ func newCommand(c *Command, env Env, result **ops.Envelope) *cobra.Command {
 		}
 	}
 	fs.StringP("input", "i", "", "read the whole operation input from `file` (- for stdin)")
+	for _, g := range c.Exclusive {
+		cmd.MarkFlagsMutuallyExclusive(g...)
+	}
 	return cmd
 }
 
@@ -178,7 +181,10 @@ func runCommand(c *Command, cmd *cobra.Command, args []string, env Env) ops.Enve
 			return ops.Failed(e)
 		}
 	} else {
-		in, problems = buildInput(c, cmd, args)
+		var e *errs.Error
+		if in, problems, e = buildInput(c, cmd, args, env); e != nil {
+			return ops.Failed(e)
+		}
 	}
 	if c.Resolve != nil {
 		ps, e := c.Resolve(in, env)

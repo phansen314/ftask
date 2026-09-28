@@ -35,6 +35,7 @@ var runners = map[string]runner{
 	"info":    typed(runInfo),
 	"show":    typed(runShow),
 	"init":    typed(runInit),
+	"create":  typed(runCreate),
 }
 
 // typed adapts an operation's function over its own input type to a runner.

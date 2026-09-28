@@ -27,6 +27,10 @@ const (
 	Repeated
 	// JSON is exactly one JSON value, read like operation input.
 	JSON
+	// TextFile names a file, "-" for stdin, whose contents, exactly as they
+	// are, become a string. A file that can't be read stops the command
+	// with io; contents that are not UTF-8 are a problem at the field.
+	TextFile
 )
 
 // Command is one CLI command: the operation it runs and how its arguments
@@ -42,6 +46,9 @@ type Command struct {
 	// what the operation leaves to its caller (init's root). Its problems
 	// are reported with the adapter's; its error stops the command.
 	Resolve func(in *jsonio.Object, env Env) ([]errs.Problem, *errs.Error)
+	// Exclusive lists groups of options, by name, of which at most one may
+	// be given.
+	Exclusive [][]string
 }
 
 // Arg is a positional argument. Every argument is required.
