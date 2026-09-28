@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+# Smoke test: runs the ftask binary from a shell, as a user would, in a
+# throwaway home, so it never touches your real config or tasks.
+#
+#   scripts/smoke.sh                 # builds ftask from this repo
+#   FTASK=~/go/bin/ftask scripts/smoke.sh   # tests that binary instead
+#
+# Needs jq. Exits 0 when every check passes, 1 otherwise.
+set -uo pipefail
+
+repo=$(cd "$(dirname "$0")/.." && pwd)
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+# Build before HOME changes: go keeps its caches under the real home.
+if [[ -z ${FTASK:-} ]]; then
+	FTASK=$tmp/ftask
+	(cd "$repo" && go build -o "$FTASK" ./cmd/ftask) || { echo "build failed"; exit 1; }
+fi
+command -v jq >/dev/null || { echo "smoke.sh needs jq"; exit 1; }
+
+export HOME=$tmp/home XDG_CONFIG_HOME=$tmp/home/.config
+mkdir -p "$HOME"
+cd "$HOME"
+
+pass=0 fail=0
+out=""
+
+# check DESC WANT_EXIT JQ_EXPR -- ARGS...: runs ftask with ARGS (stdin passes
+# through), then checks the exit code, that the output is exactly one line,
+# and that JQ_EXPR is true of it. The output is left in $out.
+check() {
+	local desc=$1 want=$2 expr=$3
+	shift 4
+	local code=0
+	out=$("$FTASK" "$@") || code=$?
+	local lines
+	lines=$(printf '%s\n' "$out" | wc -l)
+	if [[ $code -ne $want ]]; then
+		why="exit $code, want $want"
+	elif [[ $lines -ne 1 ]]; then
+		why="$lines lines of output, want 1"
+	elif ! jq -e "$expr" >/dev/null 2>&1 <<<"$out"; then
+		why="not true: $expr"
+	else
+		pass=$((pass + 1))
+		printf 'ok    %s\n' "$desc"
+		return
+	fi
+	fail=$((fail + 1))
+	printf 'FAIL  %s\n      ftask %s\n      %s\n      %s\n' "$desc" "$*" "$why" "$out"
+}
+
+# expect DESC CONDITION: a check of something besides ftask's output.
+expect() {
+	if eval "$2"; then
+		pass=$((pass + 1))
+		printf 'ok    %s\n' "$1"
+	else
+		fail=$((fail + 1))
+		printf 'FAIL  %s\n      not true: %s\n' "$1" "$2"
+	fi
+}
+
+echo "== before init"
+check "version" 0 '.ok and (.result.version | type == "string")' -- version
+check "info: nothing set up" 0 '.result.usable == false' -- info
+check "show: not initialized" 1 '.error.kind == "not-initialized" and .error.details.missing == "config"' -- show 1
+
+echo "== init"
+check "init ~/tasks" 0 '.result == {root: "'"$HOME"'/tasks", action: "created", last_id: 0}' -- init '~/tasks'
+check "info: usable" 0 '.result.usable' -- info
+check "second init refused" 1 '.error.details.rule == "config-exists"' -- init '~/other'
+
+echo "== folders"
+check "missing parent without -p" 1 '.error.kind == "not-found" and .error.details.folders == ["/proj"]' -- create-folder /proj/travel
+check "-p creates the chain" 0 '.result.created == ["/proj", "/proj/travel"]' -- create-folder -p /proj/travel
+check "rerun creates nothing" 0 '.result.created == []' -- create-folder -p /proj/travel
+check "top-level folder" 0 '.result.created == ["/home"]' -- create-folder /home
+check "deeper chain" 0 '.result.created == ["/proj/work", "/proj/work/q3"]' -- create-folder -p /proj/work/q3
+check "root always exists" 0 '.result.created == []' -- create-folder /
+expect "folders on disk" '[[ -d $HOME/tasks/proj/travel && -d $HOME/tasks/proj/work/q3 && -d $HOME/tasks/home ]]'
+
+echo "== tasks"
+check "create 1: priority and tags" 0 '.result | .id == 1 and .priority == 1 and .tags == ["travel", "urgent"] and .folder == "/proj/travel"' \
+	-- create 'Renew passport' --folder /proj/travel --priority 1 --tags urgent,travel
+check "create 2: blocked by 1" 0 '.result | .id == 2 and .blocked_by == [1]' \
+	-- create 'Book flights' --folder /proj/travel --blocked-by 1
+check "create 3: notes from stdin" 0 '.result | .id == 3 and .blocked_by == [2]' \
+	-- create 'Book hotel' --folder /proj/travel --blocked-by 2 --notes-file - <<<'Near the station'
+notes3=$(jq -r .result.notes_path <<<"$out")
+check "create 4: two blockers and extra" 0 '.result | .id == 4 and .blocked_by == [2, 3] and .extra == {status: "waiting"}' \
+	-- create 'Pack bags' --folder /home --blocked-by 3,2 --extra '{"status":"waiting"}'
+check "create 5: title trimmed" 0 '.result | .id == 5 and .title == "Q3 report"' \
+	-- create '  Q3 report ' --folder /proj/work/q3
+check "create 6: whole input as JSON" 0 '.result | .id == 6 and .folder == "/proj/work" and .notes_path == "'"$HOME"'/tasks/proj/work/6.md"' \
+	-- create -i - <<<'{"title": "Review Q3", "folder": "/proj/work", "blocked_by": [5], "notes": "slides too"}'
+check "create 7: in the root" 0 '.result | .id == 7 and .folder == "/" and .priority == null' -- create 'Water plants'
+expect "notes written as given" '[[ $(cat "$notes3") == "Near the station" ]]'
+expect "task file on disk" '[[ -f $HOME/tasks/proj/travel/1.json && -f $HOME/tasks/home/4.json ]]'
+
+echo "== create failures"
+check "missing folder and blockers in one not-found" 1 '.error.details == {folders: ["/nope"], ids: [98, 99], paths: []}' \
+	-- create x --folder /nope --blocked-by 99,98
+check "blank title" 1 '.error.kind == "invalid-input" and .error.details.problems[0].field == "/title"' -- create '   '
+check "--notes with --notes-file" 2 '.error.kind == "usage"' -- create x --notes a --notes-file -
+check "failed creates used no IDs" 0 '.result.tree.last_id == 7' -- info
+
+echo "== show"
+check "1: ready" 0 '.result.tasks[0] | .readiness == "ready" and .blocking == []' -- show 1
+check "3: blocked by 2" 0 '.result.tasks[0] | .readiness == "blocked" and .blocking == [2]' -- show 3
+check "4: blocked by 2 and 3" 0 '.result.tasks[0] | .readiness == "blocked" and .blocking == [2, 3]' -- show 4
+check "6: blocked by 5, across folders" 0 '.result.tasks[0] | .readiness == "blocked" and .blocking == [5]' -- show 6
+check "not found" 1 '.error.kind == "not-found" and .error.details.ids == [99]' -- show 99
+check "not an ID" 1 '.error.kind == "invalid-input"' -- show abc
+
+echo "== complete and reopen"
+check "complete 1" 0 '.result | .changed and .completed_at != null' -- complete 1
+done1=$(jq -r .result.completed_at <<<"$out")
+check "2 now ready" 0 '.result.tasks[0].readiness == "ready"' -- show 2
+check "complete 1 again: nothing changes" 0 '.result | (.changed | not) and .completed_at == "'"$done1"'"' -- complete 1
+check "1 shows complete" 0 '.result.tasks[0].readiness == "complete"' -- show 1
+check "complete 2" 0 '.result.changed' -- complete 2
+check "4 still blocked by 3 only" 0 '.result.tasks[0].blocking == [3]' -- show 4
+check "complete 3" 0 '.result.changed' -- complete 3
+check "4 now ready" 0 '.result.tasks[0] | .readiness == "ready" and .blocking == []' -- show 4
+check "complete a task with open blockers" 0 '.result.changed' -- complete 6
+check "reopen 2" 0 '.result | .changed and .completed_at == null' -- reopen 2
+check "3 still complete" 0 '.result.tasks[0].readiness == "complete"' -- show 3
+check "4 blocked again by 2" 0 '.result.tasks[0] | .readiness == "blocked" and .blocking == [2]' -- show 4
+check "reopen 2 again: nothing changes" 0 '.result.changed == false' -- reopen 2
+check "complete: not found" 1 '.error.details.ids == [99]' -- complete 99
+check "reopen: not found" 1 '.error.details.ids == [99]' -- reopen 99
+
+echo "== end state"
+check "last_id counts every task" 0 '.result.tree.last_id == 7' -- info
+
+echo
+echo "$pass passed, $fail failed"
+[[ $fail -eq 0 ]]
