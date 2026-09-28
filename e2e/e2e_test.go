@@ -334,8 +334,9 @@ func TestCreateFolder(t *testing.T) {
 	}
 }
 
-// complete makes a dependent ready; completing again changes nothing.
-func TestComplete(t *testing.T) {
+// complete makes a dependent ready, and reopen blocks it again; doing
+// either twice changes nothing.
+func TestCompleteReopen(t *testing.T) {
 	first := ftask(t, "init", "~/tasks")
 	same := func(args ...string) *exec.Cmd {
 		cmd := exec.Command(binary, args...)
@@ -355,6 +356,9 @@ func TestComplete(t *testing.T) {
 		{same("show", "2"), 0, `"readiness":"ready","blocking":[]`},
 		{same("complete", "1"), 0, `"changed":false`},
 		{same("complete", "9"), 1, `"ids":[9]`},
+		{same("reopen", "1"), 0, `"completed_at":null,`},
+		{same("show", "2"), 0, `"readiness":"blocked","blocking":[1]`},
+		{same("reopen", "1"), 0, `"changed":false`},
 	} {
 		r := run(t, step.cmd)
 		envelope(t, r)

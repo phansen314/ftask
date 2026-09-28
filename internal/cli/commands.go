@@ -77,4 +77,11 @@ var commands = []Command{
 		Example: `  ftask complete 42 | jq .result.changed
   for id in 41 42; do ftask complete "$id"; done | jq -c '{id: .result.id, changed: .result.changed}'`,
 	},
+	{
+		Name:    "reopen",
+		Op:      "reopen",
+		Summary: "Reopen a complete task; reopening an open task changes nothing",
+		Args:    []Arg{{Name: "id", Field: "/id", Type: Int}},
+		Example: "  ftask reopen 42 | jq -r .result.completed_at   # null",
+	},
 }

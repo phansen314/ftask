@@ -113,7 +113,7 @@ func TestInfo(t *testing.T) {
 // valid ID gets as far as locating the config (none in testEnv).
 // Commands whose one argument is a task ID.
 func TestIDCommands(t *testing.T) {
-	for _, name := range []string{"show", "complete"} {
+	for _, name := range []string{"show", "complete", "reopen"} {
 		for _, tc := range []struct {
 			args []string
 			code int

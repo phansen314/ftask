@@ -107,6 +107,20 @@ func TestCompletedAtCases(t *testing.T) {
 		{"missing blockers don't stop it", "complete", func(f *fixture) { f.task("", 7, false, 99) },
 			"/ 7 2026-09-28T12:00:00Z changed=true", ""},
 
+		// reopen.
+		{"reopen a complete task", "reopen", func(f *fixture) { f.write("tasks/7.json", richTask(true)) },
+			"/ 7 null changed=true", richTask(false)},
+		{"reopen an open task", "reopen", func(f *fixture) { f.write("tasks/7.json", richTask(false)) },
+			"/ 7 null changed=false", richTask(false)},
+		{"reopen: duplicate", "reopen", func(f *fixture) { f.write("tasks/7.json", richTask(true)); f.task("p", 7, true) },
+			`conflict {"rule":"duplicate-id","ids":[7]}`, richTask(true)},
+		{"reopen: not found", "reopen", func(f *fixture) {}, `not-found {"folders":[],"ids":[7],"paths":[]}`, ""},
+		{"reopen: replace fails", "reopen", func(f *fixture) {
+			f.write("tasks/7.json", richTask(true))
+			f.failAt(fsys.OpRename, "7.json", syscall.ENOSPC)
+		},
+			`io {"path":"~/tasks/7.json","code":"ENOSPC"}`, richTask(true)},
+
 		// Finding the one task, in precedence order.
 		{"not found", "complete", func(f *fixture) { f.task("", 8, false) },
 			`not-found {"folders":[],"ids":[7],"paths":[]}`, ""},
@@ -161,20 +175,35 @@ func TestCompletedAtCases(t *testing.T) {
 // A task already as asked is not written at all: its file keeps its
 // modification time.
 func TestCompletedAtUnchangedNotWritten(t *testing.T) {
+	for op, completed := range map[string]bool{"complete": true, "reopen": false} {
+		f := newFixture(t)
+		f.write("tasks/7.json", richTask(completed))
+		p := filepath.Join(f.root, "7.json")
+		old := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
+		f.changed(op, 7)
+		fi, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !fi.ModTime().Equal(old) {
+			t.Errorf("%s: task file rewritten: modified %v", op, fi.ModTime())
+		}
+	}
+}
+
+// complete then reopen gives back the file as it was, byte for byte.
+func TestCompleteReopenRoundTrip(t *testing.T) {
 	f := newFixture(t)
-	f.write("tasks/7.json", richTask(true))
-	p := filepath.Join(f.root, "7.json")
-	old := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
-	if err := os.Chtimes(p, old, old); err != nil {
-		t.Fatal(err)
-	}
+	f.write("tasks/7.json", richTask(false))
 	f.changed("complete", 7)
-	fi, err := os.Stat(p)
-	if err != nil {
-		t.Fatal(err)
+	if got := f.changed("reopen", 7); got != "/ 7 null changed=true" {
+		t.Errorf("reopen: %s", got)
 	}
-	if !fi.ModTime().Equal(old) {
-		t.Errorf("task file rewritten: modified %v", fi.ModTime())
+	if got := f.read("tasks/7.json"); got != richTask(false) {
+		t.Errorf("task file:\n%s", got)
 	}
 }
 
