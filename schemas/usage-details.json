@@ -11,7 +11,7 @@
         "type": "object",
         "required": ["reason"],
         "properties": {
-          "argument": { "type": "string", "description": "The offending command-line token, e.g. --limt; for an option missing its value, the option; for two conflicting tokens, the later one. Absent when the problem is something missing: an argument, a required option, or the command." },
+          "argument": { "type": "string", "description": "The offending command-line token, e.g. --limt, when the parser names one. Absent when the problem is something missing (an argument, a required option, the command) or the parser names no single token." },
           "reason": { "type": "string", "description": "Human-readable." }
         },
         "additionalProperties": false

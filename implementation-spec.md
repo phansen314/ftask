@@ -18,7 +18,7 @@ How the design spec's [write lock](design-spec.md#write-lock) and [Guarantees](d
 ## Toolchain
 
 - **Go**, standard library first. The `version` operation's `go`, `commit`, `commit_time`, and `uncommitted_changes` come from the build information Go embeds (`runtime/debug.ReadBuildInfo`: the Go version and the `vcs.revision`, `vcs.time`, and `vcs.modified` settings); `version` itself is set at release build time. A **release build** must come from a git checkout, so this information is present; the release build fails otherwise. A **development build** without it reports `commit` `"unknown"` and `commit_time` `"1970-01-01T00:00:00Z"`, so the output still matches `version-output`.
-- **No runtime dependencies** beyond the standard library. A JSON Schema library is a **test-only** dependency (see [Validation](#validation)).
+- **No runtime dependencies** beyond the standard library, except cobra (and pflag) in the CLI (see [Argument parsing](#argument-parsing)). A JSON Schema library is a **test-only** dependency (see [Validation](#validation)).
 
 ## JSON reading
 
@@ -90,19 +90,18 @@ For files, the same steps implement [File validity](design-spec.md#file-validity
 
 ## Argument parsing
 
-The standard `flag` package, `pflag`, and command frameworks do not implement the [Command line](cli-spec.md#command-line) rules (options and arguments in any order, `--no-` booleans, one spelling each, repeatable-only-when-marked, `--help` precedence, every problem reported). The parser is ftask's own, and small, because each command is described by a table rather than code.
+The command line is parsed by [cobra](https://github.com/spf13/cobra) (and pflag beneath it), which implements the [Command line](cli-spec.md#command-line) rules. ftask is a task manager, not a parsing project: where a rule and cobra disagreed, the rule gave way. What ftask adds is small: turning cobra's errors into envelopes, and building the operation's input from what cobra parsed.
 
 ### Command tables
 
-Each command has one table row per argument and option: its name, any short form, the JSON Pointer of the field it sets (or none, e.g. `--notes-file`, `--help`), its value type (boolean, integer, nullable integer, string, folder path, comma list of IDs, comma list of tags, repeatable string, JSON value, file), whether it is required, and the options it is mutually exclusive with. `--help` text, the usage-error checks, and the input-building all come from the same table.
+Each command is declared by a small table: its name, the operation it runs, and one row per argument and option — name, any short form, the JSON Pointer of the field it sets (or none, e.g. `--notes-file`), its value type (boolean, integer, nullable integer, string, comma list, repeatable string, JSON value), and whether it is required. The cobra command and its flags, and the input-building, are generated from the table. Every flag but a boolean is registered as a string (a comma list or a repeatable string as a string array), so cobra judges only shape and every value reaches the adapters.
 
 ### Phases
 
-1. **`--help`.** Scan for `--help` among the options — using the table, so a `--help` after `--` or consumed as an option's value is not one. If found, print help (the command's, if a known command is present) and exit `0`.
-2. **Command.** The first token, unless it is `--help` or `--version`.
-3. **Shape.** Walk the tokens against the command's table and collect every usage problem: unknown or misspelled options, missing values, values on booleans, repeats not marked repeatable, missing required arguments or options, extra arguments, two options setting one field, `--input` with field options. Problems are kept in the order [Usage errors](cli-spec.md#usage-errors) requires. If there are any, report `usage` (exit `2`) and stop.
-4. **Build the input.** Place each value at its field, converting by type (below), and apply the command's input resolution (`init`'s `root`, `--notes-file`). With `--input`, read the file instead (then apply resolution).
-5. **Validate** through the same adapters as `--input` (see [Validation](#validation)).
+1. **Parse.** cobra parses the command line and prints `--help` itself (plain text, exit `0`). `SilenceErrors` and `SilenceUsage` keep it from printing anything else. Every error it returns — unknown command or flag, missing flag value, wrong argument count — is a `usage` error, reported with its message as the one problem.
+2. **Shape checks cobra lacks.** Before the operation runs: a missing required option, and `--input` together with any argument or option that sets a field, are `usage` errors. The argument count is checked by the command's `Args` function: the table's arguments, or none with `--input`.
+3. **Build the input.** Place each value at its field, converting by type (below), and apply the command's input resolution (`init`'s `root`, `--notes-file`). Only flags actually given are placed; defaults are the operation's. With `--input`, read the file instead (then apply resolution).
+4. **Validate** through the same adapters as `--input` (see [Validation](#validation)).
 
 ### Conversion
 
@@ -111,7 +110,7 @@ The CLI decides shape; values are judged by the adapters. A token that does not 
 - **Integer fields** (and each item of an ID list): a token shaped like a JSON integer (`-?(0|[1-9][0-9]*)`) becomes a number; the adapter checks its range. Anything else becomes a string, which the adapter rejects as the wrong type. `ftask show abc` builds `{"id": "abc"}` and fails at `/id`.
 - **Nullable fields:** the token `null` becomes `null`.
 - **JSON values** (`--extra`, `--extra-merge`, `--extra-replace-all`): the CLI checks the token with `json.Valid`. A valid token is parsed (through [JSON reading](#json-reading)) into that value. An invalid one is an `invalid-input` problem at the option's field ("not valid JSON"), raised by the CLI; the field is left out of the input, the adapters still run on the rest, and the CLI's problems are merged into the adapters' list before sorting, so every problem is still reported once.
-- **Comma lists:** split on `,` exactly; `''` is `[]`. Items are not trimmed.
+- **Comma lists:** each occurrence split on `,` exactly, occurrences joined in order; `''` is `[]`. Items are not trimmed.
 - **Strings, folder paths:** as given.
 - **Input resolution** runs while the input is built. Its `invalid-input` problems (`~user/` in `init`'s `root`, non-UTF-8 `--notes-file` contents) are merged like a JSON option's. Its `io` errors (an unreadable `--notes-file` or `--input` file, an undeterminable working directory) and `environment` errors (an undeterminable home directory) stop the command before validation: the input cannot be built.
 
@@ -305,7 +304,7 @@ Module `github.com/phansen314/ftask`. Everything but `main` is under `internal/`
 
 ```text
 cmd/ftask/                 main: SetTraceback, SIGPIPE, run(), os.Exit — nothing else
-internal/cli/              argument parser, command tables, --help, conversion, envelope output, exit codes
+internal/cli/              command tables, cobra commands, conversion, envelope output, exit codes
 internal/ops/              one file per operation: its input adapter and its steps, in precedence order
 internal/model/            domain types: ID, Title, Tag, FolderPath, Priority, Timestamp, Extra (ordered), Task, TaskView
 internal/store/            config, root states, the lock, tree walk and index, task-file cache, file validity, atomic writes
@@ -457,7 +456,7 @@ For each operation, a set of faults, each of which alone triggers one error kind
 
 ### Generated and cross-cutting
 
-- **Fuzzing** (Go's native fuzzer) of the JSON reader and the argument parser: any input yields a defined envelope and never a panic, since a panic is a crash (exit 134).
+- **Fuzzing** (Go's native fuzzer) of the JSON reader and the CLI: any command line yields a defined envelope and never a panic, since a panic is a crash (exit 134).
 - **Determinism.** Every read runs twice over the same tree; the bytes must match, warnings and `problems` order included.
 - **The CLI spec's examples.** Every `sh` block in the [CLI spec](cli-spec.md) runs against a fixture tree in CI and must exit as its context implies, producing JSON that `jq` accepts. Examples needing outside tools (`gh`, `$EDITOR`) are marked and skipped.
 - **Race detector.** Every in-process test runs under `go test -race`.

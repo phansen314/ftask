@@ -40,49 +40,46 @@ ftask create -i <(jq -n '{title: "x"}')
 
 ### Command line
 
+The command line is parsed in the conventional GNU style of Go's [cobra](https://github.com/spf13/cobra) and [pflag](https://github.com/spf13/pflag) libraries. The rules below are what ftask relies on; anything they leave open is the libraries' behavior.
+
 - **Command names are operation names.** A command that runs one operation has that operation's name (`create-folder`, `show`, `complete`). A command that composes several operations gets a name of its own.
 - **Option names are field names.** An option that sets an input field is named after that field, in kebab-case: `blocked_by` is `--blocked-by`, `replace_config` is `--replace-config`. A nested field is named by its path: `/tags/add` is `--tags-add`, `/extra/replace_all` is `--extra-replace-all`. Options that set no field under their own name (e.g. `--notes-file`) are the exceptions, and each command lists them.
 - **Arguments are for the one required subject.** A command's single required subject — the task it acts on, the folder it creates, the title it needs — is a positional argument. Everything optional is an option. There are no optional arguments, so a bare token always has one meaning, and a field keeps one spelling across commands (e.g. `folder` is `--folder` everywhere except [`create-folder`](#create-folder), where it is the subject).
-- **Booleans** get two options: `--<field>` sets `true`, `--no-<field>` sets `false` (e.g. `--recursive`, `--no-recursive`). Giving both sets one field twice, a usage error.
+- **Booleans.** `--<field>` sets `true`; `--<field>=false` sets `false` (e.g. `--recursive=false`). A boolean never takes the next token as its value: in `--recursive false`, `false` is an argument.
 - **Required options.** An option a command marks as required — typically one whose position alone would not make its meaning clear — is a usage error when missing, unless `--input` is given.
 - **Short options are rare.** An option gets a one-letter form only when it has a strong Unix precedent (e.g. `-p` for `--parents`, as in `mkdir -p`) or is used constantly. Everything else is long-form only.
 - **Folder paths are exact.** A folder path given as an argument or option is taken exactly as a [folder path](design-spec.md#folder-paths): from the root, which is `/` (e.g. `/proj/travel`). The CLI does not complete or normalize it — `proj/travel` and `/proj/` are `invalid-input` — and never derives one from the working directory.
-- **Options and arguments follow the command,** in any order: `ftask <command> [options and arguments]`. The exceptions are `--help` and `--version`, which may also be given with no command (`ftask --help`, `ftask --version`).
-- **`--`** ends options. Everything after it is an argument, even if it starts with `-` (e.g. a title like `-urgent`), including a second `--`.
+- **Options and arguments follow the command,** in any order: `ftask <command> [options and arguments]`. The exception is `--help`, which may also be given with no command (`ftask --help`).
+- **`--`** ends options. Everything after it is an argument, even if it starts with `-` (e.g. a title like `-urgent`).
 - **A lone `-`** is an ordinary argument, not an option.
-- **Long option values** may be given as `--flag value` or `--flag=value`.
-- **One spelling each.** Every command and option has exactly one spelling, matched exactly, apart from the `=` form above, the short forms a command lists (`-p`, `-i`), and the `--version` alias. Everything else is a usage error:
-  - a value on a boolean option (`--parents=true`, `--no-recursive=false`): booleans take none;
-  - combined short options (`-pi file`) and attached short values (`-ifile`, `-i=file`): only `-i file`;
-  - abbreviations (`--fold` for `--folder`, `ftask comp` for `complete`), so that adding an option or command never breaks an existing command line;
-  - a different case (`--Folder`, `ftask Show`).
+- **Option values** may be given as `--flag value` or `--flag=value`, and for a short form as `-i value` or `-ivalue`. Short boolean options may be combined (`-pi file`).
+- **Exact names.** Commands and options are matched exactly: no abbreviations (`--fold` for `--folder`, `ftask comp` for `complete`) and no other case (`--Folder`, `ftask Show`), so adding an option or command never breaks an existing command line.
 - **Empty values** are values: `--folder ''` or `--notes=` sets the empty string, which the operation then judges like any other value (an empty folder path is `invalid-input`; empty notes are fine). For a comma list, `''` is the empty list (see *Value formats*).
 - **An option that takes a value always consumes the next token,** even one starting with `-`, so `--priority -3` works.
 - **Arguments are single tokens.** A value with spaces, such as a title, is one argument and must be quoted for the shell (`'Book flights'`; single quotes also keep `$` literal). The quotes are shell syntax, not part of the value. Unquoted words are extra arguments, a usage error; they are never joined.
 - **Value formats.** An argument or option value that sets an input field is converted by its field's type:
   - *Integers* are decimal, with an optional leading `-`: no `+`, no leading zeros, no fraction or exponent, the same rule as for [`--input`](#input).
   - *Null.* For a field that may be `null`, the value `null` converts to it: `--priority null` clears the priority. For any other field, `null` is an ordinary value.
-  - *Lists of items that cannot contain a comma* (tags, IDs) are comma-separated: `--tags travel,urgent`. Items are taken exactly and passed on: `a, b` (with a space), `a,,b`, and a duplicate item all reach the operation, which rejects them as `invalid-input`. An empty value (`''`) is the empty list.
+  - *Lists of items that cannot contain a comma* (tags, IDs) are comma-separated: `--tags travel,urgent`. Items are taken exactly and passed on: `a, b` (with a space), `a,,b`, and a duplicate item all reach the operation, which rejects them as `invalid-input`. An empty value (`''`) is the empty list. The option may be repeated; its lists are joined in order (`--tags a --tags b,c` is `a,b,c`).
   - *Lists of items that can contain a comma* (e.g. `extra` keys, which are arbitrary strings) use a **repeatable** option instead, one item per occurrence: `--extra-remove status --extra-remove owner`. Each occurrence is exactly one item, so `--extra-remove 'a,b'` names the single key `a,b`.
   - *JSON values* (e.g. `--extra`) are exactly one JSON value, held to the [input conventions](operations.md#conventions) (integer literals, no duplicate keys). Problems are reported at the option's field (e.g. `/extra`); the value's type — e.g. that it is an object — is checked by the operation.
   - *Encoding.* Every value is UTF-8; one that is not is `invalid-input` at its field.
   - A value that cannot be converted is `invalid-input` (see [Usage errors](#usage-errors)).
 - **Mutually exclusive options,** where a command lists them, are a usage error when given together.
 - **The CLI rejects only what it cannot build.** A combination of options is a usage error only when the CLI cannot construct an input from it — e.g. two options that set the same field, like `--notes` and `--notes-file`. A combination the CLI can build but the operation forbids (e.g. `update`'s `--tags-replace-all` with `--tags-add`, or no field to change at all) is passed to the operation, which rejects it as `invalid-input`. Rules about input live in the operation, not in the CLI.
-- **A repeated option** (e.g. `-i a -i b`) is a [usage error](#usage-errors), unless the command marks it repeatable (see *Lists* above).
+- **A repeated option** that takes one value (e.g. `-i a -i b`, `--priority 1 --priority 2`): the last one wins. List options accumulate (see *Value formats*).
 - **Bare `ftask`**, with no command, is a usage error.
-- **`--help`** anywhere among the options — before or after the command, but not after `--` and not as an option's value (in `--notes --help`, `--help` is the notes) — writes help text and exits `0`. It overrides every other usage problem and runs no operation: `ftask create --help --bogus` prints help. With a known command anywhere on the line (`ftask create --help`, `ftask --help create`), the help is that command's; otherwise (`ftask --help`, `ftask nosuch --help`), it is the general help.
-- **`--version`** is valid only alone (`ftask --version`). Combined with anything else, it is a usage error.
+- **`--help`** (or `-h`) writes help text and exits `0`, running no operation: the command's help after a command (`ftask create --help`), otherwise the general help. Help text is for humans and not part of the contract; which other problems on the same command line it overrides is the libraries' behavior.
 
 ### Usage errors
 
-A usage error is a problem with the command line itself: an unknown command or option, a missing or extra argument, a repeated option not marked repeatable, an option missing its value, mutually exclusive options given together, two options that set the same field (e.g. `--recursive` with `--no-recursive`), `--input` together with field arguments or options. It is reported as an envelope with error kind `usage`, and exits with code `2`. `invalid-input` stays reserved for operation input, whose `field` is a JSON Pointer into that input; problems with an `--input` file's content are `invalid-input`, not `usage` (see [Input](#input)).
+A usage error is a problem with the command line itself: an unknown command or option, a missing or extra argument, an option missing its value, mutually exclusive options given together, two options that set the same field (e.g. `--notes` with `--notes-file`), `--input` together with field arguments or options. It is reported as an envelope with error kind `usage`, and exits with code `2`. `invalid-input` stays reserved for operation input, whose `field` is a JSON Pointer into that input; problems with an `--input` file's content are `invalid-input`, not `usage` (see [Input](#input)).
 
-**Shape, not values.** `usage` is about the shape of the command line: an unknown, missing, extra, repeated, or conflicting token. A token in the right place whose value is unacceptable — one that cannot be converted to its field's type (e.g. `ftask show abc`, where the ID is an integer) or that fails the operation's validation — is `invalid-input`, with `field` the JSON Pointer of the input field it sets, per the command's Arguments and Options tables. A bad value is therefore the same error whether it arrives as an argument or through `--input`.
+**Shape, not values.** `usage` is about the shape of the command line: an unknown, missing, extra, or conflicting token. A token in the right place whose value is unacceptable — one that cannot be converted to its field's type (e.g. `ftask show abc`, where the ID is an integer) or that fails the operation's validation — is `invalid-input`, with `field` the JSON Pointer of the input field it sets, per the command's Arguments and Options tables. A bad value is therefore the same error whether it arrives as an argument or through `--input`.
 
 `usage` is a CLI-only error kind: no operation raises it, and it is not listed in the operations' [error kinds](operations.md#error-kinds). As with any kind, callers treat an unknown one as a generic failure.
 
-`details` reports **every** problem the parser can find, not just the first. After an unknown command, that is only one. Problems are in command-line order — the order their offending tokens appear — followed by problems about something missing (an argument, a required option), in the order the command's Synopsis lists them.
+`details` reports the **first** problem the parser finds, as a one-item list; the list leaves room to report more in a later release. Its `reason` is human-readable and may change between releases.
 
 ```json
 {
@@ -98,7 +95,7 @@ A usage error is a problem with the command line itself: an unknown command or o
         "type": "object",
         "required": ["reason"],
         "properties": {
-          "argument": { "type": "string", "description": "The offending command-line token, e.g. --limt; for an option missing its value, the option; for two conflicting tokens, the later one. Absent when the problem is something missing: an argument, a required option, or the command." },
+          "argument": { "type": "string", "description": "The offending command-line token, e.g. --limt, when the parser names one. Absent when the problem is something missing (an argument, a required option, the command) or the parser names no single token." },
           "reason": { "type": "string", "description": "Human-readable." }
         },
         "additionalProperties": false
@@ -129,8 +126,7 @@ A usage error is a problem with the command line itself: an unknown command or o
 | Option | Meaning |
 |---|---|
 | `-i, --input <file>` | Read operation input from `<file>` (`-` for stdin). See [Input](#input). |
-| `--help` | Print plain-text usage. See [Command line](#command-line). |
-| `--version` | Same as [`ftask version`](#version). Valid only alone. |
+| `-h, --help` | Print plain-text usage. See [Command line](#command-line). |
 
 ## Command template
 
@@ -157,7 +153,7 @@ Exit codes are not a part: they follow from the envelope and the global [Exit co
 
 Report the version and build of the ftask binary, and the data format versions it supports. Runs [`version`](operations.md#version).
 
-**Synopsis:** `ftask version`, `ftask version -i <file>`, or the alias `ftask --version`.
+**Synopsis:** `ftask version`, or `ftask version -i <file>`.
 
 **Operation:** [`version`](operations.md#version).
 
@@ -175,7 +171,7 @@ Report the version and build of the ftask binary, and the data format versions i
 
 ```sh
 ftask version | jq -r .result.version
-ftask --version | jq .result.schemas
+ftask version | jq .result.schemas
 ```
 
 ### info
@@ -223,7 +219,7 @@ Create a new tree, or attach an existing one, and make it this machine's configu
 
 | Option | Field | Default |
 |---|---|---|
-| `--replace-config`, `--no-replace-config` | `/replace_config` | `false`. |
+| `--replace-config` | `/replace_config` | `false`. |
 
 **Input:** `root` — from `<root>` or from `--input` — is resolved to an absolute path before the operation runs, since the operation leaves that to its caller:
 
@@ -270,7 +266,7 @@ Create a folder, and optionally any missing parent folders. Runs [`create-folder
 
 | Option | Field | Default |
 |---|---|---|
-| `-p, --parents`, `--no-parents` | `/parents` | `false`. |
+| `-p, --parents` | `/parents` | `false`. |
 
 **Input:** none beyond the Arguments and Options mapping.
 
@@ -547,7 +543,7 @@ ftask update 42 --tags-replace-all ''
 
 Return the ready tasks — open, and not blocked — in the order to work on them. Runs [`frontier`](operations.md#frontier).
 
-**Synopsis:** `ftask frontier [--folder <path>] [--no-recursive]`, or `ftask frontier -i <file>`.
+**Synopsis:** `ftask frontier [--folder <path>] [--recursive=false]`, or `ftask frontier -i <file>`.
 
 **Operation:** [`frontier`](operations.md#frontier).
 
@@ -558,7 +554,7 @@ Return the ready tasks — open, and not blocked — in the order to work on the
 | Option | Field | Default |
 |---|---|---|
 | `--folder <path>` | `/folder` | `/`. An exact [folder path](#command-line). |
-| `--recursive`, `--no-recursive` | `/recursive` | `true`. `--no-recursive` leaves out tasks in subfolders. |
+| `--recursive` | `/recursive` | `true`. `--recursive=false` leaves out tasks in subfolders. |
 
 **Input:** none beyond the Options mapping.
 
@@ -581,7 +577,7 @@ ftask frontier | jq '.result.tasks[:5]'                      # the first five
 
 Return every task in scope, whatever its readiness, with its readiness shown — and optionally the folders in scope. Complete tasks are included only on request. Runs [`list`](operations.md#list).
 
-**Synopsis:** `ftask list [--folder <path>] [--no-recursive] [--include-complete] [--include-folders]`, or `ftask list -i <file>`.
+**Synopsis:** `ftask list [--folder <path>] [--recursive=false] [--include-complete] [--include-folders]`, or `ftask list -i <file>`.
 
 **Operation:** [`list`](operations.md#list).
 
@@ -592,9 +588,9 @@ Return every task in scope, whatever its readiness, with its readiness shown —
 | Option | Field | Default |
 |---|---|---|
 | `--folder <path>` | `/folder` | `/`. An exact [folder path](#command-line). |
-| `--recursive`, `--no-recursive` | `/recursive` | `true`. `--no-recursive` leaves out tasks in subfolders, and folders below the immediate subfolders. |
-| `--include-complete`, `--no-include-complete` | `/include_complete` | `false`. |
-| `--include-folders`, `--no-include-folders` | `/include_folders` | `false`. |
+| `--recursive` | `/recursive` | `true`. `--recursive=false` leaves out tasks in subfolders, and folders below the immediate subfolders. |
+| `--include-complete` | `/include_complete` | `false`. |
+| `--include-folders` | `/include_folders` | `false`. |
 
 **Input:** none beyond the Options mapping.
 
