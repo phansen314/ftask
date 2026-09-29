@@ -436,8 +436,9 @@ func TestBlockUnblock(t *testing.T) {
 	}
 }
 
-// list returns tasks across folders in tree order, with their readiness.
-func TestList(t *testing.T) {
+// list returns tasks across folders in tree order, with their readiness;
+// frontier returns only the ready ones, in the order to work on them.
+func TestListFrontier(t *testing.T) {
 	first := ftask(t, "init", "~/tasks")
 	same := func(args ...string) *exec.Cmd {
 		cmd := exec.Command(binary, args...)
@@ -458,6 +459,12 @@ func TestList(t *testing.T) {
 		{same("list"), 0, `"tasks":[{"schema":1,"id":2,`},
 		{same("list", "--include-complete", "--include-folders"), 0, `"folders":["/","/proj","/proj/travel"],"tasks":[{"schema":1,"id":2,`},
 		{same("list", "--folder", "/nope"), 1, `"folders":["/nope"]`},
+		{same("create", "c", "--priority", "5", "--folder", "/proj"), 0, `"id":3,`},
+		{same("create", "d", "--blocked-by", "3"), 0, `"id":4,`},
+		{same("frontier"), 0, `"tasks":[{"schema":1,"id":3,`},
+		{same("frontier", "--folder", "/proj", "--recursive=false"), 0, `"tasks":[{"schema":1,"id":3,`},
+		{same("complete", "3"), 0, `"changed":true`},
+		{same("frontier", "--folder", "/proj"), 0, `"result":{"tasks":[]}`},
 	} {
 		r := run(t, step.cmd)
 		envelope(t, r)

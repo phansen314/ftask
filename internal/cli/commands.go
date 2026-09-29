@@ -141,4 +141,17 @@ var commands = []Command{
   ftask list --include-folders | jq -r '.result.folders[]'
   ftask list | jq '.result.tasks | group_by(.folder) | map({folder: .[0].folder, ids: map(.id)})'`,
 	},
+	{
+		Name:    "frontier",
+		Op:      "frontier",
+		Summary: "Return the ready tasks — open, not blocked — in the order to work on them",
+		Options: []Option{
+			{Name: "folder", Field: "/folder", Type: String, Help: "only tasks in this folder, an exact `path` (default /)"},
+			{Name: "recursive", Field: "/recursive", Type: Bool, Help: "also tasks in subfolders (default true; --recursive=false for none)"},
+		},
+		Example: `  ftask frontier | jq '.result.tasks[0]'                       # next task
+  ftask frontier --folder /proj | jq -r '.result.tasks[] | "\(.id)\t\(.title)"'
+  ftask frontier | jq '[.result.tasks[] | select(.tags | index("urgent"))]'
+  ftask frontier | jq '.result.tasks[:5]'                      # the first five`,
+	},
 }

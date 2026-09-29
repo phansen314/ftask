@@ -623,7 +623,7 @@ func TestBlockersInput(t *testing.T) {
 }
 
 // list's input: options only, --recursive a flag that --recursive=false
-// turns off.
+// turns off. frontier shares --folder and --recursive.
 func TestListInput(t *testing.T) {
 	saved := runOp
 	t.Cleanup(func() { runOp = saved })
@@ -646,7 +646,21 @@ func TestListInput(t *testing.T) {
 			t.Errorf("%q: exit %d, input %s, want %s", tc.args, r.code, got, tc.want)
 		}
 	}
-	if r := run(t, commands, "", "list", "/proj"); r.code != ExitUsage {
-		t.Errorf("list with an argument: exit %d: %s", r.code, r.raw)
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"frontier"}, `{}`},
+		{[]string{"frontier", "--folder", "/proj", "--recursive=false"}, `{"folder":"/proj","recursive":false}`},
+	} {
+		got = ""
+		if r := run(t, commands, "", tc.args...); r.code != ExitOK || got != tc.want {
+			t.Errorf("%q: exit %d, input %s, want %s", tc.args, r.code, got, tc.want)
+		}
+	}
+	for _, args := range [][]string{{"list", "/proj"}, {"frontier", "/proj"}, {"frontier", "--include-complete"}} {
+		if r := run(t, commands, "", args...); r.code != ExitUsage {
+			t.Errorf("%q: exit %d: %s", args, r.code, r.raw)
+		}
 	}
 }

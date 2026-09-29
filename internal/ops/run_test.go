@@ -86,8 +86,8 @@ func TestRunInvalidInput(t *testing.T) {
 		// The caller's problem at a field replaces the adapter's there.
 		{"caller covers field", "init", `{"root": "~bob/t", "x": 1}`, []errs.Problem{{Field: "/root", Reason: "~user/"}}, []string{"/root", "/x"}},
 		{"caller covers missing", "show", `{}`, []errs.Problem{{Field: "/id", Reason: "must be UTF-8"}}, []string{"/id"}},
-		// Validation comes before anything else, implemented or not.
-		{"unimplemented", "frontier", `{"recursive": 1}`, nil, []string{"/recursive"}},
+		// Validation comes before the operation runs.
+		{"before running", "frontier", `{"recursive": 1}`, nil, []string{"/recursive"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			env := Run(tc.op, parse(t, tc.doc), tc.caller, Env{})
@@ -104,9 +104,10 @@ func TestRunInvalidInput(t *testing.T) {
 }
 
 func TestRunInternal(t *testing.T) {
-	saved := runners["version"]
-	t.Cleanup(func() { runners["version"] = saved })
+	savedVersion, savedFrontier := runners["version"], runners["frontier"]
+	t.Cleanup(func() { runners["version"], runners["frontier"] = savedVersion, savedFrontier })
 	runners["version"] = func(Env, any, *errs.Collector) (any, *errs.Error) { return nil, nil }
+	delete(runners, "frontier") // every operation is implemented: pretend one isn't
 
 	for _, tc := range []struct{ name, op, doc string }{
 		{"no such operation", "nosuch", `{}`},

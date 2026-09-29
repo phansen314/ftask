@@ -191,6 +191,22 @@ check "folders, not recursive" 0 '.result.folders == ["/proj", "/proj/travel", "
 check "missing folder" 1 '.error.details.folders == ["/nope"]' -- list --folder /nope
 check "list takes no arguments" 2 '.error.kind == "usage"' -- list /proj
 
+echo "== frontier"
+# Ready now: 2 and 7, neither with a priority (update cleared 7's);
+# blocked: 4 (by 2), 5 (by 7).
+check "ready tasks, lower ID first" 0 '[.result.tasks[].id] == [2, 7] and all(.result.tasks[]; .readiness == "ready" and .blocking == [])' -- frontier
+check "one folder" 0 '[.result.tasks[].id] == [2]' -- frontier --folder /proj/travel
+check "a blocker in another folder still blocks" 0 '.result.tasks == []' -- frontier --folder /proj/work
+check "complete 7" 0 '.result.changed' -- complete 7
+check "5 joins the frontier" 0 '[.result.tasks[].id] == [2, 5]' -- frontier
+check "priority 9 goes first" 0 '.result.changed == ["priority"]' -- update 5 --priority 9
+check "now 5 first" 0 '[.result.tasks[].id] == [5, 2]' -- frontier
+check "complete 2" 0 '.result.changed' -- complete 2
+check "4 ready too: tie on no priority, lower ID first" 0 '[.result.tasks[].id] == [5, 4]' -- frontier
+check "not recursive" 0 '.result.tasks == []' -- frontier --folder /proj --recursive=false
+check "missing folder" 1 '.error.details.folders == ["/nope"]' -- frontier --folder /nope
+check "list's options aren't frontier's" 2 '.error.kind == "usage"' -- frontier --include-complete
+
 echo "== end state"
 check "last_id counts every task" 0 '.result.tree.last_id == 7' -- info
 
