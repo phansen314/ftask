@@ -14,6 +14,14 @@ func build(settings ...string) *debug.BuildInfo {
 	return bi
 }
 
+// installed is build info for a binary built by go install pkg@version: no VCS
+// settings, but the main module's version.
+func installed(version string) *debug.BuildInfo {
+	bi := build()
+	bi.Main.Version = version
+	return bi
+}
+
 func TestFromBuild(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -41,6 +49,36 @@ func TestFromBuild(t *testing.T) {
 			"time without revision",
 			build("vcs.time", "2026-09-27T12:34:56Z", "vcs.modified", "true"),
 			Info{"1.4.0", UnknownCommit, UnknownCommitTime, false, "go1.25.1", "linux/amd64"},
+		},
+		{
+			"go install, pseudo-version with no tag",
+			installed("v0.0.0-20260929021723-4df90bd5d3e3"),
+			Info{"1.4.0", "4df90bd5d3e3", "2026-09-29T02:17:23Z", false, "go1.25.1", "linux/amd64"},
+		},
+		{
+			"go install, pseudo-version after a tag",
+			installed("v1.4.1-0.20260929021723-4df90bd5d3e3"),
+			Info{"1.4.0", "4df90bd5d3e3", "2026-09-29T02:17:23Z", false, "go1.25.1", "linux/amd64"},
+		},
+		{
+			"go install, pseudo-version after a prerelease",
+			installed("v1.5.0-rc.1.0.20260929021723-4df90bd5d3e3"),
+			Info{"1.4.0", "4df90bd5d3e3", "2026-09-29T02:17:23Z", false, "go1.25.1", "linux/amd64"},
+		},
+		{
+			"go install, tagged version",
+			installed("v1.4.0"),
+			Info{"1.4.0", UnknownCommit, UnknownCommitTime, false, "go1.25.1", "linux/amd64"},
+		},
+		{"devel", installed("(devel)"), Info{"1.4.0", UnknownCommit, UnknownCommitTime, false, "go1.25.1", "linux/amd64"}},
+		{
+			"vcs wins over the pseudo-version",
+			func() *debug.BuildInfo {
+				bi := build("vcs.revision", "abc123", "vcs.time", "2026-09-27T12:34:56Z", "vcs.modified", "true")
+				bi.Main.Version = "v0.0.0-20260929021723-4df90bd5d3e3+dirty"
+				return bi
+			}(),
+			Info{"1.4.0", "abc123", "2026-09-27T12:34:56Z", true, "go1.25.1", "linux/amd64"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

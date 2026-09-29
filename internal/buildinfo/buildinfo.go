@@ -4,6 +4,8 @@ import (
 	"runtime"
 	"runtime/debug"
 	"time"
+
+	"golang.org/x/mod/module"
 )
 
 // Version is the release version, set at release build time:
@@ -68,6 +70,21 @@ func fromBuild(bi *debug.BuildInfo, version, goVersion, platform string) Info {
 			info.CommitTime = t.UTC().Truncate(time.Second).Format(timeLayout)
 		}
 		info.UncommittedChanges = settings["vcs.modified"] == "true"
+		return info
+	}
+	// go install pkg@version builds from the module cache, with no VCS
+	// information; the module's pseudo-version still names the commit, by its
+	// 12-character prefix, and the commit's UTC time. A module download has no
+	// uncommitted changes. A tagged version names no commit.
+	if v := bi.Main.Version; module.IsPseudoVersion(v) {
+		rev, err := module.PseudoVersionRev(v)
+		if err != nil {
+			return info
+		}
+		info.Commit = rev
+		if t, err := module.PseudoVersionTime(v); err == nil {
+			info.CommitTime = t.UTC().Format(timeLayout)
+		}
 	}
 	return info
 }
