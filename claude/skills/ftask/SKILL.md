@@ -53,7 +53,11 @@ Everything ftask prints lands in your context, and stays there for the rest of t
 - `--limit 0` gives just the count, in `total`.
 - For one task's full detail, `show` it.
 
-**Never trim a write's, `show`'s, or any small output's envelope with `jq`**: print it as is. When a big read needs `jq`, keep `ok`, `error` and `warnings` with `jq -c 'if .ok then .result |= <shape> else . end'`, where `<shape>` gives one value (`map(…)`, never `.[]`). A trimmed failure looks like success: the pipe's exit status is jq's, so the error kind and warnings just vanish. A filter that drops tasks must replace `total` and `truncated`, which count what ftask returned, with `scanned` (tasks it checked) and `unscanned` (tasks `--limit` cut, never checked), as in the `extra` example below. Before saying there are none, or giving a count, make `unscanned` 0 by raising or dropping `--limit`.
+With `jq`, a trimmed failure looks like success: the pipe's exit status is jq's, so the error kind and warnings just vanish. So:
+
+- **Never trim a write's, `show`'s, or any small output's envelope**: print it as is.
+- **When a big read needs `jq`**, keep `ok`, `error` and `warnings` with `jq -c 'if .ok then .result |= <shape> else . end'`, where `<shape>` gives one value (`map(…)`, never `.[]`).
+- **A filter that drops tasks** replaces `total` and `truncated`, which count what ftask returned, with `scanned` (tasks it checked) and `unscanned` (tasks `--limit` cut, never checked), as in the `extra` example below. Before saying there are none, or giving a count, make `unscanned` 0 by raising or dropping `--limit`.
 
 ## The daily loop
 
