@@ -45,7 +45,7 @@ The plugin tracks `main`: `claude plugin update ftask@ftask` picks up changes, o
 ftask create-folder -p /work/api
 ftask create 'Design schema' --folder /work/api --priority 2 --tags db
 ftask create 'Write migrations' --folder /work/api --blocked-by 1
-ftask frontier | jq -r '.result.tasks[] | "\(.id)\t\(.title)"'   # ready tasks, in work order
+ftask frontier --limit 10 --fields id,title                       # the next ready tasks, in work order
 ftask complete 1
 ```
 

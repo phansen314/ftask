@@ -43,27 +43,41 @@ Error kinds worth handling:
 - `conflict` with `rule: "duplicate-id"` or `"id-above-last-id"` — the tree is damaged; report it, don't work around it.
 - `corrupt`, `unsupported-format`, `io`, `internal` — stop and report to the user; don't try to fix files by hand.
 
+## Keep output small
+
+Everything ftask prints lands in your context, and stays there for the rest of the session. A whole task is about 300 bytes, so a bare `ftask list` of a few hundred tasks is tens of KB. **Always pass `--limit` and `--fields` to `frontier` and `list`**, as below, and widen only when the question needs it:
+
+- `--fields id,title,…` returns only those fields of each task (`id` always). Fields: `title`, `priority`, `folder`, `tags`, `readiness`, `blocking`, `blocked_by`, `extra`, `created_at`, `completed_at`, `notes_path`, `schema`.
+- `--limit N` returns the first N in the command's order. The result always says `total` and `truncated`: when `truncated` is true there are `total` tasks and you got N. Say so rather than presenting N as everything, and fetch more only if the user needs them.
+- `--tags-any a,b` / `--tags-all a,b` filter by tag, and `list --readiness …` by readiness. Anything else (`extra`, title words) is `jq`'s, still with `--fields` so less comes through.
+- `--limit 0` gives just the count, in `total`.
+- For one task's full detail, `show` it.
+
+Printing the envelope as is, without `jq`, also keeps `warnings` in view.
+
 ## The daily loop
 
 ```sh
-ftask frontier | jq -r '.result.tasks[:10][] | "\(.id)\t\(.priority)\t\(.folder)\t\(.title)"'   # what's ready, in work order
-ftask show 42 | jq '.result.tasks[0]'                                                         # one task
-ftask complete 42 | jq -c '.result | {id, completed_at, changed}'                             # done
+ftask frontier --limit 10 --fields id,title,priority,folder,tags   # what's ready, in work order
+ftask show 42 | jq '.result.tasks[0]'                              # one task, whole
+ftask complete 42 | jq -c '.result | {id, completed_at, changed}'  # done
 ```
 
-`frontier` lists open, unblocked tasks in the order to work on them: highest priority first, unprioritized after, ties oldest (lowest ID) first. Scope it with `--folder /proj` and `--recursive=false`.
+`frontier` lists open, unblocked tasks in the order to work on them: highest priority first, unprioritized after, ties oldest (lowest ID) first. Scope it with `--folder /proj` and `--recursive=false`, or by tag with `--tags-any`.
 
 `show` returns `result.tasks`, always an array: one task, or every copy if the ID is duplicated (with a `duplicate-id` warning — report it). Each has `readiness` (`ready`/`blocked`/`complete`), `blocking` (the blocker IDs still holding it up), and `notes_path`. **Notes are a plain Markdown file:** read it with the Read tool, and edit it with Edit/Write directly — there is no ftask command for notes after creation.
 
 Overview of everything:
 
 ```sh
-ftask list | jq -r '.result.tasks[] | "\(.id)\t\(.readiness)\t\(.folder)\t\(.title)"'
-ftask list --include-complete --include-folders | jq '.result.folders'
-ftask list --folder /proj | jq '[.result.tasks[] | select(.tags | index("urgent"))]'
+ftask list --limit 50 --fields id,title,readiness,folder           # open tasks, in tree order
+ftask list --readiness blocked --limit 20 --fields id,title,blocking   # what's stuck, and on what
+ftask list --folder /proj --tags-any urgent --limit 20 --fields id,title,readiness
+ftask list --readiness complete --limit 0                          # how many are done: .result.total
+ftask list --include-folders --limit 0 | jq -c '{folders: .result.folders, warnings}'
 ```
 
-There are no built-in filters or limits; filter with `jq`.
+`list` returns open tasks (`ready` and `blocked`) unless `--readiness` says otherwise: `--readiness complete` for finished ones, `--readiness ready,blocked,complete` for all.
 
 ## Writing
 
@@ -99,7 +113,7 @@ ftask delete-folder -r /proj/old | jq -c '.result | {ids, dependents}'
 
 - Moving never changes blockers: tasks are named by ID, not location. Notes move with the task.
 - **Deleting is permanent.** ftask keeps no trash; the only undo is git, if the user keeps the tree in a repo, and only back to their last commit. So:
-  - **Always confirm with the user before `delete` or `delete-folder`**, naming what goes (for a folder, list its tasks first with `ftask list --folder /x`). Never delete to tidy up on your own initiative.
+  - **Always confirm with the user before `delete` or `delete-folder`**, naming what goes (for a folder, list its tasks first, complete ones too: `ftask list --folder /x --readiness ready,blocked,complete --limit 50 --fields id,title,readiness`). Never delete to tidy up on your own initiative.
   - Prefer cancelling (below) when the user just means "won't do": it keeps the record.
   - A deleted task's ID is removed from its dependents' blockers, so they may become ready. Tell the user which (`dependents` in the output).
 
