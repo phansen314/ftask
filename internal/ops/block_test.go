@@ -60,11 +60,11 @@ func TestBlock(t *testing.T) {
 	f.task("x", 10, false)
 	e := Run("block", parse(t, `{"id": 7, "blockers": [10, 3, 2]}`), nil, f.env)
 	got := f.rel(line(t, e))
-	want := `{"ok":true,"result":{"schema":1,"id":7,"title":"Pack bags","priority":-2,"created_at":"2026-09-20T18:31:51Z","completed_at":null,"blocked_by":[1,2,3,10],"tags":["travel"],"extra":{"n":1.50,"deep":{"k":[true,null]}},"folder":"/proj","notes_path":"~/tasks/proj/7.md","added":[2,10]},"warnings":[]}` + "\n"
+	want := `{"ok":true,"result":{"schema":1,"id":7,"title":"Pack bags","priority":-2,"created_at":"2026-09-20T18:31:51Z","completed_at":null,"updated_at":"2026-09-28T12:00:00Z","blocked_by":[1,2,3,10],"tags":["travel"],"extra":{"n":1.50,"deep":{"k":[true,null]}},"folder":"/proj","notes_path":"~/tasks/proj/7.md","added":[2,10]},"warnings":[]}` + "\n"
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
-	wantFile := strings.Replace(richTask(false), "\"blocked_by\": [\n    1,\n    3\n  ]", "\"blocked_by\": [\n    1,\n    2,\n    3,\n    10\n  ]", 1)
+	wantFile := strings.Replace(stamped(richTask(false)), "\"blocked_by\": [\n    1,\n    3\n  ]", "\"blocked_by\": [\n    1,\n    2,\n    3,\n    10\n  ]", 1)
 	if got := f.read("tasks/proj/7.json"); got != wantFile {
 		t.Errorf("task file:\n%s\nwant\n%s", got, wantFile)
 	}

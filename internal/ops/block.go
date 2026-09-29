@@ -101,11 +101,7 @@ func runBlock(env Env, in BlockersInput, w *errs.Collector) (any, *errs.Error) {
 		ld := copies[0]
 		if len(added) > 0 {
 			ld.Task.BlockedBy = slices.Concat(ld.Task.BlockedBy, added)
-			data, err := ld.Task.Encode()
-			if err != nil {
-				return errs.Internal("encoding the task file: " + err.Error())
-			}
-			if e := tx.Replace(ld.Loc.Rel(), data); e != nil {
+			if e := replaceTask(tx, ld.Loc.Rel(), &ld.Task, model.TimestampOf(env.Clock())); e != nil {
 				return e
 			}
 		}

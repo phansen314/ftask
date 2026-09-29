@@ -73,7 +73,7 @@ func (f *fixture) prioritized(folder string, id model.ID, p int64, blockedBy ...
 	f.t.Helper()
 	tf := model.TaskFile{
 		Schema: model.TaskSchema, ID: id, Title: model.Title(fmt.Sprintf("task %d", id)), Priority: &p,
-		CreatedAt: "2026-09-20T18:31:51Z", BlockedBy: blockedBy, Extra: &jsonio.Object{},
+		CreatedAt: "2026-09-20T18:31:51Z", UpdatedAt: "2026-09-20T18:31:51Z", BlockedBy: blockedBy, Extra: &jsonio.Object{},
 	}
 	data, err := tf.Encode()
 	if err != nil {

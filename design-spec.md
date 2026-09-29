@@ -69,7 +69,7 @@ The normative JSON Schema for a task file. A file that does not validate against
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "task-file",
   "type": "object",
-  "required": ["schema", "id", "title", "priority", "created_at", "completed_at", "blocked_by", "tags", "extra"],
+  "required": ["schema", "id", "title", "priority", "created_at", "completed_at", "updated_at", "blocked_by", "tags", "extra"],
   "properties": {
     "schema": { "const": 1 },
     "id": { "type": "integer", "minimum": 1, "maximum": 999999999999999 },
@@ -77,6 +77,7 @@ The normative JSON Schema for a task file. A file that does not validate against
     "priority": { "type": ["integer", "null"], "minimum": -9007199254740991, "maximum": 9007199254740991 },
     "created_at": { "$ref": "#/$defs/timestamp" },
     "completed_at": { "anyOf": [{ "$ref": "#/$defs/timestamp" }, { "type": "null" }] },
+    "updated_at": { "$ref": "#/$defs/timestamp" },
     "blocked_by": { "type": "array", "items": { "$ref": "#/properties/id" }, "uniqueItems": true },
     "tags": { "type": "array", "items": { "$ref": "#/$defs/name" }, "uniqueItems": true },
     "extra": { "type": "object" }
@@ -101,6 +102,7 @@ Every key is required and no other top-level key is allowed. `extra` is the plac
 - **`completed_at`** — [Timestamp](#timestamps) of when the task was completed, or `null`. This is the **sole** source of truth for a task's state:
   - **Open:** `completed_at` is `null`.
   - **Complete:** `completed_at` is not `null`. Complete covers every way a task can end — done, implemented, cancelled, abandoned — and ftask draws no distinction between them. The user can record the distinction in `extra` (e.g. a `status` key).
+- **`updated_at`** — [Timestamp](#timestamps) of when ftask last changed the task file's content: set to `created_at` at creation, then to the current time by every write that changes a field — including removing a deleted task from a dependent's `blocked_by`. A write that changes nothing does not rewrite the file, so leaves it alone. [`move`](operations.md#move) does not set it: the folder is not stored in the task file. Edits to the notes are not tracked: ftask never sees them.
 - **`blocked_by`** — Set of IDs of the tasks that must be complete before this one is ready (see [Dependencies](#dependencies)).
 - **`tags`** — Set of labels for grouping and filtering tasks across folders (see [Tags](#tags)).
 - **`extra`** — Open map of user-defined data: string keys, any JSON values. Untyped and **never interpreted by ftask** — ftask stores it and returns it, and managing its keys and value types consistently is up to the user or agent. Entirely optional; a task that doesn't use it has an empty map. Common uses are a workflow `status` or project-specific fields.
@@ -130,6 +132,7 @@ Task file:
   "priority": 2,
   "created_at": "2026-09-20T18:31:51Z",
   "completed_at": null,
+  "updated_at": "2026-09-20T18:31:51Z",
   "blocked_by": [],
   "tags": [
     "travel"

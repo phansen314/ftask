@@ -44,15 +44,15 @@ func (f *fixture) changed(op string, id int) string {
 	return fmt.Sprintf("%s %d %s changed=%v", r.Folder, r.ID, at, r.Changed)
 }
 
-// A rich task file, as ftask writes it: open, or completed at
-// 2026-09-21T10:00:00Z.
+// A rich task file, as ftask writes it: open, or completed (and last
+// updated) at 2026-09-21T10:00:00Z.
 func richTask(completed bool) string {
-	at := "null"
+	at, updated := "null", `"2026-09-20T18:31:51Z"`
 	if completed {
-		at = `"2026-09-21T10:00:00Z"`
+		at, updated = `"2026-09-21T10:00:00Z"`, `"2026-09-21T10:00:00Z"`
 	}
 	return "{\n  \"schema\": 1,\n  \"id\": 7,\n  \"title\": \"Pack bags\",\n  \"priority\": -2,\n  \"created_at\": \"2026-09-20T18:31:51Z\",\n  \"completed_at\": " + at +
-		",\n  \"blocked_by\": [\n    1,\n    3\n  ],\n  \"tags\": [\n    \"travel\"\n  ],\n  \"extra\": {\n    \"n\": 1.50,\n    \"deep\": {\n      \"k\": [\n        true,\n        null\n      ]\n    }\n  }\n}\n"
+		",\n  \"updated_at\": " + updated + ",\n  \"blocked_by\": [\n    1,\n    3\n  ],\n  \"tags\": [\n    \"travel\"\n  ],\n  \"extra\": {\n    \"n\": 1.50,\n    \"deep\": {\n      \"k\": [\n        true,\n        null\n      ]\n    }\n  }\n}\n"
 }
 
 // Only completed_at changes: the rest of the file, byte for byte, and the .md
@@ -63,11 +63,11 @@ func TestComplete(t *testing.T) {
 	f.write("tasks/proj/7.md", "notes\n")
 	e := Run("complete", parse(t, `{"id": 7}`), nil, f.env)
 	got := f.rel(line(t, e))
-	want := `{"ok":true,"result":{"schema":1,"id":7,"title":"Pack bags","priority":-2,"created_at":"2026-09-20T18:31:51Z","completed_at":"2026-09-28T12:00:00Z","blocked_by":[1,3],"tags":["travel"],"extra":{"n":1.50,"deep":{"k":[true,null]}},"folder":"/proj","notes_path":"~/tasks/proj/7.md","changed":true},"warnings":[]}` + "\n"
+	want := `{"ok":true,"result":{"schema":1,"id":7,"title":"Pack bags","priority":-2,"created_at":"2026-09-20T18:31:51Z","completed_at":"2026-09-28T12:00:00Z","updated_at":"2026-09-28T12:00:00Z","blocked_by":[1,3],"tags":["travel"],"extra":{"n":1.50,"deep":{"k":[true,null]}},"folder":"/proj","notes_path":"~/tasks/proj/7.md","changed":true},"warnings":[]}` + "\n"
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
-	wantFile := strings.Replace(richTask(false), `"completed_at": null`, `"completed_at": "2026-09-28T12:00:00Z"`, 1)
+	wantFile := strings.Replace(stamped(richTask(false)), `"completed_at": null`, `"completed_at": "2026-09-28T12:00:00Z"`, 1)
 	if got := f.read("tasks/proj/7.json"); got != wantFile {
 		t.Errorf("task file:\n%s\nwant\n%s", got, wantFile)
 	}
@@ -79,11 +79,11 @@ func TestComplete(t *testing.T) {
 // A task file in another layout keeps every value, rewritten in ftask's.
 func TestCompleteHandFormatted(t *testing.T) {
 	f := newFixture(t)
-	f.write("tasks/7.json", `{"schema":1,"id":7,"title":"t","priority":null,"created_at":"2026-09-20T18:31:51Z","completed_at":null,"blocked_by":[],"tags":[],"extra":{"n":1e2}}`)
+	f.write("tasks/7.json", `{"schema":1,"id":7,"title":"t","priority":null,"created_at":"2026-09-20T18:31:51Z","completed_at":null,"updated_at":"2026-09-20T18:31:51Z","blocked_by":[],"tags":[],"extra":{"n":1e2}}`)
 	if got := f.changed("complete", 7); got != "/ 7 2026-09-28T12:00:00Z changed=true" {
 		t.Errorf("got %s", got)
 	}
-	want := "{\n  \"schema\": 1,\n  \"id\": 7,\n  \"title\": \"t\",\n  \"priority\": null,\n  \"created_at\": \"2026-09-20T18:31:51Z\",\n  \"completed_at\": \"2026-09-28T12:00:00Z\",\n  \"blocked_by\": [],\n  \"tags\": [],\n  \"extra\": {\n    \"n\": 1e2\n  }\n}\n"
+	want := "{\n  \"schema\": 1,\n  \"id\": 7,\n  \"title\": \"t\",\n  \"priority\": null,\n  \"created_at\": \"2026-09-20T18:31:51Z\",\n  \"completed_at\": \"2026-09-28T12:00:00Z\",\n  \"updated_at\": \"2026-09-28T12:00:00Z\",\n  \"blocked_by\": [],\n  \"tags\": [],\n  \"extra\": {\n    \"n\": 1e2\n  }\n}\n"
 	if got := f.read("tasks/7.json"); got != want {
 		t.Errorf("task file:\n%s\nwant\n%s", got, want)
 	}
@@ -109,7 +109,7 @@ func TestCompletedAtCases(t *testing.T) {
 
 		// reopen.
 		{"reopen a complete task", "reopen", func(f *fixture) { f.write("tasks/7.json", richTask(true)) },
-			"/ 7 null changed=true", richTask(false)},
+			"/ 7 null changed=true", stamped(richTask(false))},
 		{"reopen an open task", "reopen", func(f *fixture) { f.write("tasks/7.json", richTask(false)) },
 			"/ 7 null changed=false", richTask(false)},
 		{"reopen: duplicate", "reopen", func(f *fixture) { f.write("tasks/7.json", richTask(true)); f.task("p", 7, true) },
@@ -194,7 +194,8 @@ func TestCompletedAtUnchangedNotWritten(t *testing.T) {
 	}
 }
 
-// complete then reopen gives back the file as it was, byte for byte.
+// complete then reopen gives back the file as it was, byte for byte, but for
+// updated_at.
 func TestCompleteReopenRoundTrip(t *testing.T) {
 	f := newFixture(t)
 	f.write("tasks/7.json", richTask(false))
@@ -202,7 +203,7 @@ func TestCompleteReopenRoundTrip(t *testing.T) {
 	if got := f.changed("reopen", 7); got != "/ 7 null changed=true" {
 		t.Errorf("reopen: %s", got)
 	}
-	if got := f.read("tasks/7.json"); got != richTask(false) {
+	if got := f.read("tasks/7.json"); got != stamped(richTask(false)) {
 		t.Errorf("task file:\n%s", got)
 	}
 }

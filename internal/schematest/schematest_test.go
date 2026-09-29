@@ -207,7 +207,7 @@ func TestLocations(t *testing.T) {
 		{`[3, 3, 3]`, `["a", "b", "a", "b"]`, []string{"/blocked_by/1", "/blocked_by/2", "/tags/2", "/tags/3"}},
 		{`[3, 3.0]`, `[]`, []string{"/blocked_by/1"}}, // equal numbers, however written
 	} {
-		doc := `{"schema":1,"id":1,"title":"t","priority":null,"created_at":"2026-09-20T18:31:51Z","completed_at":null,"blocked_by":` + tc.blockedBy + `,"tags":` + tc.tags + `,"extra":{}}`
+		doc := `{"schema":1,"id":1,"title":"t","priority":null,"created_at":"2026-09-20T18:31:51Z","completed_at":null,"updated_at":"2026-09-20T18:31:51Z","blocked_by":` + tc.blockedBy + `,"tags":` + tc.tags + `,"extra":{}}`
 		ok, f := Check(t, "task-file", []byte(doc))
 		if got := f.Fields; ok || !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("duplicates %s %s: ok %v, locations %q; want %q", tc.blockedBy, tc.tags, ok, got, tc.want)

@@ -21,6 +21,7 @@ const exampleTask = `{
   "priority": 2,
   "created_at": "2026-09-20T18:31:51Z",
   "completed_at": null,
+  "updated_at": "2026-09-20T18:31:51Z",
   "blocked_by": [],
   "tags": [
     "travel"
@@ -163,7 +164,7 @@ func TestTaskFileExactProblems(t *testing.T) {
 		want       []string
 	}{
 		{"several missing fields",
-			`{"schema": 1, "id": 42, "title": "Book flights", "created_at": "2026-09-20T18:31:51Z", "completed_at": null, "blocked_by": []}`, 42,
+			`{"schema": 1, "id": 42, "title": "Book flights", "created_at": "2026-09-20T18:31:51Z", "completed_at": null,"updated_at": "2026-09-20T18:31:51Z", "blocked_by": []}`, 42,
 			[]string{"/priority: required", "/tags: required", "/extra: required"}},
 		{"unknown and repeated keys",
 			strings.Replace(exampleTask, `"title": "Book flights",`, `"title": "Book flights", "title": "x", "status": "a", "status": "b",`, 1), 42,
@@ -250,7 +251,7 @@ func TestTaskViewKeyOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"schema":1,"id":42,"title":"Book flights","priority":2,"created_at":"2026-09-20T18:31:51Z","completed_at":null,"blocked_by":[],"tags":["travel"],"extra":{"status":"waiting on quote"},"folder":"/proj","notes_path":"/r/proj/42.md","readiness":"ready","blocking":[]}` + "\n"
+	want := `{"schema":1,"id":42,"title":"Book flights","priority":2,"created_at":"2026-09-20T18:31:51Z","completed_at":null,"updated_at":"2026-09-20T18:31:51Z","blocked_by":[],"tags":["travel"],"extra":{"status":"waiting on quote"},"folder":"/proj","notes_path":"/r/proj/42.md","readiness":"ready","blocking":[]}` + "\n"
 	if string(got) != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}

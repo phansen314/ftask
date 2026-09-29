@@ -66,7 +66,7 @@ func (f *fixture) task(folder string, id model.ID, completed bool, blockedBy ...
 	f.t.Helper()
 	tf := model.TaskFile{
 		Schema: model.TaskSchema, ID: id, Title: model.Title(fmt.Sprintf("task %d", id)),
-		CreatedAt: "2026-09-20T18:31:51Z", BlockedBy: blockedBy, Extra: &jsonio.Object{},
+		CreatedAt: "2026-09-20T18:31:51Z", UpdatedAt: "2026-09-20T18:31:51Z", BlockedBy: blockedBy, Extra: &jsonio.Object{},
 	}
 	if completed {
 		ts := model.Timestamp("2026-09-21T10:00:00Z")

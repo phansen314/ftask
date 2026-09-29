@@ -370,7 +370,7 @@ Every operation that returns a task returns it in this shape: exactly the [task 
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "task",
   "type": "object",
-  "required": ["schema", "id", "title", "priority", "created_at", "completed_at", "blocked_by", "tags", "extra", "folder", "notes_path"],
+  "required": ["schema", "id", "title", "priority", "created_at", "completed_at", "updated_at", "blocked_by", "tags", "extra", "folder", "notes_path"],
   "properties": {
     "schema": { "$ref": "task-file#/properties/schema" },
     "id": { "$ref": "task-file#/properties/id" },
@@ -378,6 +378,7 @@ Every operation that returns a task returns it in this shape: exactly the [task 
     "priority": { "$ref": "task-file#/properties/priority" },
     "created_at": { "$ref": "task-file#/properties/created_at" },
     "completed_at": { "$ref": "task-file#/properties/completed_at" },
+    "updated_at": { "$ref": "task-file#/properties/updated_at" },
     "blocked_by": { "$ref": "task-file#/properties/blocked_by" },
     "tags": { "$ref": "task-file#/properties/tags" },
     "extra": { "$ref": "task-file#/properties/extra" },
@@ -397,7 +398,7 @@ A [Task](#task) plus its derived readiness. Returned by read operations that rep
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "task-view",
   "type": "object",
-  "required": ["schema", "id", "title", "priority", "created_at", "completed_at", "blocked_by", "tags", "extra", "folder", "notes_path", "readiness", "blocking"],
+  "required": ["schema", "id", "title", "priority", "created_at", "completed_at", "updated_at", "blocked_by", "tags", "extra", "folder", "notes_path", "readiness", "blocking"],
   "properties": {
     "schema": { "$ref": "task#/properties/schema" },
     "id": { "$ref": "task#/properties/id" },
@@ -405,6 +406,7 @@ A [Task](#task) plus its derived readiness. Returned by read operations that rep
     "priority": { "$ref": "task#/properties/priority" },
     "created_at": { "$ref": "task#/properties/created_at" },
     "completed_at": { "$ref": "task#/properties/completed_at" },
+    "updated_at": { "$ref": "task#/properties/updated_at" },
     "blocked_by": { "$ref": "task#/properties/blocked_by" },
     "tags": { "$ref": "task#/properties/tags" },
     "extra": { "$ref": "task#/properties/extra" },
@@ -443,6 +445,7 @@ Some of a [Task view](#task-view)'s fields — always including `id` — in the 
     "priority": { "$ref": "task-view#/properties/priority" },
     "created_at": { "$ref": "task-view#/properties/created_at" },
     "completed_at": { "$ref": "task-view#/properties/completed_at" },
+    "updated_at": { "$ref": "task-view#/properties/updated_at" },
     "blocked_by": { "$ref": "task-view#/properties/blocked_by" },
     "tags": { "$ref": "task-view#/properties/tags" },
     "extra": { "$ref": "task-view#/properties/extra" },
@@ -462,7 +465,7 @@ The names a caller may choose are these properties' names:
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "task-field",
   "type": "string",
-  "enum": ["schema", "id", "title", "priority", "created_at", "completed_at", "blocked_by", "tags", "extra", "folder", "notes_path", "readiness", "blocking"]
+  "enum": ["schema", "id", "title", "priority", "created_at", "completed_at", "updated_at", "blocked_by", "tags", "extra", "folder", "notes_path", "readiness", "blocking"]
 }
 ```
 
@@ -869,7 +872,7 @@ The tasks under `folder` may be open or complete, and their task files may be un
 
 **Effects:**
 
-- Every task file outside `folder` whose `blocked_by` contains an ID of a task under `folder` has those IDs removed. Every other field, the task file's `schema`, and the `.md` are unchanged.
+- Every task file outside `folder` whose `blocked_by` contains an ID of a task under `folder` has those IDs removed and its `updated_at` set to the current time. Every other field, the task file's `schema`, and the `.md` are unchanged.
 - `folder` no longer exists, nor does anything under it: its tasks and their notes, its folders, and every other entry, hidden ones included.
 
 Tasks that were blocked only by tasks under `folder` become ready, as they would if those tasks had been completed. References between tasks under `folder` go with it.
@@ -1078,7 +1081,7 @@ Create a new, open task.
 }
 ```
 
-**Additional validation:** `title` is trimmed, then validated, per [Titles](design-spec.md#titles). `id`, `schema`, `created_at`, and `completed_at` are never input — ftask sets them.
+**Additional validation:** `title` is trimmed, then validated, per [Titles](design-spec.md#titles). `id`, `schema`, `created_at`, `completed_at`, and `updated_at` are never input — ftask sets them.
 
 **Preconditions:** `folder` exists; every ID in `blocked_by` names an existing task, open or complete. A `blocked_by` ID that has several task files exists.
 
@@ -1087,7 +1090,7 @@ Create a new, open task.
 **Effects:**
 
 - `last_id` is incremented; the new task's `id` is the new `last_id`.
-- A task exists in `folder` with the given fields, `schema` set to the supported task file format, `created_at` set to now, and `completed_at` `null`.
+- A task exists in `folder` with the given fields, `schema` set to the supported task file format, `created_at` and `updated_at` set to now, and `completed_at` `null`.
 - Its `.md` exists, containing `notes` (empty if none were given). A stray `.md` already at that path (left by an editor, or by a system crash) is replaced. If writing the `.md` fails, `create` still succeeds, with a `notes-missing` warning.
 
 **Invariants at risk:**
@@ -1255,7 +1258,7 @@ Mark a task complete by setting its `completed_at` to the current time. Completi
 
 **Effects:**
 
-- If the task is open: its `completed_at` is set to the current time. Every other field, the task file's `schema`, and the `.md` are unchanged.
+- If the task is open: its `completed_at` and `updated_at` are set to the current time. Every other field, the task file's `schema`, and the `.md` are unchanged.
 - If the task is already complete: nothing changes; `completed_at` keeps its original value.
 
 Completing a task can make its dependents ready. Readiness is always derived when read (see [Dependencies](design-spec.md#dependencies)), so no other file is rewritten.
@@ -1269,7 +1272,7 @@ Completing a task can make its dependents ready. Readiness is always derived whe
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "complete-output",
   "type": "object",
-  "required": ["schema", "id", "title", "priority", "created_at", "completed_at", "blocked_by", "tags", "extra", "folder", "notes_path", "changed"],
+  "required": ["schema", "id", "title", "priority", "created_at", "completed_at", "updated_at", "blocked_by", "tags", "extra", "folder", "notes_path", "changed"],
   "properties": {
     "schema": { "$ref": "task#/properties/schema" },
     "id": { "$ref": "task#/properties/id" },
@@ -1277,6 +1280,7 @@ Completing a task can make its dependents ready. Readiness is always derived whe
     "priority": { "$ref": "task#/properties/priority" },
     "created_at": { "$ref": "task#/properties/created_at" },
     "completed_at": { "$ref": "task#/properties/completed_at" },
+    "updated_at": { "$ref": "task#/properties/updated_at" },
     "blocked_by": { "$ref": "task#/properties/blocked_by" },
     "tags": { "$ref": "task#/properties/tags" },
     "extra": { "$ref": "task#/properties/extra" },
@@ -1338,7 +1342,7 @@ Reopen a complete task by clearing its `completed_at`. Reopening an already open
 
 **Effects:**
 
-- If the task is complete: its `completed_at` is set to `null`. Every other field, the task file's `schema`, and the `.md` are unchanged.
+- If the task is complete: its `completed_at` is set to `null` and its `updated_at` to the current time. Every other field, the task file's `schema`, and the `.md` are unchanged.
 - If the task is already open: nothing changes.
 
 Reopening a task can make its dependents blocked again, and the reopened task itself may be ready or blocked. Readiness is derived when read (see [Dependencies](design-spec.md#dependencies)), so no other file is rewritten.
@@ -1352,7 +1356,7 @@ Reopening a task can make its dependents blocked again, and the reopened task it
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "reopen-output",
   "type": "object",
-  "required": ["schema", "id", "title", "priority", "created_at", "completed_at", "blocked_by", "tags", "extra", "folder", "notes_path", "changed"],
+  "required": ["schema", "id", "title", "priority", "created_at", "completed_at", "updated_at", "blocked_by", "tags", "extra", "folder", "notes_path", "changed"],
   "properties": {
     "schema": { "$ref": "task#/properties/schema" },
     "id": { "$ref": "task#/properties/id" },
@@ -1360,6 +1364,7 @@ Reopening a task can make its dependents blocked again, and the reopened task it
     "priority": { "$ref": "task#/properties/priority" },
     "created_at": { "$ref": "task#/properties/created_at" },
     "completed_at": { "$ref": "task#/properties/completed_at" },
+    "updated_at": { "$ref": "task#/properties/updated_at" },
     "blocked_by": { "$ref": "task#/properties/blocked_by" },
     "tags": { "$ref": "task#/properties/tags" },
     "extra": { "$ref": "task#/properties/extra" },
@@ -1436,6 +1441,7 @@ How the cycle check decides: adding "`id` is blocked by B" creates a cycle exact
 **Effects:**
 
 - The task's `blocked_by` becomes `blocked_by` ∪ `blockers`. Blockers already present are left as they are.
+- If `blocked_by` changed, `updated_at` is set to the current time; if not, the task file is not rewritten.
 - Every other field, the task file's `schema`, and the `.md` are unchanged.
 
 The task may become blocked; readiness is derived when read (see [Dependencies](design-spec.md#dependencies)), so no other file is rewritten.
@@ -1452,7 +1458,7 @@ The task may become blocked; readiness is derived when read (see [Dependencies](
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "block-output",
   "type": "object",
-  "required": ["schema", "id", "title", "priority", "created_at", "completed_at", "blocked_by", "tags", "extra", "folder", "notes_path", "added"],
+  "required": ["schema", "id", "title", "priority", "created_at", "completed_at", "updated_at", "blocked_by", "tags", "extra", "folder", "notes_path", "added"],
   "properties": {
     "schema": { "$ref": "task#/properties/schema" },
     "id": { "$ref": "task#/properties/id" },
@@ -1460,6 +1466,7 @@ The task may become blocked; readiness is derived when read (see [Dependencies](
     "priority": { "$ref": "task#/properties/priority" },
     "created_at": { "$ref": "task#/properties/created_at" },
     "completed_at": { "$ref": "task#/properties/completed_at" },
+    "updated_at": { "$ref": "task#/properties/updated_at" },
     "blocked_by": { "$ref": "task#/properties/blocked_by" },
     "tags": { "$ref": "task#/properties/tags" },
     "extra": { "$ref": "task#/properties/extra" },
@@ -1528,6 +1535,7 @@ Remove one or more blockers from a task's `blocked_by`. Removing an ID that isn'
 **Effects:**
 
 - The task's `blocked_by` becomes `blocked_by` − `blockers`.
+- If `blocked_by` changed, `updated_at` is set to the current time; if not, the task file is not rewritten.
 - Every other field, the task file's `schema`, and the `.md` are unchanged.
 
 The task may become ready; readiness is derived when read (see [Dependencies](design-spec.md#dependencies)), so no other file is rewritten.
@@ -1541,7 +1549,7 @@ The task may become ready; readiness is derived when read (see [Dependencies](de
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "unblock-output",
   "type": "object",
-  "required": ["schema", "id", "title", "priority", "created_at", "completed_at", "blocked_by", "tags", "extra", "folder", "notes_path", "removed"],
+  "required": ["schema", "id", "title", "priority", "created_at", "completed_at", "updated_at", "blocked_by", "tags", "extra", "folder", "notes_path", "removed"],
   "properties": {
     "schema": { "$ref": "task#/properties/schema" },
     "id": { "$ref": "task#/properties/id" },
@@ -1549,6 +1557,7 @@ The task may become ready; readiness is derived when read (see [Dependencies](de
     "priority": { "$ref": "task#/properties/priority" },
     "created_at": { "$ref": "task#/properties/created_at" },
     "completed_at": { "$ref": "task#/properties/completed_at" },
+    "updated_at": { "$ref": "task#/properties/updated_at" },
     "blocked_by": { "$ref": "task#/properties/blocked_by" },
     "tags": { "$ref": "task#/properties/tags" },
     "extra": { "$ref": "task#/properties/extra" },
@@ -1585,7 +1594,7 @@ The task after the operation, per the [Task](#task) schema, plus `removed`.
 
 Change one or more of a task's user-owned fields: `title`, `priority`, `tags`, `extra`. Fields not named in the input are left unchanged.
 
-Other fields have their own operations: `blocked_by` ([`block`](#block), [`unblock`](#unblock)), `completed_at` ([`complete`](#complete), [`reopen`](#reopen)), the folder ([`move`](#move)). Notes are edited directly in the `.md`. `id`, `schema`, and `created_at` never change.
+Other fields have their own operations: `blocked_by` ([`block`](#block), [`unblock`](#unblock)), `completed_at` ([`complete`](#complete), [`reopen`](#reopen)), the folder ([`move`](#move)). Notes are edited directly in the `.md`. `id`, `schema`, and `created_at` never change; `updated_at` changes only as a side effect of a write.
 
 **Kind:** write. Takes the write lock. Requires a usable root.
 
@@ -1671,7 +1680,7 @@ The schema itself enforces the rest: at least one field to change (`{"id": 42}` 
 - **`tags`** — `replace_all`: becomes exactly the given set. `add`/`remove`: `tags` ∪ `add` − `remove`. Adding a tag already present, or removing one that isn't, changes nothing.
 - **`extra`** — `replace_all`: becomes exactly the given map. `merge`: each given key is set to the given value, replacing any earlier value wholesale (no recursive merge into objects); `null` is an ordinary value, not a deletion. `remove`: each given key is deleted; a key that isn't present changes nothing. Key order follows [File format](design-spec.md#file-format): existing keys keep their position; new keys are appended in the order given.
 
-Every other field, the task file's `schema`, and the `.md` are unchanged.
+`updated_at` is set to the current time when any field changes. Every other field, the task file's `schema`, and the `.md` are unchanged.
 
 A field counts as **changed** when its new value differs from its old one *as a JSON value*: maps compare regardless of key order, numbers by numeric value, `tags` as a set. If no field changes by that comparison, the task file is **not rewritten** at all — a no-op `update` leaves the file, and its layout, untouched.
 
@@ -1684,7 +1693,7 @@ A field counts as **changed** when its new value differs from its old one *as a 
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "update-output",
   "type": "object",
-  "required": ["schema", "id", "title", "priority", "created_at", "completed_at", "blocked_by", "tags", "extra", "folder", "notes_path", "changed"],
+  "required": ["schema", "id", "title", "priority", "created_at", "completed_at", "updated_at", "blocked_by", "tags", "extra", "folder", "notes_path", "changed"],
   "properties": {
     "schema": { "$ref": "task#/properties/schema" },
     "id": { "$ref": "task#/properties/id" },
@@ -1692,6 +1701,7 @@ A field counts as **changed** when its new value differs from its old one *as a 
     "priority": { "$ref": "task#/properties/priority" },
     "created_at": { "$ref": "task#/properties/created_at" },
     "completed_at": { "$ref": "task#/properties/completed_at" },
+    "updated_at": { "$ref": "task#/properties/updated_at" },
     "blocked_by": { "$ref": "task#/properties/blocked_by" },
     "tags": { "$ref": "task#/properties/tags" },
     "extra": { "$ref": "task#/properties/extra" },
@@ -1761,7 +1771,7 @@ Permanently remove a task, and remove its ID from every other task's `blocked_by
 
 **Effects:**
 
-- Every task file whose `blocked_by` contains `id` has it removed. Every other field, the task file's `schema`, and the `.md` are unchanged.
+- Every task file whose `blocked_by` contains `id` has it removed and its `updated_at` set to the current time. Every other field, the task file's `schema`, and the `.md` are unchanged.
 - The task no longer exists, nor does its `.md`.
 
 Tasks that were blocked only by this one become ready, as they would if it had been completed: deleting a task says its work won't happen, like cancelling it.
@@ -1877,7 +1887,7 @@ Move a task into a folder. Its ID, fields, and notes go with it; moving a task t
 
 **Effects:**
 
-- The task is in `to`, with every field, its task file's `schema`, and its `.md` unchanged. A stray `.md` already in `to` under the task's name — left by an editor after an earlier move (see [Assumptions](design-spec.md#assumptions)) — is replaced by the task's notes, or removed if the task has none.
+- The task is in `to`, with every field (including `updated_at`: the folder is not stored in the task file), its task file's `schema`, and its `.md` unchanged. A stray `.md` already in `to` under the task's name — left by an editor after an earlier move (see [Assumptions](design-spec.md#assumptions)) — is replaced by the task's notes, or removed if the task has none.
 - With `parents`, `to` and every folder above it exist.
 - If the task was already in `to`: nothing changes.
 
@@ -1890,7 +1900,7 @@ Move a task into a folder. Its ID, fields, and notes go with it; moving a task t
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "move-output",
   "type": "object",
-  "required": ["schema", "id", "title", "priority", "created_at", "completed_at", "blocked_by", "tags", "extra", "folder", "notes_path", "from", "created", "changed"],
+  "required": ["schema", "id", "title", "priority", "created_at", "completed_at", "updated_at", "blocked_by", "tags", "extra", "folder", "notes_path", "from", "created", "changed"],
   "properties": {
     "schema": { "$ref": "task#/properties/schema" },
     "id": { "$ref": "task#/properties/id" },
@@ -1898,6 +1908,7 @@ Move a task into a folder. Its ID, fields, and notes go with it; moving a task t
     "priority": { "$ref": "task#/properties/priority" },
     "created_at": { "$ref": "task#/properties/created_at" },
     "completed_at": { "$ref": "task#/properties/completed_at" },
+    "updated_at": { "$ref": "task#/properties/updated_at" },
     "blocked_by": { "$ref": "task#/properties/blocked_by" },
     "tags": { "$ref": "task#/properties/tags" },
     "extra": { "$ref": "task#/properties/extra" },

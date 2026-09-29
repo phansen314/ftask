@@ -243,11 +243,7 @@ func runUpdate(env Env, in UpdateInput, w *errs.Collector) (any, *errs.Error) {
 			}
 		}
 		if len(out.Changed) > 0 {
-			data, err := t.Encode()
-			if err != nil {
-				return errs.Internal("encoding the task file: " + err.Error())
-			}
-			if e := tx.Replace(ld.Loc.Rel(), data); e != nil {
+			if e := replaceTask(tx, ld.Loc.Rel(), t, model.TimestampOf(env.Clock())); e != nil {
 				return e
 			}
 		}

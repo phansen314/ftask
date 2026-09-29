@@ -3,6 +3,7 @@ package ops
 import (
 	"fmt"
 	"maps"
+	"regexp"
 	"slices"
 	"strings"
 	"syscall"
@@ -81,6 +82,16 @@ func (f *fixture) blockedBy(rel string) string {
 	return strings.Join(strings.Fields(s[:strings.IndexAny(s, "]")+1]), "")
 }
 
+// updatedAt is the updated_at of the task file at rel under the root.
+func (f *fixture) updatedAt(rel string) string {
+	f.t.Helper()
+	m := regexp.MustCompile(`"updated_at": "([^"]*)"`).FindStringSubmatch(f.read("tasks/" + rel))
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
 func TestDelete(t *testing.T) {
 	f := newFixture(t)
 	f.task("p", 5, false)
@@ -96,6 +107,11 @@ func TestDelete(t *testing.T) {
 	}
 	if got := f.blockedBy("6.json") + " " + f.blockedBy("q/8.json"); got != "[7] []" {
 		t.Errorf("blocked_by %s", got)
+	}
+	// Only the dependents rewritten are stamped.
+	if got, want := f.updatedAt("6.json")+" "+f.updatedAt("7.json")+" "+f.updatedAt("q/8.json"),
+		"2026-09-28T12:00:00Z 2026-09-20T18:31:51Z 2026-09-28T12:00:00Z"; got != want {
+		t.Errorf("updated_at %s, want %s", got, want)
 	}
 }
 
@@ -168,6 +184,9 @@ func TestDeleteFolder(t *testing.T) {
 	if got := f.blockedBy("q/7.json"); got != "[9]" {
 		t.Errorf("blocked_by %s", got)
 	}
+	if got, want := f.updatedAt("q/7.json")+" "+f.updatedAt("9.json"), "2026-09-28T12:00:00Z 2026-09-20T18:31:51Z"; got != want {
+		t.Errorf("updated_at %s, want %s", got, want)
+	}
 }
 
 func TestDeleteFolderCases(t *testing.T) {
@@ -234,7 +253,7 @@ func TestMove(t *testing.T) {
 	f.task("", 6, false)
 	f.write("tasks/5.md", "notes\n")
 	got := f.op("move", `{"id": 5, "to": "/p/q", "parents": true}`)
-	want := `{"schema":1,"id":5,"title":"task 5","priority":null,"created_at":"2026-09-20T18:31:51Z","completed_at":null,"blocked_by":[6],"tags":[],"extra":{},"folder":"/p/q","notes_path":"~/tasks/p/q/5.md","from":"/","created":["/p","/p/q"],"changed":true}`
+	want := `{"schema":1,"id":5,"title":"task 5","priority":null,"created_at":"2026-09-20T18:31:51Z","completed_at":null,"updated_at":"2026-09-20T18:31:51Z","blocked_by":[6],"tags":[],"extra":{},"folder":"/p/q","notes_path":"~/tasks/p/q/5.md","from":"/","created":["/p","/p/q"],"changed":true}`
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}

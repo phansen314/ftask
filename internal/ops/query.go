@@ -198,6 +198,17 @@ func findOne(tx *store.Tx, id model.ID) (*store.Loaded, *errs.Error) {
 	return copies[0], nil
 }
 
+// replaceTask writes t, changed by the caller, over the task file at rel,
+// stamping its updated_at with now.
+func replaceTask(tx *store.Tx, rel string, t *model.TaskFile, now model.Timestamp) *errs.Error {
+	t.UpdatedAt = now
+	data, err := t.Encode()
+	if err != nil {
+		return errs.Internal("encoding the task file: " + err.Error())
+	}
+	return tx.Replace(rel, data)
+}
+
 // inScope is the query behind list and frontier (implementation-spec.md,
 // Queries: filter by scope): the path walk of in.Folder, then every folder
 // that could not be listed as a warning, then the folders in scope and the

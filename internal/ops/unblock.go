@@ -44,11 +44,7 @@ func runUnblock(env Env, in BlockersInput, w *errs.Collector) (any, *errs.Error)
 		}
 		if len(removed) > 0 {
 			ld.Task.BlockedBy = kept
-			data, err := ld.Task.Encode()
-			if err != nil {
-				return errs.Internal("encoding the task file: " + err.Error())
-			}
-			if e := tx.Replace(ld.Loc.Rel(), data); e != nil {
+			if e := replaceTask(tx, ld.Loc.Rel(), &ld.Task, model.TimestampOf(env.Clock())); e != nil {
 				return e
 			}
 		}

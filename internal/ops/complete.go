@@ -34,16 +34,12 @@ func setCompleted(env Env, id model.ID, complete bool, w *errs.Collector) (any, 
 			return e
 		}
 		if ld.Task.Open() == complete {
+			now := model.TimestampOf(env.Clock())
 			ld.Task.CompletedAt = nil
 			if complete {
-				now := model.TimestampOf(env.Clock())
 				ld.Task.CompletedAt = &now
 			}
-			data, err := ld.Task.Encode()
-			if err != nil {
-				return errs.Internal("encoding the task file: " + err.Error())
-			}
-			if e := tx.Replace(ld.Loc.Rel(), data); e != nil {
+			if e := replaceTask(tx, ld.Loc.Rel(), &ld.Task, now); e != nil {
 				return e
 			}
 			out.Changed = true

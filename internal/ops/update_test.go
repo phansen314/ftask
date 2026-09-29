@@ -46,7 +46,7 @@ func TestUpdate(t *testing.T) {
 	f.write("tasks/proj/7.md", "notes\n")
 	e := Run("update", parse(t, `{"id": 7, "title": " Pack light ", "tags": {"add": ["packing"]}, "extra": {"merge": {"z": 1, "a": {"b": 2}}}}`), nil, f.env)
 	got := f.rel(line(t, e))
-	want := `{"ok":true,"result":{"schema":1,"id":7,"title":"Pack light","priority":-2,"created_at":"2026-09-20T18:31:51Z","completed_at":null,"blocked_by":[1,3],"tags":["packing","travel"],"extra":{"n":1.50,"deep":{"k":[true,null]},"z":1,"a":{"b":2}},"folder":"/proj","notes_path":"~/tasks/proj/7.md","changed":["title","tags","extra"]},"warnings":[]}` + "\n"
+	want := `{"ok":true,"result":{"schema":1,"id":7,"title":"Pack light","priority":-2,"created_at":"2026-09-20T18:31:51Z","completed_at":null,"updated_at":"2026-09-28T12:00:00Z","blocked_by":[1,3],"tags":["packing","travel"],"extra":{"n":1.50,"deep":{"k":[true,null]},"z":1,"a":{"b":2}},"folder":"/proj","notes_path":"~/tasks/proj/7.md","changed":["title","tags","extra"]},"warnings":[]}` + "\n"
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
@@ -54,7 +54,7 @@ func TestUpdate(t *testing.T) {
 		`"title": "Pack bags"`, `"title": "Pack light"`,
 		"\"tags\": [\n    \"travel\"\n  ]", "\"tags\": [\n    \"packing\",\n    \"travel\"\n  ]",
 		"        null\n      ]\n    }\n  }", "        null\n      ]\n    },\n    \"z\": 1,\n    \"a\": {\n      \"b\": 2\n    }\n  }",
-	).Replace(richTask(false))
+	).Replace(stamped(richTask(false)))
 	if got := f.read("tasks/proj/7.json"); got != wantFile {
 		t.Errorf("task file:\n%s\nwant\n%s", got, wantFile)
 	}
@@ -131,9 +131,9 @@ func TestUpdateCases(t *testing.T) {
 // A field left as it was keeps its exact form in a rewritten file.
 func TestUpdateKeepsUnchangedForm(t *testing.T) {
 	f := newFixture(t)
-	f.write("tasks/7.json", `{"schema":1,"id":7,"title":"t","priority":null,"created_at":"2026-09-20T18:31:51Z","completed_at":null,"blocked_by":[],"tags":[],"extra":{"b":1e2,"a":1}}`)
+	f.write("tasks/7.json", `{"schema":1,"id":7,"title":"t","priority":null,"created_at":"2026-09-20T18:31:51Z","completed_at":null,"updated_at":"2026-09-20T18:31:51Z","blocked_by":[],"tags":[],"extra":{"b":1e2,"a":1}}`)
 	f.update(`{"id": 7, "title": "u", "extra": {"replace_all": {"a": 1.0, "b": 100}}}`)
-	want := "{\n  \"schema\": 1,\n  \"id\": 7,\n  \"title\": \"u\",\n  \"priority\": null,\n  \"created_at\": \"2026-09-20T18:31:51Z\",\n  \"completed_at\": null,\n  \"blocked_by\": [],\n  \"tags\": [],\n  \"extra\": {\n    \"b\": 1e2,\n    \"a\": 1\n  }\n}\n"
+	want := "{\n  \"schema\": 1,\n  \"id\": 7,\n  \"title\": \"u\",\n  \"priority\": null,\n  \"created_at\": \"2026-09-20T18:31:51Z\",\n  \"completed_at\": null,\n  \"updated_at\": \"2026-09-28T12:00:00Z\",\n  \"blocked_by\": [],\n  \"tags\": [],\n  \"extra\": {\n    \"b\": 1e2,\n    \"a\": 1\n  }\n}\n"
 	if got := f.read("tasks/7.json"); got != want {
 		t.Errorf("task file:\n%s\nwant\n%s", got, want)
 	}

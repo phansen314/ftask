@@ -98,12 +98,12 @@ func TestCreate(t *testing.T) {
 	f.task("proj", 3, true)
 	got := f.rel(line(t, f.create(`{"title": "  Book flights ", "folder": "/proj", "priority": 2, "tags": ["urgent", "travel"],
 		"blocked_by": [3, 1], "extra": {"status": "waiting", "n": 1.50}, "notes": "call first\n"}`)))
-	want := `{"ok":true,"result":{"schema":1,"id":101,"title":"Book flights","priority":2,"created_at":"2026-09-28T12:00:00Z","completed_at":null,"blocked_by":[1,3],"tags":["travel","urgent"],"extra":{"status":"waiting","n":1.50},"folder":"/proj","notes_path":"~/tasks/proj/101.md"},"warnings":[]}` + "\n"
+	want := `{"ok":true,"result":{"schema":1,"id":101,"title":"Book flights","priority":2,"created_at":"2026-09-28T12:00:00Z","completed_at":null,"updated_at":"2026-09-28T12:00:00Z","blocked_by":[1,3],"tags":["travel","urgent"],"extra":{"status":"waiting","n":1.50},"folder":"/proj","notes_path":"~/tasks/proj/101.md"},"warnings":[]}` + "\n"
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
 	for rel, want := range map[string]string{
-		"tasks/proj/101.json": "{\n  \"schema\": 1,\n  \"id\": 101,\n  \"title\": \"Book flights\",\n  \"priority\": 2,\n  \"created_at\": \"2026-09-28T12:00:00Z\",\n  \"completed_at\": null,\n  \"blocked_by\": [\n    1,\n    3\n  ],\n  \"tags\": [\n    \"travel\",\n    \"urgent\"\n  ],\n  \"extra\": {\n    \"status\": \"waiting\",\n    \"n\": 1.50\n  }\n}\n",
+		"tasks/proj/101.json": "{\n  \"schema\": 1,\n  \"id\": 101,\n  \"title\": \"Book flights\",\n  \"priority\": 2,\n  \"created_at\": \"2026-09-28T12:00:00Z\",\n  \"completed_at\": null,\n  \"updated_at\": \"2026-09-28T12:00:00Z\",\n  \"blocked_by\": [\n    1,\n    3\n  ],\n  \"tags\": [\n    \"travel\",\n    \"urgent\"\n  ],\n  \"extra\": {\n    \"status\": \"waiting\",\n    \"n\": 1.50\n  }\n}\n",
 		"tasks/proj/101.md":   "call first\n",
 		"tasks/ftask.json":    "{\n  \"schema\": 1,\n  \"last_id\": 101\n}\n",
 	} {
@@ -119,7 +119,7 @@ func TestCreateDefaults(t *testing.T) {
 	f := newFixture(t)
 	e := f.create(`{"title": "x"}`)
 	got := f.rel(line(t, e))
-	want := `{"ok":true,"result":{"schema":1,"id":101,"title":"x","priority":null,"created_at":"2026-09-28T12:00:00Z","completed_at":null,"blocked_by":[],"tags":[],"extra":{},"folder":"/","notes_path":"~/tasks/101.md"},"warnings":[]}` + "\n"
+	want := `{"ok":true,"result":{"schema":1,"id":101,"title":"x","priority":null,"created_at":"2026-09-28T12:00:00Z","completed_at":null,"updated_at":"2026-09-28T12:00:00Z","blocked_by":[],"tags":[],"extra":{},"folder":"/","notes_path":"~/tasks/101.md"},"warnings":[]}` + "\n"
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}

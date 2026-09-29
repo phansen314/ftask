@@ -49,7 +49,7 @@ func runDelete(env Env, in IDInput, w *errs.Collector) (any, *errs.Error) {
 			return errs.Conflict(errs.RuleIDAboveLastID, []int64{int64(in.ID)})
 		}
 		target := locs[0]
-		deps, e := removeReferences(tx, []model.ID{in.ID}, func(l store.Location) bool { return l == target })
+		deps, e := removeReferences(tx, []model.ID{in.ID}, func(l store.Location) bool { return l == target }, model.TimestampOf(env.Clock()))
 		if e != nil {
 			return e
 		}
@@ -71,11 +71,12 @@ func runDelete(env Env, in IDInput, w *errs.Collector) (any, *errs.Error) {
 }
 
 // removeReferences removes ids from the blocked_by of every task file not
-// being removed (skip), one file at a time, in tree order, and returns the
-// IDs of the tasks it rewrote, ascending. An unusable task file may hold a
-// reference that can't be read, so every one is an unusable-file warning. An
-// error after at least one rewrite carries the partial.
-func removeReferences(tx *store.Tx, ids []model.ID, skip func(store.Location) bool) ([]model.ID, *errs.Error) {
+// being removed (skip), one file at a time, in tree order, stamping each
+// updated_at now, and returns the IDs of the tasks it rewrote, ascending. An
+// unusable task file may hold a reference that can't be read, so every one
+// is an unusable-file warning. An error after at least one rewrite carries
+// the partial.
+func removeReferences(tx *store.Tx, ids []model.ID, skip func(store.Location) bool, now model.Timestamp) ([]model.ID, *errs.Error) {
 	deps := []model.ID{}
 	for _, l := range tx.Index().Tasks {
 		if skip(l) {
@@ -98,11 +99,7 @@ func removeReferences(tx *store.Tx, ids []model.ID, skip func(store.Location) bo
 		}
 		t := ld.Task
 		t.BlockedBy = kept
-		data, err := t.Encode()
-		if err != nil {
-			return nil, errs.Internal("encoding the task file: " + err.Error())
-		}
-		if e := tx.Replace(l.Rel(), data); e != nil {
+		if e := replaceTask(tx, l.Rel(), &t, now); e != nil {
 			return nil, partialDependents(e, deps)
 		}
 		deps = append(deps, l.ID)
@@ -206,7 +203,7 @@ func runDeleteFolder(env Env, in DeleteFolderInput, w *errs.Collector) (any, *er
 			case above != nil:
 				return errs.Conflict(errs.RuleIDAboveLastID, above)
 			}
-			if deps, e = removeReferences(tx, ids, func(l store.Location) bool { return under(l.Folder) }); e != nil {
+			if deps, e = removeReferences(tx, ids, func(l store.Location) bool { return under(l.Folder) }, model.TimestampOf(env.Clock())); e != nil {
 				return e
 			}
 		}

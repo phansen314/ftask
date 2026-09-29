@@ -87,9 +87,10 @@ func runCreate(env Env, in CreateInput, w *errs.Collector) (any, *errs.Error) {
 
 		id := model.ID(tx.Meta().LastID + 1)
 		loc := store.Location{Folder: in.Folder, ID: id}
+		now := model.TimestampOf(env.Clock())
 		tf := model.TaskFile{
 			Schema: model.TaskSchema, ID: id, Title: in.Title, Priority: in.Priority,
-			CreatedAt: model.TimestampOf(env.Clock()), BlockedBy: in.BlockedBy, Tags: in.Tags, Extra: in.Extra,
+			CreatedAt: now, UpdatedAt: now, BlockedBy: in.BlockedBy, Tags: in.Tags, Extra: in.Extra,
 		}
 		data, err := tf.Encode()
 		if err != nil {

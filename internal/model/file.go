@@ -125,6 +125,9 @@ func DecodeTaskFile(obj *jsonio.Object, repeated []string, filenameID ID) (TaskF
 			t.CompletedAt = &ts
 		}
 	}
+	if v, ok := f.Required("updated_at"); ok {
+		t.UpdatedAt, _ = p.Timestamp(v, "/updated_at")
+	}
 	if v, ok := f.Required("blocked_by"); ok {
 		if ids, ok := p.IDs(v, "/blocked_by"); ok {
 			t.BlockedBy = ids

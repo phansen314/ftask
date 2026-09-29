@@ -15,6 +15,7 @@ type TaskFile struct {
 	Priority    *int64         `json:"priority"`
 	CreatedAt   Timestamp      `json:"created_at"`
 	CompletedAt *Timestamp     `json:"completed_at"`
+	UpdatedAt   Timestamp      `json:"updated_at"`
 	BlockedBy   []ID           `json:"blocked_by"`
 	Tags        []Tag          `json:"tags"`
 	Extra       *jsonio.Object `json:"extra"`
@@ -88,8 +89,8 @@ func (v *TaskView) Normalize() {
 // ViewFields are a task view's field names, in the order it is returned
 // (the task-field schema).
 var ViewFields = []string{
-	"schema", "id", "title", "priority", "created_at", "completed_at", "blocked_by",
-	"tags", "extra", "folder", "notes_path", "readiness", "blocking",
+	"schema", "id", "title", "priority", "created_at", "completed_at", "updated_at",
+	"blocked_by", "tags", "extra", "folder", "notes_path", "readiness", "blocking",
 }
 
 // Project returns v with only the named fields, and id whether named or not,
@@ -120,6 +121,8 @@ func (v TaskView) field(name string) any {
 		return v.CreatedAt
 	case "completed_at":
 		return v.CompletedAt
+	case "updated_at":
+		return v.UpdatedAt
 	case "blocked_by":
 		return v.BlockedBy
 	case "tags":

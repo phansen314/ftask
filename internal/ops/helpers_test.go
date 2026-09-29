@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"testing"
@@ -17,6 +18,12 @@ import (
 
 // fixedClock is the tests' clock, so written files compare byte for byte.
 func fixedClock() time.Time { return time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC) }
+
+// stamped is file, a task file as ftask writes it, with its updated_at set to
+// fixedClock, as a write that changes the task leaves it.
+func stamped(file string) string {
+	return regexp.MustCompile(`"updated_at": "[^"]*"`).ReplaceAllString(file, `"updated_at": "2026-09-28T12:00:00Z"`)
+}
 
 // fixture is a usable root under a temp home: the config in cfg/, the root
 // at tasks/ with ftask.json's last_id 100, and no tasks.
@@ -62,7 +69,7 @@ func (f *fixture) task(folder string, id model.ID, completed bool, blockedBy ...
 	f.t.Helper()
 	tf := model.TaskFile{
 		Schema: model.TaskSchema, ID: id, Title: model.Title(fmt.Sprintf("task %d", id)),
-		CreatedAt: "2026-09-20T18:31:51Z", BlockedBy: blockedBy, Extra: &jsonio.Object{},
+		CreatedAt: "2026-09-20T18:31:51Z", UpdatedAt: "2026-09-20T18:31:51Z", BlockedBy: blockedBy, Extra: &jsonio.Object{},
 	}
 	if completed {
 		ts := model.Timestamp("2026-09-21T10:00:00Z")
@@ -80,7 +87,7 @@ func (f *fixture) tagged(folder string, id model.ID, tags ...model.Tag) {
 	f.t.Helper()
 	tf := model.TaskFile{
 		Schema: model.TaskSchema, ID: id, Title: model.Title(fmt.Sprintf("task %d", id)),
-		CreatedAt: "2026-09-20T18:31:51Z", Tags: tags, Extra: &jsonio.Object{},
+		CreatedAt: "2026-09-20T18:31:51Z", UpdatedAt: "2026-09-20T18:31:51Z", Tags: tags, Extra: &jsonio.Object{},
 	}
 	data, err := tf.Encode()
 	if err != nil {
