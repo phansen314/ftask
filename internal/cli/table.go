@@ -21,8 +21,9 @@ const (
 	NullableInt
 	// IDList is a comma list of Int items; occurrences are joined.
 	IDList
-	// TagList is a comma list of string items; occurrences are joined.
-	TagList
+	// StringList is a comma list of string items (tags, field names, readiness
+	// values); occurrences are joined.
+	StringList
 	// Repeated is one string item per occurrence.
 	Repeated
 	// JSON is exactly one JSON value, read like operation input.

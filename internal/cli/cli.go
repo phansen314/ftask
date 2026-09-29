@@ -146,7 +146,7 @@ func newCommand(c *Command, env Env, result **ops.Envelope) *cobra.Command {
 		switch o.Type {
 		case Bool:
 			fs.BoolP(o.Name, o.Short, false, o.Help)
-		case IDList, TagList, Repeated:
+		case IDList, StringList, Repeated:
 			fs.StringArrayP(o.Name, o.Short, nil, o.Help)
 		default:
 			fs.StringP(o.Name, o.Short, "", o.Help)

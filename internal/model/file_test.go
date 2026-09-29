@@ -1,12 +1,16 @@
 package model
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/phansen314/ftask/internal/errs"
 	"github.com/phansen314/ftask/internal/jsonio"
+	"github.com/phansen314/ftask/internal/schematest"
 )
 
 // The design spec's example task file, in File format.
@@ -249,5 +253,48 @@ func TestTaskViewKeyOrder(t *testing.T) {
 	want := `{"schema":1,"id":42,"title":"Book flights","priority":2,"created_at":"2026-09-20T18:31:51Z","completed_at":null,"blocked_by":[],"tags":["travel"],"extra":{"status":"waiting on quote"},"folder":"/proj","notes_path":"/r/proj/42.md","readiness":"ready","blocking":[]}` + "\n"
 	if string(got) != want {
 		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}
+
+// A projection of every field is the whole view, byte for byte; a smaller
+// one keeps the view's order and always id.
+func TestTaskViewProject(t *testing.T) {
+	tf, _ := decodeTask(t, exampleTask, 42)
+	v := TaskView{Task: Task{TaskFile: tf, Folder: "/proj", NotesPath: "/r/proj/42.md"}, Readiness: Ready, Blocking: []ID{}}
+	whole, err := jsonio.MarshalLine(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		fields []string
+		want   string
+	}{
+		{ViewFields, strings.TrimSuffix(string(whole), "\n")},
+		{[]string{"folder", "title"}, `{"id":42,"title":"Book flights","folder":"/proj"}`},
+		{[]string{"id"}, `{"id":42}`},
+		{[]string{"blocking", "extra", "priority"}, `{"id":42,"priority":2,"extra":{"status":"waiting on quote"},"blocking":[]}`},
+	} {
+		got, err := jsonio.MarshalLine(v.Project(tc.fields))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(got) != tc.want+"\n" {
+			t.Errorf("%v:\ngot  %s\nwant %s", tc.fields, got, tc.want)
+		}
+	}
+}
+
+// ViewFields are the task-field schema's names, in task-view's order.
+func TestViewFieldsAgreeWithSchema(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join(schematest.Dir(), "task-field.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s struct{ Enum []string }
+	if err := json.Unmarshal(data, &s); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(s.Enum, ViewFields) {
+		t.Errorf("task-field lists %v, ViewFields %v", s.Enum, ViewFields)
 	}
 }

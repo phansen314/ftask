@@ -182,14 +182,20 @@ echo "== list"
 # complete 1, 3 (/proj/travel) and 6 (/proj/work).
 check "every open task, in tree order" 0 '[.result.tasks[].id] == [7, 4, 2, 5] and (.result | has("folders") | not)' -- list
 check "readiness shown" 0 '[.result.tasks[] | {id, readiness}] == [{id: 7, readiness: "ready"}, {id: 4, readiness: "blocked"}, {id: 2, readiness: "ready"}, {id: 5, readiness: "blocked"}]' -- list
-check "with complete tasks" 0 '[.result.tasks[].id] == [7, 4, 1, 2, 3, 6, 5]' -- list --include-complete
+check "with complete tasks" 0 '[.result.tasks[].id] == [7, 4, 1, 2, 3, 6, 5]' -- list --readiness ready,blocked,complete
+check "only complete" 0 '[.result.tasks[].id] == [1, 3, 6]' -- list --readiness complete
 check "one folder" 0 '[.result.tasks[].id] == [5]' -- list --folder /proj/work
-check "one folder with complete" 0 '[.result.tasks[].id] == [6, 5]' -- list --folder /proj/work --include-complete
+check "one folder with complete" 0 '[.result.tasks[].id] == [6, 5]' -- list --folder /proj/work --readiness ready,blocked,complete
 check "not recursive" 0 '.result.tasks == []' -- list --folder /proj --recursive=false
 check "folders" 0 '.result.folders == ["/", "/home", "/proj", "/proj/travel", "/proj/work", "/proj/work/q3"]' -- list --include-folders
 check "folders, not recursive" 0 '.result.folders == ["/proj", "/proj/travel", "/proj/work"]' -- list --folder /proj --recursive=false --include-folders
 check "missing folder" 1 '.error.details.folders == ["/nope"]' -- list --folder /nope
 check "list takes no arguments" 2 '.error.kind == "usage"' -- list /proj
+check "limit: a prefix, with the count" 0 '[.result.tasks[].id] == [7, 4] and .result.total == 4 and .result.truncated' -- list --limit 2
+check "no limit: nothing cut" 0 '.result.total == 4 and (.result.truncated | not)' -- list
+check "fields: those and id" 0 '.result.tasks[0] == {id: 7, title: "Water the plants", readiness: "ready"}' -- list --fields readiness,title --limit 1
+check "blocked, briefly" 0 '.result.tasks == [{id: 4, blocking: [2]}, {id: 5, blocking: [7]}]' -- list --readiness blocked --fields blocking
+check "include-complete is gone" 2 '.error.kind == "usage"' -- list --include-complete
 
 echo "== frontier"
 # Ready now: 2 and 7, neither with a priority (update cleared 7's);
@@ -205,7 +211,9 @@ check "complete 2" 0 '.result.changed' -- complete 2
 check "4 ready too: tie on no priority, lower ID first" 0 '[.result.tasks[].id] == [5, 4]' -- frontier
 check "not recursive" 0 '.result.tasks == []' -- frontier --folder /proj --recursive=false
 check "missing folder" 1 '.error.details.folders == ["/nope"]' -- frontier --folder /nope
-check "list's options aren't frontier's" 2 '.error.kind == "usage"' -- frontier --include-complete
+check "limit and fields" 0 '.result == {tasks: [{id: 5, priority: 9}], total: 2, truncated: true}' -- frontier --limit 1 --fields priority
+check "the count alone" 0 '.result | .tasks == [] and .total == 2' -- frontier --limit 0
+check "list's options aren't frontier's" 2 '.error.kind == "usage"' -- frontier --readiness ready
 
 echo "== move and delete"
 # Here: complete 1, 2, 3 (/proj/travel), 6 (/proj/work, blocked by 5), 7 (/);
@@ -223,7 +231,7 @@ check "5 ready" 0 '.result.tasks[0] | .blocked_by == [] and .readiness == "ready
 check "delete: gone" 1 '.error.details.ids == [7]' -- delete 7
 check "delete-folder -r: 4 no longer blocked by 2" 0 '.result | .ids == [1, 2, 3] and .dependents == [4]' -- delete-folder -r /proj
 check "delete-folder: the root never" 1 '.error.kind == "invalid-input"' -- delete-folder -r /
-check "what's left" 0 '[.result.tasks[].id] == [4, 6, 5] and .result.folders == ["/", "/archive", "/archive/work", "/archive/work/q3", "/home"]' -- list --include-complete --include-folders
+check "what's left" 0 '[.result.tasks[].id] == [4, 6, 5] and .result.folders == ["/", "/archive", "/archive/work", "/archive/work/q3", "/home"]' -- list --readiness ready,blocked,complete --include-folders
 
 echo "== end state"
 check "last_id counts every task" 0 '.result.tree.last_id == 7' -- info

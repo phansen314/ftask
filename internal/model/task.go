@@ -85,6 +85,59 @@ func (v *TaskView) Normalize() {
 	slices.Sort(v.Blocking)
 }
 
+// ViewFields are a task view's field names, in the order it is returned
+// (the task-field schema).
+var ViewFields = []string{
+	"schema", "id", "title", "priority", "created_at", "completed_at", "blocked_by",
+	"tags", "extra", "folder", "notes_path", "readiness", "blocking",
+}
+
+// Project returns v with only the named fields, and id whether named or not,
+// in ViewFields order (the task-projection schema). Names not in ViewFields
+// are ignored.
+func (v TaskView) Project(fields []string) *jsonio.Object {
+	out := &jsonio.Object{}
+	for _, name := range ViewFields {
+		if name == "id" || slices.Contains(fields, name) {
+			out.Members = append(out.Members, jsonio.Member{Key: name, Value: v.field(name)})
+		}
+	}
+	return out
+}
+
+// field is the value of v's field name, as it is encoded.
+func (v TaskView) field(name string) any {
+	switch name {
+	case "schema":
+		return v.Schema
+	case "id":
+		return v.ID
+	case "title":
+		return v.Title
+	case "priority":
+		return v.Priority
+	case "created_at":
+		return v.CreatedAt
+	case "completed_at":
+		return v.CompletedAt
+	case "blocked_by":
+		return v.BlockedBy
+	case "tags":
+		return v.Tags
+	case "extra":
+		return v.Extra
+	case "folder":
+		return v.Folder
+	case "notes_path":
+		return v.NotesPath
+	case "readiness":
+		return v.Readiness
+	case "blocking":
+		return v.Blocking
+	}
+	return nil
+}
+
 // RootFile is ftask.json's content (see design-spec.md, Root metadata).
 type RootFile struct {
 	Schema int64 `json:"schema"`

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/phansen314/ftask/internal/schematest"
 )
 
 func TestExitCodes(t *testing.T) {
@@ -270,20 +272,72 @@ func TestBlockUnblock(t *testing.T) {
 func TestListFrontier(t *testing.T) {
 	same := newTree(t).cmd
 	steps(t, []step{
-		{same("list"), 0, `"result":{"tasks":[]}`},
+		{same("list"), 0, `"result":{"tasks":[],"total":0,"truncated":false}`},
 		{same("create-folder", "-p", "/proj/travel"), 0, `"created"`},
 		{same("create", "b", "--folder", "/proj/travel"), 0, `"id":1,`},
 		{same("create", "a", "--blocked-by", "1"), 0, `"id":2,`},
 		{same("complete", "1"), 0, `"changed":true`},
 		{same("list"), 0, `"tasks":[{"schema":1,"id":2,`},
-		{same("list", "--include-complete", "--include-folders"), 0, `"folders":["/","/proj","/proj/travel"],"tasks":[{"schema":1,"id":2,`},
+		{same("list", "--readiness", "ready,blocked,complete", "--include-folders"), 0, `"folders":["/","/proj","/proj/travel"],"tasks":[{"schema":1,"id":2,`},
 		{same("list", "--folder", "/nope"), 1, `"folders":["/nope"]`},
 		{same("create", "c", "--priority", "5", "--folder", "/proj"), 0, `"id":3,`},
 		{same("create", "d", "--blocked-by", "3"), 0, `"id":4,`},
 		{same("frontier"), 0, `"tasks":[{"schema":1,"id":3,`},
 		{same("frontier", "--folder", "/proj", "--recursive=false"), 0, `"tasks":[{"schema":1,"id":3,`},
 		{same("complete", "3"), 0, `"changed":true`},
-		{same("frontier", "--folder", "/proj"), 0, `"result":{"tasks":[]}`},
+		{same("frontier", "--folder", "/proj"), 0, `"result":{"tasks":[],"total":0,"truncated":false}`},
+	})
+}
+
+// frontier and list narrowed from the command line: each output shape —
+// projected, cut by a limit, the count alone, filtered — is exactly as
+// expected and passes its output schema, and a warning survives narrowing.
+func TestNarrowing(t *testing.T) {
+	tr := newTree(t)
+	same := tr.cmd
+	steps(t, []step{
+		{same("create", "a", "--priority", "1", "--tags", "db"), 0, `"id":1,`},
+		{same("create", "b", "--priority", "3", "--tags", "db,backend"), 0, `"id":2,`},
+		{same("create", "c", "--blocked-by", "1"), 0, `"id":3,`},
+		{same("create", "d"), 0, `"id":4,`},
+		{same("complete", "4"), 0, `"changed":true`},
+	})
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"frontier", "--limit", "1", "--fields", "title,priority"},
+			`{"tasks":[{"id":2,"title":"b","priority":3}],"total":2,"truncated":true}`},
+		{[]string{"frontier", "--limit", "0"}, `{"tasks":[],"total":2,"truncated":true}`},
+		{[]string{"frontier", "--tags-all", "db,backend", "--fields", "id"}, `{"tasks":[{"id":2}],"total":1,"truncated":false}`},
+		{[]string{"list", "--readiness", "blocked", "--fields", "readiness,blocking"},
+			`{"tasks":[{"id":3,"readiness":"blocked","blocking":[1]}],"total":1,"truncated":false}`},
+		{[]string{"list", "--readiness", "complete", "--fields", "readiness"},
+			`{"tasks":[{"id":4,"readiness":"complete"}],"total":1,"truncated":false}`},
+		{[]string{"list", "--tags-any", "backend,nope", "--limit", "5", "--fields", "tags", "--include-folders"},
+			`{"folders":["/"],"tasks":[{"id":2,"tags":["backend","db"]}],"total":1,"truncated":false}`},
+	} {
+		r := run(t, same(tc.args...))
+		envelope(t, r)
+		var env struct{ Result json.RawMessage }
+		if err := json.Unmarshal([]byte(r.stdout), &env); err != nil {
+			t.Fatal(err)
+		}
+		if r.code != 0 || string(env.Result) != tc.want {
+			t.Errorf("%q: exit %d, result\n  %s\nwant\n  %s", tc.args, r.code, env.Result, tc.want)
+		}
+		if ok, f := schematest.Check(t, tc.args[0]+"-output", env.Result); !ok {
+			t.Errorf("%q: %s-output rejects at %s", tc.args, tc.args[0], f)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(tr.home, "tasks", "9.json"), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	steps(t, []step{
+		{same("frontier", "--limit", "0"), 0, `"warnings":[{"kind":"unusable-file"`},
+		{same("list", "--readiness", "nope"), 1, `"field":"/readiness/0"`},
+		{same("frontier", "--fields", "id,nope"), 1, `"field":"/fields/1"`},
+		{same("list", "--include-complete"), 2, `"kind":"usage"`},
 	})
 }
 

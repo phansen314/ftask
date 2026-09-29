@@ -202,7 +202,9 @@ func findOne(tx *store.Tx, id model.ID) (*store.Loaded, *errs.Error) {
 // Queries: filter by scope): the path walk of in.Folder, then every folder
 // that could not be listed as a warning, then the folders in scope and the
 // usable tasks in scope as views, both in tree order — complete tasks only
-// if in.IncludeComplete. An unusable task file in scope is a warning and is
+// if in.Readiness has complete. Every open task in scope is a view whatever
+// in.Readiness, so the warnings its blockers call for are recorded whatever
+// the caller keeps. An unusable task file in scope is a warning and is
 // left out; an ID with several copies in scope is a duplicate-id warning,
 // whether or not every copy is returned.
 func inScope(tx *store.Tx, in ScopeInput) ([]model.FolderPath, []model.TaskView, *errs.Error) {
@@ -252,7 +254,7 @@ func inScope(tx *store.Tx, in ScopeInput) ([]model.FolderPath, []model.TaskView,
 				return nil, nil, e
 			}
 			continue
-		case !ld.Task.Open() && !in.IncludeComplete:
+		case !ld.Task.Open() && !slices.Contains(in.Readiness, model.Complete):
 			continue
 		}
 		v, e := view(tx, ld)

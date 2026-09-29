@@ -235,8 +235,8 @@ var synthetic = []Command{{
 		{Name: "count", Field: "/count", Type: Int},
 		{Name: "recursive", Field: "/recursive", Type: Bool},
 		{Name: "parents", Short: "p", Field: "/parents", Type: Bool},
-		{Name: "tags", Field: "/tags", Type: TagList},
-		{Name: "tags-add", Field: "/tags/add", Type: TagList},
+		{Name: "tags", Field: "/tags", Type: StringList},
+		{Name: "tags-add", Field: "/tags/add", Type: StringList},
 		{Name: "blocked-by", Field: "/blocked_by", Type: IDList},
 		{Name: "extra", Field: "/extra", Type: JSON},
 		{Name: "extra-merge", Field: "/extra/merge", Type: JSON},
@@ -639,7 +639,11 @@ func TestListInput(t *testing.T) {
 	}{
 		{[]string{"list"}, `{}`},
 		{[]string{"list", "--folder", "/proj", "--recursive=false"}, `{"folder":"/proj","recursive":false}`},
-		{[]string{"list", "--include-complete", "--include-folders"}, `{"include_complete":true,"include_folders":true}`},
+		{[]string{"list", "--readiness", "complete", "--include-folders"}, `{"readiness":["complete"],"include_folders":true}`},
+		{[]string{"list", "--readiness", "ready,blocked", "--readiness", "complete"}, `{"readiness":["ready","blocked","complete"]}`},
+		{[]string{"list", "--tags-any", "a,b", "--tags-all", "c", "--limit", "5", "--fields", "title,folder"},
+			`{"tags_any":["a","b"],"tags_all":["c"],"limit":5,"fields":["title","folder"]}`},
+		{[]string{"list", "--limit", "x", "--fields", ""}, `{"limit":"x","fields":[]}`},
 	} {
 		got = ""
 		if r := run(t, commands, "", tc.args...); r.code != ExitOK || got != tc.want {
@@ -652,13 +656,16 @@ func TestListInput(t *testing.T) {
 	}{
 		{[]string{"frontier"}, `{}`},
 		{[]string{"frontier", "--folder", "/proj", "--recursive=false"}, `{"folder":"/proj","recursive":false}`},
+		{[]string{"frontier", "--limit", "10", "--fields", "id,title,priority", "--tags-any", "urgent"},
+			`{"tags_any":["urgent"],"limit":10,"fields":["id","title","priority"]}`},
+		{[]string{"frontier", "--limit=0", "--tags-all", "a", "--tags-all", "b"}, `{"tags_all":["a","b"],"limit":0}`},
 	} {
 		got = ""
 		if r := run(t, commands, "", tc.args...); r.code != ExitOK || got != tc.want {
 			t.Errorf("%q: exit %d, input %s, want %s", tc.args, r.code, got, tc.want)
 		}
 	}
-	for _, args := range [][]string{{"list", "/proj"}, {"frontier", "/proj"}, {"frontier", "--include-complete"}} {
+	for _, args := range [][]string{{"list", "/proj"}, {"frontier", "/proj"}, {"frontier", "--readiness", "ready"}, {"list", "--include-complete"}} {
 		if r := run(t, commands, "", args...); r.code != ExitUsage {
 			t.Errorf("%q: exit %d: %s", args, r.code, r.raw)
 		}

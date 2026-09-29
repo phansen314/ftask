@@ -75,6 +75,20 @@ func (f *fixture) task(folder string, id model.ID, completed bool, blockedBy ...
 	f.write(filepath.Join("tasks", folder, fmt.Sprintf("%d.json", id)), string(data))
 }
 
+// tagged writes an open task id in folder with tags.
+func (f *fixture) tagged(folder string, id model.ID, tags ...model.Tag) {
+	f.t.Helper()
+	tf := model.TaskFile{
+		Schema: model.TaskSchema, ID: id, Title: model.Title(fmt.Sprintf("task %d", id)),
+		CreatedAt: "2026-09-20T18:31:51Z", Tags: tags, Extra: &jsonio.Object{},
+	}
+	data, err := tf.Encode()
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	f.write(filepath.Join("tasks", folder, fmt.Sprintf("%d.json", id)), string(data))
+}
+
 // fail wraps f's filesystem so op on the path rel (relative to the root, as
 // store passes it) fails with errno.
 func (f *fixture) fail(op, rel string, errno syscall.Errno) {

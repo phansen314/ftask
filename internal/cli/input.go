@@ -45,7 +45,7 @@ func buildInput(c *Command, cmd *cobra.Command, args []string, env Env) (*jsonio
 			b, _ := cmd.Flags().GetBool(o.Name)
 			setAt(in, o.Field, b)
 			continue
-		case IDList, TagList, Repeated:
+		case IDList, StringList, Repeated:
 			raw, _ = cmd.Flags().GetStringArray(o.Name)
 		case TextFile:
 			name, _ := cmd.Flags().GetString(o.Name)
@@ -68,7 +68,7 @@ func buildInput(c *Command, cmd *cobra.Command, args []string, env Env) (*jsonio
 			continue
 		}
 		switch o.Type {
-		case IDList, TagList:
+		case IDList, StringList:
 			items := []any{}
 			for _, s := range raw {
 				if s == "" {

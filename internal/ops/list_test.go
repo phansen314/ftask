@@ -15,9 +15,11 @@ import (
 
 // list runs list with input over f twice, checking that both runs give the
 // same bytes (a read is deterministic), the envelope, and on success
-// list-output. It returns the result in short — "folders […]" when present,
-// then each task as "folder:id readiness blocking" — or the error as "kind
-// details", then each warning as "kind ids paths"; the home as "~".
+// list-output and that truncated means total is more than the tasks
+// returned. It returns the result in short — "folders […]" when present,
+// then each task as "folder:id readiness blocking", then " of total" if the
+// limit cut them — or the error as "kind details", then each warning as
+// "kind ids paths"; the home as "~".
 func (f *fixture) list(input string) string {
 	f.t.Helper()
 	e := Run("list", parse(f.t, input), nil, f.env)
@@ -39,10 +41,17 @@ func (f *fixture) list(input string) string {
 			parts = append(parts, fmt.Sprintf("folders %v", *r.Folders))
 		}
 		var tasks []string
-		for _, v := range r.Tasks {
+		for _, v := range r.Tasks.Views {
 			tasks = append(tasks, fmt.Sprintf("%s:%d %s %v", v.Folder, v.ID, v.Readiness, v.Blocking))
 		}
-		parts = append(parts, "tasks ["+strings.Join(tasks, ", ")+"]")
+		s := "tasks [" + strings.Join(tasks, ", ") + "]"
+		if r.Truncated != (r.Total > len(r.Tasks.Views)) || r.Total < len(r.Tasks.Views) {
+			f.t.Errorf("total %d, truncated %v, for %d tasks", r.Total, r.Truncated, len(r.Tasks.Views))
+		}
+		if r.Truncated {
+			s += fmt.Sprintf(" of %d", r.Total)
+		}
+		parts = append(parts, s)
 	} else {
 		d, err := jsonio.MarshalLine(e.Error.Details)
 		if err != nil {
@@ -61,7 +70,20 @@ func TestList(t *testing.T) {
 	f := newFixture(t)
 	f.task("proj", 7, false)
 	got := f.rel(line(t, Run("list", parse(t, `{}`), nil, f.env)))
-	want := `{"ok":true,"result":{"tasks":[{"schema":1,"id":7,"title":"task 7","priority":null,"created_at":"2026-09-20T18:31:51Z","completed_at":null,"blocked_by":[],"tags":[],"extra":{},"folder":"/proj","notes_path":"~/tasks/proj/7.md","readiness":"ready","blocking":[]}]},"warnings":[]}` + "\n"
+	want := `{"ok":true,"result":{"tasks":[{"schema":1,"id":7,"title":"task 7","priority":null,"created_at":"2026-09-20T18:31:51Z","completed_at":null,"blocked_by":[],"tags":[],"extra":{},"folder":"/proj","notes_path":"~/tasks/proj/7.md","readiness":"ready","blocking":[]}],"total":1,"truncated":false},"warnings":[]}` + "\n"
+	if got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}
+
+// Projected, byte for byte: only the fields asked for, and id, in the task
+// view's order.
+func TestListFields(t *testing.T) {
+	f := newFixture(t)
+	f.task("proj", 7, false, 8)
+	f.task("proj", 8, false)
+	got := f.rel(line(t, Run("list", parse(t, `{"fields": ["blocking", "title"], "limit": 1}`), nil, f.env)))
+	want := `{"ok":true,"result":{"tasks":[{"id":7,"title":"task 7","blocking":[8]}],"total":2,"truncated":true},"warnings":[]}` + "\n"
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
@@ -80,6 +102,13 @@ func TestListCases(t *testing.T) {
 		f.mkdir("tasks/empty")
 		f.mkdir("tasks/proj/travel/far")
 	}
+	// tagged: / has 1 [a], 2 [b], 3 [a b], 4 [].
+	tagged := func(f *fixture) {
+		f.tagged("", 1, "a")
+		f.tagged("", 2, "b")
+		f.tagged("", 3, "a", "b")
+		f.tagged("", 4)
+	}
 	for _, tc := range []struct {
 		name, input string
 		setup       func(f *fixture)
@@ -87,15 +116,34 @@ func TestListCases(t *testing.T) {
 	}{
 		// Scope, in tree order: /proj/travel before /proj-b.
 		{"every open task", `{}`, tree, "tasks [/:1 ready [], /proj:3 blocked [4], /proj/travel:4 ready []]"},
-		{"with complete", `{"include_complete": true}`, tree,
+		{"with complete", `{"readiness": ["ready", "blocked", "complete"]}`, tree,
 			"tasks [/:1 ready [], /:2 complete [], /proj:3 blocked [4], /proj/travel:4 ready [], /proj-b:5 complete []]"},
 		{"a folder", `{"folder": "/proj"}`, tree, "tasks [/proj:3 blocked [4], /proj/travel:4 ready []]"},
 		{"not recursive", `{"folder": "/proj", "recursive": false}`, tree, "tasks [/proj:3 blocked [4]]"},
 		{"a blocker outside scope still counts", `{"folder": "/proj", "recursive": false}`, func(f *fixture) { f.task("proj", 3, false, 9); f.task("x", 9, false) },
 			"tasks [/proj:3 blocked [9]]"},
-		{"root, not recursive", `{"recursive": false, "include_complete": true}`, tree, "tasks [/:1 ready [], /:2 complete []]"},
+		{"root, not recursive", `{"recursive": false, "readiness": ["complete", "ready"]}`, tree, "tasks [/:1 ready [], /:2 complete []]"},
 		{"nothing in scope", `{"folder": "/empty"}`, tree, "tasks []"},
 		{"an empty tree", `{}`, nil, "tasks []"},
+
+		// Readiness.
+		{"only complete", `{"readiness": ["complete"]}`, tree, "tasks [/:2 complete [], /proj-b:5 complete []]"},
+		{"only blocked", `{"readiness": ["blocked"]}`, tree, "tasks [/proj:3 blocked [4]]"},
+		{"only ready", `{"readiness": ["ready"]}`, tree, "tasks [/:1 ready [], /proj/travel:4 ready []]"},
+
+		// Narrowing: a prefix of tree order, after the filters.
+		{"limit", `{"limit": 2}`, tree, "tasks [/:1 ready [], /proj:3 blocked [4]] of 3"},
+		{"limit not reached", `{"limit": 3}`, tree, "tasks [/:1 ready [], /proj:3 blocked [4], /proj/travel:4 ready []]"},
+		{"limit 0: the count alone", `{"limit": 0}`, tree, "tasks [] of 3"},
+		{"limit 0 of none", `{"limit": 0, "folder": "/empty"}`, tree, "tasks []"},
+		{"limit after readiness", `{"readiness": ["complete"], "limit": 1}`, tree, "tasks [/:2 complete []] of 2"},
+		{"tags", `{"tags_any": ["a", "b"]}`, tagged, "tasks [/:1 ready [], /:2 ready [], /:3 ready []]"},
+		{"tags, all", `{"tags_all": ["a", "b"]}`, tagged, "tasks [/:3 ready []]"},
+		{"tags, both", `{"tags_any": ["c", "b"], "tags_all": ["a"]}`, tagged, "tasks [/:3 ready []]"},
+		{"tags, none match", `{"tags_any": ["z"]}`, tagged, "tasks []"},
+		{"tags, then limit", `{"tags_any": ["a"], "limit": 1}`, tagged, "tasks [/:1 ready []] of 2"},
+		{"folders never narrowed", `{"include_folders": true, "limit": 0, "tags_any": ["z"]}`, tree,
+			"folders [/ /empty /proj /proj/travel /proj/travel/far /proj-b]; tasks []"},
 
 		// Folders.
 		{"folders", `{"include_folders": true}`, tree,
@@ -106,7 +154,17 @@ func TestListCases(t *testing.T) {
 			"folders [/proj /proj/travel]; tasks [/proj:3 blocked [4]]"},
 		{"folders of an empty folder", `{"folder": "/empty", "include_folders": true}`, tree, "folders [/empty]; tasks []"},
 
-		// Warnings.
+		// Warnings: never narrowed away.
+		{"warnings about tasks filtered out", `{"readiness": ["complete"], "tags_any": ["z"], "limit": 0}`, func(f *fixture) {
+			f.task("a", 1, false, 9)
+			f.task("b", 2, false)
+			f.task("c", 2, false)
+			f.write("tasks/3.json", "{")
+		}, "tasks []; dangling-reference [1 9] [~/tasks/a/1.json]; duplicate-id [2] [~/tasks/b/2.json ~/tasks/c/2.json]; unusable-file [3] [~/tasks/3.json]"},
+		{"warnings about tasks past the limit", `{"limit": 1}`, func(f *fixture) {
+			f.task("a", 1, false)
+			f.task("b", 2, false, 9)
+		}, "tasks [/a:1 ready []] of 2; dangling-reference [2 9] [~/tasks/b/2.json]"},
 		{"unusable file in scope", `{}`, func(f *fixture) { f.task("", 1, false); f.write("tasks/2.json", "{") },
 			"tasks [/:1 ready []]; unusable-file [2] [~/tasks/2.json]"},
 		{"unusable file out of scope: silent", `{"folder": "/a"}`, func(f *fixture) { f.task("a", 1, false); f.write("tasks/2.json", "{") },
@@ -121,7 +179,7 @@ func TestListCases(t *testing.T) {
 			"tasks [/a:1 ready [], /a/x:1 ready []]; duplicate-id [1] [~/tasks/a/1.json ~/tasks/a/x/1.json]"},
 		{"dangling blocker", `{}`, func(f *fixture) { f.task("", 1, false, 9) },
 			"tasks [/:1 blocked [9]]; dangling-reference [1 9] [~/tasks/1.json]"},
-		{"a complete task's blockers aren't read", `{"include_complete": true}`, func(f *fixture) { f.task("", 1, true, 9) },
+		{"a complete task's blockers aren't read", `{"readiness": ["complete"]}`, func(f *fixture) { f.task("", 1, true, 9) },
 			"tasks [/:1 complete []]"},
 		{"duplicated blocker", `{"folder": "/a"}`, func(f *fixture) { f.task("a", 1, false, 2); f.task("b", 2, true); f.task("c", 2, true) },
 			"tasks [/a:1 blocked [2]]; duplicate-id [2] [~/tasks/b/2.json ~/tasks/c/2.json]"},
@@ -159,6 +217,12 @@ func TestListCases(t *testing.T) {
 		}, `corrupt {"path":"~/tasks/a","reason":"unexpected-file"}`},
 		{"corrupt ftask.json", `{}`, func(f *fixture) { f.write("tasks/ftask.json", "{") }, `corrupt {"path":"~/tasks/ftask.json","reason":"not-json"}`},
 		{"bad input", `{"recursive": "no"}`, nil, `invalid-input {"problems":[{"field":"/recursive","reason":"expected a boolean"}]}`},
+		{"include_complete is gone", `{"include_complete": true}`, nil, `invalid-input {"problems":[{"field":"/include_complete","reason":"unknown field"}]}`},
+		{"bad readiness", `{"readiness": ["ready", "done", "ready"]}`, nil,
+			`invalid-input {"problems":[{"field":"/readiness/1","reason":"must be one of ready, blocked, complete"},{"field":"/readiness/2","reason":"duplicate of item 0"}]}`},
+		{"empty readiness", `{"readiness": []}`, nil, `invalid-input {"problems":[{"field":"/readiness","reason":"must list at least one readiness value"}]}`},
+		{"bad narrowing", `{"limit": -1, "fields": ["title", "name"], "tags_any": [], "tags_all": ["A"]}`, nil,
+			`invalid-input {"problems":[{"field":"/fields/1","reason":"must be one of schema, id, title, priority, created_at, completed_at, blocked_by, tags, extra, folder, notes_path, readiness, blocking"},{"field":"/limit","reason":"must be between 0 and 9007199254740991"},{"field":"/tags_all/0","reason":"must be 1-64 lowercase letters, digits, and hyphens, not starting or ending with a hyphen"},{"field":"/tags_any","reason":"must list at least one tag"}]}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t)

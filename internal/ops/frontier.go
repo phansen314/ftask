@@ -10,43 +10,50 @@ import (
 )
 
 // ScopeInput is the input of frontier and list, defaults applied.
-// IncludeComplete and IncludeFolders are list's only.
+// Readiness and IncludeFolders are list's only: frontier's tasks are the
+// ready ones, which inScope leaves to it.
 type ScopeInput struct {
-	Folder          model.FolderPath
-	Recursive       bool
-	IncludeComplete bool
-	IncludeFolders  bool
+	Folder         model.FolderPath
+	Recursive      bool
+	Readiness      []model.Readiness
+	IncludeFolders bool
+	Narrowing      Narrowing
 }
 
 func decodeFrontier(f *model.Fields, p *model.Problems) any {
 	return ScopeInput{
 		Folder:    optionalFolder(f, p, "folder"),
 		Recursive: optionalBool(f, p, "recursive", true),
+		Narrowing: decodeNarrowing(f, p),
 	}
 }
 
 // FrontierOutput is frontier's result (frontier-output).
 type FrontierOutput struct {
-	Tasks []model.TaskView `json:"tasks"`
+	Tasks     Tasks `json:"tasks"`
+	Total     int   `json:"total"`
+	Truncated bool  `json:"truncated"`
 }
 
 // runFrontier returns the ready tasks in scope in the order to work on them
-// (frontierOrder). Blockers are looked up anywhere in the
+// (frontierOrder), narrowed. Blockers are looked up anywhere in the
 // tree, and every task-file problem is a warning, so one bad file never
 // fails the frontier.
 func runFrontier(env Env, in ScopeInput, w *errs.Collector) (any, *errs.Error) {
-	out := FrontierOutput{Tasks: []model.TaskView{}}
+	var out FrontierOutput
 	e := store.Read(env.Env, w, func(tx *store.Tx) *errs.Error {
 		_, views, e := inScope(tx, ScopeInput{Folder: in.Folder, Recursive: in.Recursive})
 		if e != nil {
 			return e
 		}
+		ready := []model.TaskView{}
 		for _, v := range views {
 			if v.Readiness == model.Ready {
-				out.Tasks = append(out.Tasks, v)
+				ready = append(ready, v)
 			}
 		}
-		slices.SortFunc(out.Tasks, frontierOrder)
+		slices.SortFunc(ready, frontierOrder)
+		out.Tasks, out.Total, out.Truncated = narrow(ready, in.Narrowing)
 		return nil
 	})
 	if e != nil {

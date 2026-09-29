@@ -71,7 +71,7 @@ var commands = []Command{
 		Options: []Option{
 			{Name: "folder", Field: "/folder", Type: String, Help: "folder to create the task in, as an exact `path` (default /)"},
 			{Name: "priority", Field: "/priority", Type: NullableInt, Help: "priority, an `int` or null (default null)"},
-			{Name: "tags", Field: "/tags", Type: TagList, Help: "comma-separated `tags`"},
+			{Name: "tags", Field: "/tags", Type: StringList, Help: "comma-separated `tags`"},
 			{Name: "blocked-by", Field: "/blocked_by", Type: IDList, Help: "comma-separated `ids` of the tasks that block it"},
 			{Name: "extra", Field: "/extra", Type: JSON, Help: "extra fields, a JSON `object`"},
 			{Name: "notes", Field: "/notes", Type: String, Help: "initial notes `text`"},
@@ -116,9 +116,9 @@ var commands = []Command{
 		Options: []Option{
 			{Name: "title", Field: "/title", Type: String, Help: "replace the title with `text`"},
 			{Name: "priority", Field: "/priority", Type: NullableInt, Help: "set the priority, an `int`; null clears it"},
-			{Name: "tags-add", Field: "/tags/add", Type: TagList, Help: "comma-separated `tags` to add"},
-			{Name: "tags-remove", Field: "/tags/remove", Type: TagList, Help: "comma-separated `tags` to remove"},
-			{Name: "tags-replace-all", Field: "/tags/replace_all", Type: TagList, Help: "the complete new `tags`; '' clears them"},
+			{Name: "tags-add", Field: "/tags/add", Type: StringList, Help: "comma-separated `tags` to add"},
+			{Name: "tags-remove", Field: "/tags/remove", Type: StringList, Help: "comma-separated `tags` to remove"},
+			{Name: "tags-replace-all", Field: "/tags/replace_all", Type: StringList, Help: "the complete new `tags`; '' clears them"},
 			{Name: "extra-merge", Field: "/extra/merge", Type: JSON, Help: "keys to set, a JSON `object`"},
 			{Name: "extra-remove", Field: "/extra/remove", Type: Repeated, Help: "a `key` to delete; repeatable"},
 			{Name: "extra-replace-all", Field: "/extra/replace_all", Type: JSON, Help: "the complete new extra, a JSON `object`; {} clears it"},
@@ -177,13 +177,19 @@ var commands = []Command{
 		Options: []Option{
 			{Name: "folder", Field: "/folder", Type: String, Help: "only tasks in this folder, an exact `path` (default /)"},
 			{Name: "recursive", Field: "/recursive", Type: Bool, Help: "also tasks in subfolders (default true; --recursive=false for none)"},
-			{Name: "include-complete", Field: "/include_complete", Type: Bool, Help: "also return complete tasks"},
+			{Name: "readiness", Field: "/readiness", Type: StringList, Help: "only tasks in these comma-separated `states`: ready, blocked, complete (default ready,blocked)"},
 			{Name: "include-folders", Field: "/include_folders", Type: Bool, Help: "also return the folders in scope"},
+			{Name: "tags-any", Field: "/tags_any", Type: StringList, Help: "only tasks with at least one of these comma-separated `tags`"},
+			{Name: "tags-all", Field: "/tags_all", Type: StringList, Help: "only tasks with every one of these comma-separated `tags`"},
+			{Name: "limit", Field: "/limit", Type: Int, Help: "at most `n` tasks, the first in tree order; total and truncated say what was cut"},
+			{Name: "fields", Field: "/fields", Type: StringList, Help: "return only these comma-separated task `fields`, and id"},
 		},
-		Example: `  ftask list | jq -r '.result.tasks[] | "\(.id)\t\(.readiness)\t\(.title)"'
-  ftask list --folder /proj --include-complete | jq '[.result.tasks[] | select(.completed_at != null)] | length'
-  ftask list --include-folders | jq -r '.result.folders[]'
-  ftask list | jq '.result.tasks | group_by(.folder) | map({folder: .[0].folder, ids: map(.id)})'`,
+		Example: `  ftask list --limit 50 --fields id,title,readiness,folder
+  ftask list --folder /proj --readiness complete --limit 0 | jq .result.total   # how many are done
+  ftask list --readiness blocked --fields id,title,blocking                    # what's stuck, and on what
+  ftask list --readiness ready,blocked,complete --tags-all db,backend --fields id,title,readiness
+  ftask list --include-folders --limit 0 | jq -r '.result.folders[]'
+  ftask list --fields folder | jq '.result.tasks | group_by(.folder) | map({folder: .[0].folder, ids: map(.id)})'`,
 	},
 	{
 		Name:    "frontier",
@@ -192,10 +198,15 @@ var commands = []Command{
 		Options: []Option{
 			{Name: "folder", Field: "/folder", Type: String, Help: "only tasks in this folder, an exact `path` (default /)"},
 			{Name: "recursive", Field: "/recursive", Type: Bool, Help: "also tasks in subfolders (default true; --recursive=false for none)"},
+			{Name: "tags-any", Field: "/tags_any", Type: StringList, Help: "only tasks with at least one of these comma-separated `tags`"},
+			{Name: "tags-all", Field: "/tags_all", Type: StringList, Help: "only tasks with every one of these comma-separated `tags`"},
+			{Name: "limit", Field: "/limit", Type: Int, Help: "at most `n` tasks, the first in frontier order; total and truncated say what was cut"},
+			{Name: "fields", Field: "/fields", Type: StringList, Help: "return only these comma-separated task `fields`, and id"},
 		},
-		Example: `  ftask frontier | jq '.result.tasks[0]'                       # next task
+		Example: `  ftask frontier --limit 10 --fields id,title,priority,folder   # the next ten, briefly
+  ftask frontier --limit 1 | jq '.result.tasks[0]'              # the next task, whole
   ftask frontier --folder /proj | jq -r '.result.tasks[] | "\(.id)\t\(.title)"'
-  ftask frontier | jq '[.result.tasks[] | select(.tags | index("urgent"))]'
-  ftask frontier | jq '.result.tasks[:5]'                      # the first five`,
+  ftask frontier --tags-any urgent,today --fields id,title
+  ftask frontier --limit 0 | jq .result.total                   # how many are ready`,
 	},
 }

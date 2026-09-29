@@ -35,8 +35,17 @@ var bases = map[string][]string{
 		`{"id": 42, "tags": {"replace_all": ["a"]}, "extra": {"replace_all": {"k": 1}}}`,
 		`{"id": 42, "priority": null}`,
 	},
-	"frontier": {`{"folder": "/proj", "recursive": false}`},
-	"list":     {`{"folder": "/proj", "recursive": false, "include_complete": true, "include_folders": true}`},
+	"frontier": {`{"folder": "/proj", "recursive": false, "tags_any": ["a", "b"], "tags_all": ["c"], "limit": 10, "fields": ["title", "id"]}`},
+	"list":     {`{"folder": "/proj", "recursive": false, "readiness": ["ready", "complete"], "include_folders": true, "tags_any": ["a"], "tags_all": ["b", "c"], "limit": 0, "fields": ["readiness", "blocking"]}`},
+}
+
+// scopeCandidates exercise frontier's and list's narrowing: field names and
+// readiness values, good and bad, and limits at their bounds.
+var scopeCandidates = []string{
+	`"ready"`, `"complete"`, `"id"`, `"notes_path"`, `"Ready"`, `"folders"`,
+	`["id"]`, `["blocking", "schema"]`, `["id", "id"]`, `["title", "Title"]`, `["nope"]`,
+	`["blocked"]`, `["ready", "ready"]`, `["done"]`, `["ready", 1]`,
+	`9007199254740991`, `9007199254740992`,
 }
 
 // updateCandidates exercise the forms of update's tags and extra.
@@ -64,7 +73,7 @@ func TestInputsAgreeWithSchemas(t *testing.T) {
 			if ps := problems(t, op, base); ps != nil {
 				t.Errorf("%s: base rejected by the adapter: %v\n  %s", op, ps, base)
 			}
-			for _, doc := range schematest.Mutations(t, base, updateCandidates...) {
+			for _, doc := range schematest.Mutations(t, base, slices.Concat(updateCandidates, scopeCandidates)...) {
 				agreeInput(t, op, doc)
 				n++
 			}
@@ -202,11 +211,18 @@ func TestDecodedInputs(t *testing.T) {
 		c.BlockedBy == nil || c.Extra == nil || c.Extra.Len() != 0 || c.Notes != "" {
 		t.Errorf("create defaults: %+v", c)
 	}
-	if got := decodeOK("frontier", `{}`).(ScopeInput); got != (ScopeInput{Folder: "/", Recursive: true}) {
+	if got := decodeOK("frontier", `{}`).(ScopeInput); !reflect.DeepEqual(got, ScopeInput{Folder: "/", Recursive: true}) {
 		t.Errorf("frontier defaults: %+v", got)
 	}
-	if got := decodeOK("list", `{"recursive": false}`).(ScopeInput); got != (ScopeInput{Folder: "/"}) {
+	if got := decodeOK("list", `{"recursive": false}`).(ScopeInput); !reflect.DeepEqual(got, ScopeInput{Folder: "/", Readiness: []model.Readiness{model.Ready, model.Blocked}}) {
 		t.Errorf("list: %+v", got)
+	}
+	limit := int64(0)
+	want := ScopeInput{Folder: "/", Recursive: true, Readiness: []model.Readiness{model.Complete}, Narrowing: Narrowing{
+		TagsAny: []model.Tag{"a", "b"}, TagsAll: []model.Tag{"c"}, Limit: &limit, Fields: []string{"title", "id"},
+	}}
+	if got := decodeOK("list", `{"readiness": ["complete"], "tags_any": ["a", "b"], "tags_all": ["c"], "limit": 0, "fields": ["title", "id"]}`).(ScopeInput); !reflect.DeepEqual(got, want) {
+		t.Errorf("list narrowed: %+v", got)
 	}
 	u := decodeOK("update", `{"id": 7, "priority": null, "tags": {"replace_all": []}, "extra": {"remove": ["a"]}}`).(UpdateInput)
 	if u.ID != 7 || u.Title != nil || u.Priority == nil || u.Priority.Value != nil ||

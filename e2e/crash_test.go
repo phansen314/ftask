@@ -290,7 +290,7 @@ func TestCrashInjection(t *testing.T) {
 				t.Logf("k=%d: stage %d, temps %v", k, stage, crashed.temps)
 
 				if _, err := os.Stat(filepath.Join(tr.home, ".config/ftask/config.toml")); err == nil {
-					steps(t, []step{{tr.cmd("list", "--include-complete", "--include-folders"), 0, `"warnings":[]`}})
+					steps(t, []step{{tr.cmd("list", "--readiness", "ready,blocked,complete", "--include-folders"), 0, `"warnings":[]`}})
 				}
 				code, want, same := c.rerun(stage)
 				steps(t, []step{{tr.cmd(c.args...), code, want}})
