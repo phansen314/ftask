@@ -38,6 +38,9 @@ Error kinds worth handling:
 - `not-found` — `.error.details.ids` / `.folders` name what's missing. Folders are never created implicitly.
 - `invalid-input` — `.error.details.problems[]` lists every bad field.
 - `conflict` with `rule: "acyclic"` — the block would make a cycle; `.error.details.cycles` shows it.
+- `conflict` with `rule: "not-empty"` — `delete-folder` without `-r` on a folder that holds tasks or folders. Don't add `-r` on your own: ask the user.
+- `conflict` with `rule: "destination-exists"` — `move-folder` would land on a folder that already exists; folders are never merged.
+- `conflict` with `rule: "duplicate-id"` or `"id-above-last-id"` — the tree is damaged; report it, don't work around it.
 - `corrupt`, `unsupported-format`, `io`, `internal` — stop and report to the user; don't try to fix files by hand.
 
 ## The daily loop
@@ -83,11 +86,26 @@ Rules the commands enforce:
 - **Priority**: an integer; **higher** sorts first in `frontier`. `null` means none (sorts after every priority, even negative ones).
 - **Notes**: short text with `--notes`, anything longer through a quoted heredoc with `--notes-file -` (no escaping needed).
 - `update` changes title, priority, tags (`--tags-add`, `--tags-remove`, `--tags-replace-all`), and `extra` (`--extra-merge`, `--extra-remove key`, `--extra-replace-all`). Blockers change only through `block`/`unblock`; completion only through `complete`/`reopen`.
-- There is no `delete` or `move` yet. If a task is wrong, fix it with `update`, or mark it cancelled (below); tell the user if they need a real delete or move.
+
+## Moving and deleting
+
+```sh
+ftask move 42 --to /proj/api                   # a task into a folder; -p creates it
+ftask move-folder /proj/api --to /archive      # into an existing folder: /archive/api
+ftask move-folder /proj/api --to /proj/backend # otherwise to that path: a rename
+ftask delete 42 | jq .result.dependents        # the tasks it no longer blocks
+ftask delete-folder -r /proj/old | jq -c '.result | {ids, dependents}'
+```
+
+- Moving never changes blockers: tasks are named by ID, not location. Notes move with the task.
+- **Deleting is permanent.** ftask keeps no trash; the only undo is git, if the user keeps the tree in a repo, and only back to their last commit. So:
+  - **Always confirm with the user before `delete` or `delete-folder`**, naming what goes (for a folder, list its tasks first with `ftask list --folder /x`). Never delete to tidy up on your own initiative.
+  - Prefer cancelling (below) when the user just means "won't do": it keeps the record.
+  - A deleted task's ID is removed from its dependents' blockers, so they may become ready. Tell the user which (`dependents` in the output).
 
 ## Hard rules
 
-- **Never** hand-edit, create, rename, or delete anything under the root except a task's notes `.md`. Task `.json` files and `ftask.json` belong to ftask; a hand edit can break invariants no command will repair.
+- **Never** hand-edit, create, rename, or delete anything under the root except a task's notes `.md` — use `move`, `move-folder`, `delete`, and `delete-folder`. Task `.json` files and `ftask.json` belong to ftask; a hand edit can break invariants no command will repair.
 - Don't pass `--input` unless building input from other JSON; flags are clearer.
 - Don't create tasks the user didn't ask for. When a follow-up turns up during other work, offer it: "Want me to add a task for X?"
 

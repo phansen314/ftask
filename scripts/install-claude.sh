@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Adds the permission rules the ftask plugin can't ship itself (plugins
 # cannot carry permissions) to ~/.claude/settings.json: every ftask command
-# and jq run without prompting, except `ftask init`, which asks. The skill
+# and jq run without prompting, except `ftask init` and the deletes, which
+# ask: init changes this machine's setup, and a delete has no undo but git.
+# The skill
 # comes from the plugin; see the README.
 #
 #   scripts/install-claude.sh              # add the rules
@@ -18,7 +20,7 @@ old_link=$claude_dir/skills/ftask
 settings=$claude_dir/settings.json
 
 allow='["Bash(ftask:*)", "Bash(jq:*)"]'
-ask='["Bash(ftask init:*)"]'
+ask='["Bash(ftask init:*)", "Bash(ftask delete:*)", "Bash(ftask delete-folder:*)"]'
 
 command -v jq >/dev/null || { echo "install-claude.sh needs jq" >&2; exit 1; }
 

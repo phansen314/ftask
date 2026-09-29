@@ -22,13 +22,13 @@ claude plugin marketplace add phansen314/ftask
 claude plugin install ftask@ftask
 ```
 
-Plugins can't ship permission rules, so add these three to `~/.claude/settings.json` so ftask commands run without a prompt, while `init`, which changes this machine's setup, still asks:
+Plugins can't ship permission rules, so add these to `~/.claude/settings.json` so ftask commands run without a prompt, while `init`, which changes this machine's setup, and the deletes, which can't be undone but through git, still ask:
 
 ```json
 {
   "permissions": {
     "allow": ["Bash(ftask:*)", "Bash(jq:*)"],
-    "ask": ["Bash(ftask init:*)"]
+    "ask": ["Bash(ftask init:*)", "Bash(ftask delete:*)", "Bash(ftask delete-folder:*)"]
   }
 }
 ```
@@ -48,6 +48,19 @@ ftask create 'Write migrations' --folder /work/api --blocked-by 1
 ftask frontier | jq -r '.result.tasks[] | "\(.id)\t\(.title)"'   # ready tasks, in work order
 ftask complete 1
 ```
+
+## Undoing a delete
+
+`ftask delete` and `ftask delete-folder` remove files for good; ftask keeps no trash. Keep the tree in git (`git init` in it, and commit now and then) and a delete can be undone, back to the last commit:
+
+```sh
+cd ~/ftasks
+git log --diff-filter=D --oneline -- '*/42.json' '42.json'     # the commit that removed task 42, if committed
+git restore -- proj/42.json proj/42.md                          # not yet committed: from the last commit
+git restore --source=<commit>^ -- proj/42.json proj/42.md       # committed: from the commit before
+```
+
+Restore only the removed paths, never the whole tree: `ftask.json` holds the last issued ID, and rolling it back lets IDs be reused. The delete also took the task's ID out of other tasks' blockers; its output lists them as `dependents`, to re-`block` after restoring. See [Undo](operations.md#undo).
 
 ## Specs
 
