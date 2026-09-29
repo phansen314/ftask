@@ -45,6 +45,12 @@ func Init(env Env, root string, replace bool) (InitResult, *errs.Error) {
 		return res, e
 	}
 	if cfgExists && !replace {
+		// A crash after the config was published can leave its temp file:
+		// remove it here too, or nothing ever would.
+		if r, err := env.FS.OpenRoot(env.ConfigDir); err == nil {
+			removeTemps(r)
+			r.Close()
+		}
 		return res, errs.Conflict(errs.RuleConfigExists, nil)
 	}
 	if !exists {
@@ -156,20 +162,29 @@ func writeConfig(env Env, root string, replace bool) *errs.Error {
 		return errs.FromOS(env.ConfigDir, err)
 	}
 	defer r.Close()
-	entries, err := r.ReadDir(".")
-	if err != nil {
+	if err := removeTemps(r); err != nil {
 		return errs.FromOS(env.ConfigDir, err)
-	}
-	for _, en := range entries {
-		if strings.HasPrefix(en.Name(), fsys.TempPrefix) {
-			r.Remove(en.Name()) // best effort: the next init tries again
-		}
 	}
 	if atLink, err := Publish(r, ConfigName, EncodeConfig(root), replace); err != nil {
 		if atLink && isErrno(err, syscall.EEXIST) {
 			return errs.Conflict(errs.RuleConfigExists, nil) // written since the check
 		}
 		return errs.FromOS(env.ConfigPath(), err)
+	}
+	return nil
+}
+
+// removeTemps removes the temp files an interrupted init left in the config
+// directory r. Removing is best effort: the next init tries again.
+func removeTemps(r fsys.Root) error {
+	entries, err := r.ReadDir(".")
+	if err != nil {
+		return err
+	}
+	for _, en := range entries {
+		if strings.HasPrefix(en.Name(), fsys.TempPrefix) {
+			r.Remove(en.Name())
+		}
 	}
 	return nil
 }

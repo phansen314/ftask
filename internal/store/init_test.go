@@ -171,6 +171,22 @@ func TestInitRemovesStaleTemps(t *testing.T) {
 	}
 }
 
+// A crash after the config was published leaves its temp file; the init
+// that then finds the config exists still removes it.
+func TestInitConfigExistsRemovesStaleTemps(t *testing.T) {
+	f := newInitFixture(t)
+	_, e := Init(f.env, f.path("tasks"), false)
+	wantNoErr(t, e)
+	f.write("cfg/.ftask-tmp-1", "x")
+	_, e = Init(f.env, f.path("tasks"), false)
+	if e == nil || e.Kind != errs.KindConflict {
+		t.Fatalf("got %v, want config-exists", e)
+	}
+	if _, err := os.Lstat(f.path("cfg/.ftask-tmp-1")); !os.IsNotExist(err) {
+		t.Errorf("temp file still there: %v", err)
+	}
+}
+
 // A failure after the root or ftask.json was created reports what was
 // created; rerunning with the same input completes the job, attaching the
 // tree the first run created (operations.md, init, Retry safety).

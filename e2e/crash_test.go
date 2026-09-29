@@ -245,8 +245,15 @@ func TestCrashInjection(t *testing.T) {
 				}
 				code, want, same := c.rerun(stage)
 				steps(t, []step{{tr.cmd(c.args...), code, want}})
-				if s := snap(t, tr.home); same && !maps.Equal(s.files, after.files) {
+				s := snap(t, tr.home)
+				if same && !maps.Equal(s.files, after.files) {
 					t.Errorf("k=%d: rerun left %v, want %v", k, s.files, after.files)
+				}
+				// doctor never sees the config directory: init clears it.
+				for _, tmp := range s.temps {
+					if strings.HasPrefix(tmp, ".config/") {
+						t.Errorf("k=%d: rerun left %s", k, tmp)
+					}
 				}
 			}
 			for i, ok := range seen {

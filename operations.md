@@ -514,7 +514,7 @@ Present when `init` fails after creating the root directory or `ftask.json` — 
 
 **Crash behavior:** a crash may leave some of the pieces in place and not others — e.g. a new root directory without `ftask.json`, or a tree with `ftask.json` but no config. The config is written last, so until it exists nothing else uses the root, and a partial `init` is never mistaken for a usable one. Apart from possible leftover temp files — in the root, which `doctor` finds, or in the config directory, which the next `init` removes — there is nothing for `doctor` to find.
 
-**Retry safety:** after a crash or an error with `partial`, safe: the config is written last, so an interrupted `init` did not change the config, and rerunning it with the same input finishes the job (reporting `attached` if it had already written `ftask.json` — an empty tree it created itself). After a success, rerunning fails with `conflict` (`rule`: `config-exists`).
+**Retry safety:** after a crash or an error with `partial`, safe: the config is written last, so an interrupted `init` did not change the config, and rerunning it with the same input finishes the job (reporting `attached` if it had already written `ftask.json` — an empty tree it created itself). After a success, rerunning fails with `conflict` (`rule`: `config-exists`). A crash after the config is written — while only its temp file remains to remove — is a success, and a rerun fails the same way.
 
 ### version
 

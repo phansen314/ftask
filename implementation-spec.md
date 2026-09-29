@@ -378,12 +378,12 @@ Every failure above is `corrupt` with `reason` `invalid`; `not-json` does not ap
 `init` runs before any root exists, so it does not use the [`os.Root`](#filesystem-access) of other operations:
 
 1. Validate and clean `root` ([`init`](cli-spec.md#init) path resolution first, in the CLI).
-2. Check for an existing config (`config-exists` unless `replace_config`).
+2. Check for an existing config (`config-exists` unless `replace_config`). Before failing with `config-exists`, remove any `.ftask-tmp-*` in the config directory, as step 5 does: a crash after the config was published leaves its temp file, and the rerun that follows fails here.
 3. Create the root directory if needed — `os.Mkdir`, never `MkdirAll`: `init` never creates the root's parent.
 4. Open the root with `os.OpenRoot`, then create `ftask.json` through it via a temp file and `link` (see [Writing files](#writing-files)), or read and check the existing one.
 5. Create the config directory with `os.MkdirAll`, remove any `.ftask-tmp-*` left there by an earlier interrupted `init`, and write the config via a temp file in that directory: `link` when no config exists, `rename` under `replace_config`.
 
-The config is written last, as [`init`](operations.md#init)'s crash behavior requires. A temp file left in the config directory is outside `doctor`'s reach, which is why step 5 removes stale ones.
+The config is written last, as [`init`](operations.md#init)'s crash behavior requires. A temp file left in the config directory is outside `doctor`'s reach, which is why steps 2 and 5 remove stale ones.
 
 ## `info`
 
