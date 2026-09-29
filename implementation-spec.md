@@ -410,7 +410,7 @@ The config is written last, as [`init`](operations.md#init)'s crash behavior req
 
 ### Test hooks
 
-Tests that must pause a write or crash it at an exact point use hooks compiled only into a binary built with `-tags ftasktest`. The shipped binary contains no hooks, so no environment variable can make a real ftask pause or crash. `e2e/` builds and runs the tagged binary; a short smoke suite also runs the release build, to confirm the tag changes nothing else.
+Tests that must pause a write or crash it at an exact point use hooks compiled only into a binary built with `-tags e2e_hooks`. The shipped binary contains no hooks, so no environment variable can make a real ftask pause or crash. `e2e/` builds and runs the tagged binary; a short smoke suite also runs the release build, to confirm the tag changes nothing else.
 
 ### Tests specified elsewhere
 

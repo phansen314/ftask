@@ -38,13 +38,19 @@ const (
 // Main runs ftask as this process: the real environment and the standard
 // streams. args exclude the program name.
 func Main(args []string) int {
-	return Run(args, Env{
+	return Run(args, ProcessEnv())
+}
+
+// ProcessEnv is this process's environment: the real filesystem, clock, and
+// standard streams.
+func ProcessEnv() Env {
+	return Env{
 		Ops:    ops.NewEnv(os.Getenv, runtime.GOOS),
 		Stdin:  os.Stdin,
 		Stdout: os.Stdout,
 		Stderr: os.Stderr,
 		Getwd:  os.Getwd, // $PWD when it names the working directory: as the shell reports it
-	})
+	}
 }
 
 // Run runs the command line args, without the program name, and returns the

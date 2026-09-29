@@ -4,10 +4,7 @@
 package e2e
 
 import (
-	"bytes"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,74 +12,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-
-	"github.com/phansen314/ftask/internal/schematest"
 )
-
-// binary is ftask built for the tests, with the e2e_hooks test hooks.
-var binary string
-
-func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "ftask-e2e-")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	binary = filepath.Join(dir, "ftask")
-	build := exec.Command("go", "build", "-tags", "e2e_hooks", "-o", binary, "../cmd/ftask")
-	build.Stderr = os.Stderr
-	if err := build.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "building ftask:", err)
-		os.Exit(1)
-	}
-	code := m.Run()
-	os.RemoveAll(dir)
-	os.Exit(code)
-}
-
-// ftask prepares the binary with args in its own home and config directory.
-func ftask(t *testing.T, args ...string) *exec.Cmd {
-	t.Helper()
-	home := t.TempDir()
-	cmd := exec.Command(binary, args...)
-	cmd.Env = []string{"HOME=" + home, "XDG_CONFIG_HOME=" + filepath.Join(home, ".config"), "PATH=" + os.Getenv("PATH")}
-	return cmd
-}
-
-type result struct {
-	code           int
-	stdout, stderr string
-}
-
-func run(t *testing.T, cmd *exec.Cmd) result {
-	t.Helper()
-	var stdout, stderr bytes.Buffer
-	if cmd.Stdout == nil {
-		cmd.Stdout = &stdout
-	}
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	var exit *exec.ExitError
-	if err != nil && !errors.As(err, &exit) {
-		t.Fatal(err)
-	}
-	return result{code: cmd.ProcessState.ExitCode(), stdout: stdout.String(), stderr: stderr.String()}
-}
-
-// envelope checks that r delivered exactly one complete envelope line, as
-// every exit 0, 1, or 2 must.
-func envelope(t *testing.T, r result) {
-	t.Helper()
-	if strings.Count(r.stdout, "\n") != 1 || !strings.HasSuffix(r.stdout, "\n") {
-		t.Fatalf("exit %d: not one line: %q", r.code, r.stdout)
-	}
-	if ok, f := schematest.Check(t, "envelope", []byte(r.stdout)); !ok {
-		t.Errorf("envelope schema rejects at %s: %s", f, r.stdout)
-	}
-	if r.stderr != "" {
-		t.Errorf("stderr is not empty: %q", r.stderr)
-	}
-}
 
 func TestExitCodes(t *testing.T) {
 	for _, tc := range []struct {
@@ -234,16 +164,6 @@ func TestShow(t *testing.T) {
 	}
 }
 
-// envHome is the home directory ftask gives cmd.
-func envHome(cmd *exec.Cmd) string {
-	for _, kv := range cmd.Env {
-		if h, ok := strings.CutPrefix(kv, "HOME="); ok {
-			return h
-		}
-	}
-	return ""
-}
-
 // init creates a tree the other commands then use; a second init refuses.
 // ~/ is expanded by ftask itself, as with no shell in between.
 func TestInit(t *testing.T) {
@@ -254,53 +174,26 @@ func TestInit(t *testing.T) {
 		cmd.Env = first.Env
 		return cmd
 	}
-	for _, step := range []struct {
-		cmd  *exec.Cmd
-		code int
-		want string
-	}{
+	steps(t, []step{
 		{first, 0, `"result":{"root":"` + home + `/tasks","action":"created","last_id":0}`},
 		{same("info"), 0, `"usable":true`},
 		{same("show", "1"), 1, `"kind":"not-found"`},
 		{same("init", home+"/other"), 1, `"rule":"config-exists"`},
-	} {
-		r := run(t, step.cmd)
-		envelope(t, r)
-		if r.code != step.code || !strings.Contains(r.stdout, step.want) {
-			t.Fatalf("%q: exit %d, want %d and %s: %s", step.cmd.Args[1:], r.code, step.code, step.want, r.stdout)
-		}
-	}
+	})
 }
 
 // create writes tasks that show then reads, with notes piped in on stdin.
 func TestCreate(t *testing.T) {
-	first := ftask(t, "init", "~/tasks")
-	home := envHome(first)
-	same := func(stdin string, args ...string) *exec.Cmd {
-		cmd := exec.Command(binary, args...)
-		cmd.Env = first.Env
-		cmd.Stdin = strings.NewReader(stdin)
-		return cmd
-	}
-	for _, step := range []struct {
-		cmd  *exec.Cmd
-		code int
-		want string
-	}{
-		{first, 0, `"action":"created"`},
-		{same("", "create", "Deploy"), 0, `"id":1,"title":"Deploy"`},
-		{same("call first\n", "create", "Fix login bug", "--blocked-by", "1", "--notes-file", "-"), 0, `"id":2,`},
-		{same("", "show", "2"), 0, `"blocked_by":[1],"tags":[],"extra":{},"folder":"/","notes_path":"` + home + `/tasks/2.md","readiness":"blocked","blocking":[1]`},
-		{same("", "create", "x", "--folder", "/nope", "--blocked-by", "9"), 1, `"details":{"folders":["/nope"],"ids":[9],"paths":[]}`},
-		{same("", "create", "x", "--notes", "a", "--notes-file", "-"), 2, `"kind":"usage"`},
-		{same("", "info"), 0, `"last_id":2`},
-	} {
-		r := run(t, step.cmd)
-		envelope(t, r)
-		if r.code != step.code || !strings.Contains(r.stdout, step.want) {
-			t.Fatalf("%q: exit %d, want %d and %s: %s", step.cmd.Args[1:], r.code, step.code, step.want, r.stdout)
-		}
-	}
+	tr := newTree(t)
+	home, same := tr.home, tr.cmd
+	steps(t, []step{
+		{same("create", "Deploy"), 0, `"id":1,"title":"Deploy"`},
+		{stdin(same("create", "Fix login bug", "--blocked-by", "1", "--notes-file", "-"), "call first\n"), 0, `"id":2,`},
+		{same("show", "2"), 0, `"blocked_by":[1],"tags":[],"extra":{},"folder":"/","notes_path":"` + home + `/tasks/2.md","readiness":"blocked","blocking":[1]`},
+		{same("create", "x", "--folder", "/nope", "--blocked-by", "9"), 1, `"details":{"folders":["/nope"],"ids":[9],"paths":[]}`},
+		{same("create", "x", "--notes", "a", "--notes-file", "-"), 2, `"kind":"usage"`},
+		{same("info"), 0, `"last_id":2`},
+	})
 	if b, err := os.ReadFile(filepath.Join(home, "tasks", "2.md")); err != nil || string(b) != "call first\n" {
 		t.Errorf("2.md: %q %v", b, err)
 	}
@@ -308,47 +201,21 @@ func TestCreate(t *testing.T) {
 
 // create-folder makes the folders create then files tasks in.
 func TestCreateFolder(t *testing.T) {
-	first := ftask(t, "init", "~/tasks")
-	same := func(args ...string) *exec.Cmd {
-		cmd := exec.Command(binary, args...)
-		cmd.Env = first.Env
-		return cmd
-	}
-	for _, step := range []struct {
-		cmd  *exec.Cmd
-		code int
-		want string
-	}{
-		{first, 0, `"action":"created"`},
+	same := newTree(t).cmd
+	steps(t, []step{
 		{same("create-folder", "/proj/travel"), 1, `"folders":["/proj"]`},
 		{same("create-folder", "-p", "/proj/travel"), 0, `"result":{"folder":"/proj/travel","created":["/proj","/proj/travel"]}`},
 		{same("create-folder", "-p", "/proj/travel"), 0, `"created":[]`},
 		{same("create", "Book flights", "--folder", "/proj/travel"), 0, `"id":1,`},
 		{same("show", "1"), 0, `"folder":"/proj/travel"`},
-	} {
-		r := run(t, step.cmd)
-		envelope(t, r)
-		if r.code != step.code || !strings.Contains(r.stdout, step.want) {
-			t.Fatalf("%q: exit %d, want %d and %s: %s", step.cmd.Args[1:], r.code, step.code, step.want, r.stdout)
-		}
-	}
+	})
 }
 
 // complete makes a dependent ready, and reopen blocks it again; doing
 // either twice changes nothing.
 func TestCompleteReopen(t *testing.T) {
-	first := ftask(t, "init", "~/tasks")
-	same := func(args ...string) *exec.Cmd {
-		cmd := exec.Command(binary, args...)
-		cmd.Env = first.Env
-		return cmd
-	}
-	for _, step := range []struct {
-		cmd  *exec.Cmd
-		code int
-		want string
-	}{
-		{first, 0, `"action":"created"`},
+	same := newTree(t).cmd
+	steps(t, []step{
 		{same("create", "Book flights"), 0, `"id":1,`},
 		{same("create", "Pack bags", "--blocked-by", "1"), 0, `"id":2,`},
 		{same("show", "2"), 0, `"readiness":"blocked","blocking":[1]`},
@@ -359,29 +226,13 @@ func TestCompleteReopen(t *testing.T) {
 		{same("reopen", "1"), 0, `"completed_at":null,`},
 		{same("show", "2"), 0, `"readiness":"blocked","blocking":[1]`},
 		{same("reopen", "1"), 0, `"changed":false`},
-	} {
-		r := run(t, step.cmd)
-		envelope(t, r)
-		if r.code != step.code || !strings.Contains(r.stdout, step.want) {
-			t.Fatalf("%q: exit %d, want %d and %s: %s", step.cmd.Args[1:], r.code, step.code, step.want, r.stdout)
-		}
-	}
+	})
 }
 
 // update changes only what it names; the same update again changes nothing.
 func TestUpdate(t *testing.T) {
-	first := ftask(t, "init", "~/tasks")
-	same := func(args ...string) *exec.Cmd {
-		cmd := exec.Command(binary, args...)
-		cmd.Env = first.Env
-		return cmd
-	}
-	for _, step := range []struct {
-		cmd  *exec.Cmd
-		code int
-		want string
-	}{
-		{first, 0, `"action":"created"`},
+	same := newTree(t).cmd
+	steps(t, []step{
 		{same("create", "Book flights", "--tags", "travel", "--extra", `{"status":"new"}`), 0, `"id":1,`},
 		{same("update", "1", "--priority", "2", "--tags-add", "urgent", "--extra-merge", `{"status":"waiting"}`), 0,
 			`"priority":2,"created_at":`},
@@ -390,30 +241,14 @@ func TestUpdate(t *testing.T) {
 		{same("update", "1"), 1, `"kind":"invalid-input"`},
 		{same("update", "1", "--tags-add", "x", "--tags-replace-all", "y"), 1, `"field":"/tags/add"`},
 		{same("update", "9", "--title", "x"), 1, `"ids":[9]`},
-	} {
-		r := run(t, step.cmd)
-		envelope(t, r)
-		if r.code != step.code || !strings.Contains(r.stdout, step.want) {
-			t.Fatalf("%q: exit %d, want %d and %s: %s", step.cmd.Args[1:], r.code, step.code, step.want, r.stdout)
-		}
-	}
+	})
 }
 
 // block adds blockers that show then sees, and refuses a cycle; unblock
 // removes them again.
 func TestBlockUnblock(t *testing.T) {
-	first := ftask(t, "init", "~/tasks")
-	same := func(args ...string) *exec.Cmd {
-		cmd := exec.Command(binary, args...)
-		cmd.Env = first.Env
-		return cmd
-	}
-	for _, step := range []struct {
-		cmd  *exec.Cmd
-		code int
-		want string
-	}{
-		{first, 0, `"action":"created"`},
+	same := newTree(t).cmd
+	steps(t, []step{
 		{same("create", "a"), 0, `"id":1,`},
 		{same("create", "b"), 0, `"id":2,`},
 		{same("create", "c"), 0, `"id":3,`},
@@ -427,30 +262,14 @@ func TestBlockUnblock(t *testing.T) {
 		{same("unblock", "1", "--blockers", "2,9"), 0, `"blocked_by":[],`},
 		{same("show", "1"), 0, `"readiness":"ready","blocking":[]`},
 		{same("unblock", "1", "--blockers", "2"), 0, `"removed":[]`},
-	} {
-		r := run(t, step.cmd)
-		envelope(t, r)
-		if r.code != step.code || !strings.Contains(r.stdout, step.want) {
-			t.Fatalf("%q: exit %d, want %d and %s: %s", step.cmd.Args[1:], r.code, step.code, step.want, r.stdout)
-		}
-	}
+	})
 }
 
 // list returns tasks across folders in tree order, with their readiness;
 // frontier returns only the ready ones, in the order to work on them.
 func TestListFrontier(t *testing.T) {
-	first := ftask(t, "init", "~/tasks")
-	same := func(args ...string) *exec.Cmd {
-		cmd := exec.Command(binary, args...)
-		cmd.Env = first.Env
-		return cmd
-	}
-	for _, step := range []struct {
-		cmd  *exec.Cmd
-		code int
-		want string
-	}{
-		{first, 0, `"action":"created"`},
+	same := newTree(t).cmd
+	steps(t, []step{
 		{same("list"), 0, `"result":{"tasks":[]}`},
 		{same("create-folder", "-p", "/proj/travel"), 0, `"created"`},
 		{same("create", "b", "--folder", "/proj/travel"), 0, `"id":1,`},
@@ -465,13 +284,7 @@ func TestListFrontier(t *testing.T) {
 		{same("frontier", "--folder", "/proj", "--recursive=false"), 0, `"tasks":[{"schema":1,"id":3,`},
 		{same("complete", "3"), 0, `"changed":true`},
 		{same("frontier", "--folder", "/proj"), 0, `"result":{"tasks":[]}`},
-	} {
-		r := run(t, step.cmd)
-		envelope(t, r)
-		if r.code != step.code || !strings.Contains(r.stdout, step.want) {
-			t.Fatalf("%q: exit %d, want %d and %s: %s", step.cmd.Args[1:], r.code, step.code, step.want, r.stdout)
-		}
-	}
+	})
 }
 
 // A relative root is resolved against the working directory as the shell
@@ -526,5 +339,18 @@ func TestCrash(t *testing.T) {
 	}
 	if r.stdout != "" {
 		t.Errorf("stdout %q, want nothing", r.stdout)
+	}
+}
+
+// The release build has no test hooks: their variables change nothing
+// (implementation-spec.md, Test hooks).
+func TestReleaseIgnoresHooks(t *testing.T) {
+	cmd := ftask(t, "version")
+	cmd.Path, cmd.Args[0] = release, release
+	cmd.Env = append(cmd.Env, "FTASK_E2E_PANIC=1", "FTASK_E2E_HOLD=1", "FTASK_E2E_CRASH_BEFORE=1", "FTASK_E2E_CLOCK=x")
+	r := run(t, cmd)
+	envelope(t, r)
+	if r.code != 0 {
+		t.Errorf("exit %d: %s", r.code, r.stdout)
 	}
 }

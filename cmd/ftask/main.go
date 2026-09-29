@@ -11,8 +11,9 @@ import (
 	"github.com/phansen314/ftask/internal/cli"
 )
 
-// startHook runs once the process is set up; test builds set it.
-var startHook = func() {}
+// envHook runs once the process is set up, and may change its environment;
+// test builds set it (hook_e2e.go).
+var envHook = func(*cli.Env) {}
 
 func main() {
 	os.Exit(run())
@@ -26,6 +27,7 @@ func run() int {
 	// Writing to a closed pipe then returns EPIPE, reported as exit 3,
 	// instead of killing the process.
 	signal.Notify(make(chan os.Signal, 1), syscall.SIGPIPE)
-	startHook()
-	return cli.Main(os.Args[1:])
+	env := cli.ProcessEnv()
+	envHook(&env)
+	return cli.Run(os.Args[1:], env)
 }
