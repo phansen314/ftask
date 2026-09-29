@@ -327,6 +327,7 @@ cmd/ftask → cli → ops → store → fsys
                       ↘ graph      ↘ jsonio
                       ↘ model ←── (store, graph)
 cmd/ftask → buildinfo (and ops → buildinfo, for version)
+cmd/ftask → fsys, in the e2e_hooks build only (Test hooks)
 errs and jsonio may be imported by any package, and import none of ftask's own.
 ```
 
@@ -410,7 +411,7 @@ The config is written last, as [`init`](operations.md#init)'s crash behavior req
 
 ### Test hooks
 
-Tests that must pause a write or crash it at an exact point use hooks compiled only into a binary built with `-tags e2e_hooks`. The shipped binary contains no hooks, so no environment variable can make a real ftask pause or crash. `e2e/` builds and runs the tagged binary; a short smoke suite also runs the release build, to confirm the tag changes nothing else.
+Tests that must pause a write or crash it at an exact point use hooks compiled only into a binary built with `-tags e2e_hooks`. The shipped binary contains no hooks, so no environment variable can make a real ftask pause or crash. The hooks set the process's environment before it runs — a fixed clock, a fault-injecting `fsys`, a pause once the write lock is taken — through variables named `FTASK_E2E_*`, documented in `cmd/ftask/hook_e2e.go`. `e2e/` builds and runs the tagged binary; a short smoke suite also runs the release build, to confirm the tag changes nothing else.
 
 ### Tests specified elsewhere
 
