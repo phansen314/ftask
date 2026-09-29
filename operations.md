@@ -8,9 +8,9 @@ Terms follow the design spec's [Terms](design-spec.md#terms).
 
 - **JSON in, JSON out.** Input and output are always JSON with published schemas, so users and agents can construct requests and parse results without scraping text. Every result is wrapped in the [output envelope](#output-envelope).
 - **Input follows the file-level rules.** Input is held to the same [file-level rules](design-spec.md#file-validity) for integer literals (`2`, not `2.0` or `2e0`), duplicate keys (in the input itself or anywhere inside `extra`), unpaired surrogate escapes, and nesting depth. A violation is `invalid-input`.
-- **Schema identifiers.** Shared schemas have short `$id`s (`envelope`, `error`, `warning`, `task`, `folder-path`, and the design spec's `task-file` and `root-file`). Each operation's schemas are `<op>-input`, `<op>-output`, and `<op>-partial`. Where a property has the same meaning and constraints as a task file field, the schema `$ref`s it, and its meaning is the one in [Fields](design-spec.md#fields).
+- **Schema identifiers.** Shared schemas have short `$id`s (`envelope`, `error`, `warning`, `task`, `task-view`, `task-projection`, `task-field`, `folder-path`, and the design spec's `task-file` and `root-file`). Each operation's schemas are `<op>-input`, `<op>-output`, and `<op>-partial`. Where a property has the same meaning and constraints as a task file field, the schema `$ref`s it, and its meaning is the one in [Fields](design-spec.md#fields).
 - **Referring to operations and kinds.** Operation names, error kinds, and warning kinds are written in code (`create`, `conflict`, `duplicate-id`), linked on their first mention in a section. Error qualifiers are written `` `kind` (`field`: `value`) ``, e.g. `conflict` (`rule`: `id-exhausted`).
-- **Parameters.** An operation takes a parameter only if it changes the meaning of the result or the work done (e.g. `frontier`'s `folder`, which limits which files are read). Narrowing or shaping output — filtering on fields, taking the first N — is left to the caller (e.g. `jq`) or the CLI.
+- **Parameters.** An operation takes a parameter only if it changes the meaning of the result or the work done (e.g. `frontier`'s `folder`, which limits which files are read). Narrowing or shaping output — filtering on fields, taking the first N — is left to the caller (e.g. `jq`) or the CLI. One exception: [`frontier`](#frontier) and [`list`](#list) take the few parameters of [Narrowing tasks](#narrowing-tasks) — a limit, a choice of fields, and filters on tags and readiness. Their output goes straight into the context of the agent driving ftask, its main caller, where every byte is a cost that later turns pay for too; so the small result must be the one the tool itself makes easy, not one the caller has to remember to cut down. Anything past those few is still left to `jq`.
 - **Versioning.** The schemas in this document are ftask's public contract (see [Versioning](#versioning)).
 
 ## Operation kinds
@@ -327,6 +327,30 @@ How an operation checks a folder path given as input (e.g. `folder`). Entries ar
 
 So a folder "exists" only if every entry on its path is a plain directory, not a symlink.
 
+### Narrowing tasks
+
+[`frontier`](#frontier) and [`list`](#list) share these input fields, which narrow the tasks they return:
+
+- **`tags_any`** — keep only tasks with at least one of these tags.
+- **`tags_all`** — keep only tasks with every one of these tags. Given with `tags_any`, a task must pass both.
+- **`limit`** — return at most this many tasks: the first ones in the operation's order. `0` returns none, for the count alone.
+- **`fields`** — return each task as a [Task projection](#task-projection) holding only these fields, in the order the [Task view](#task-view) lists them. `id` is always included, named or not, so any task returned can be followed up with [`show`](#show).
+
+`list` also filters by `readiness` (see [`list`](#list)), a scope rule of its own.
+
+They apply in this order, after the tree is read and every warning recorded:
+
+1. **Scope** — `folder` and `recursive`, and which readiness the operation returns (`frontier`: ready; `list`: its `readiness`).
+2. **Filters** — `tags_any`, then `tags_all`.
+3. **Order** — the operation's own, unchanged.
+4. **Count** — `total` is the number of tasks left.
+5. **Limit** — the first `limit` of them; `truncated` says whether any were cut.
+6. **Fields** — each task projected to `fields`.
+
+Narrowing changes only which tasks are returned and how much of each. It never changes the work done, readiness, the order, or the **warnings**: those are exactly the ones the same call without these fields reports, including those about tasks the filters or the limit leave out. So a warning is never lost to narrowing. `list`'s `folders` are not narrowed.
+
+Every result of `frontier` and `list` carries `total` and `truncated`, whether or not `limit` is given, so it has one shape: without `limit`, `total` is the number of tasks returned and `truncated` is `false`. A caller that got N tasks can tell "there are N" from "there are more, and you got N".
+
 ### Undo
 
 [`delete`](#delete) and [`delete-folder`](#delete-folder) remove files for good: ftask keeps no trash and no history. Undo comes from git, when the root is a repository (see *Syncing and committing are allowed* in [Assumptions](design-spec.md#assumptions)), and reaches back only to the last commit — ftask never commits. Restoring from git is an [outside change](design-spec.md#assumptions):
@@ -399,6 +423,46 @@ A [Task](#task) plus its derived readiness. Returned by read operations that rep
     { "if": { "properties": { "readiness": { "const": "blocked" } } }, "then": { "properties": { "blocking": { "minItems": 1 } } }, "else": { "properties": { "blocking": { "maxItems": 0 } } } },
     { "if": { "properties": { "readiness": { "const": "complete" } } }, "then": { "properties": { "completed_at": { "type": "string" } } }, "else": { "properties": { "completed_at": { "type": "null" } } } }
   ]
+}
+```
+
+### Task projection
+
+Some of a [Task view](#task-view)'s fields — always including `id` — in the Task view's order. Returned by [`frontier`](#frontier) and [`list`](#list) in place of Task views when `fields` is given (see [Narrowing tasks](#narrowing-tasks)); each field present has exactly its Task view meaning and value.
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "task-projection",
+  "type": "object",
+  "required": ["id"],
+  "properties": {
+    "schema": { "$ref": "task-view#/properties/schema" },
+    "id": { "$ref": "task-view#/properties/id" },
+    "title": { "$ref": "task-view#/properties/title" },
+    "priority": { "$ref": "task-view#/properties/priority" },
+    "created_at": { "$ref": "task-view#/properties/created_at" },
+    "completed_at": { "$ref": "task-view#/properties/completed_at" },
+    "blocked_by": { "$ref": "task-view#/properties/blocked_by" },
+    "tags": { "$ref": "task-view#/properties/tags" },
+    "extra": { "$ref": "task-view#/properties/extra" },
+    "folder": { "$ref": "task-view#/properties/folder" },
+    "notes_path": { "$ref": "task-view#/properties/notes_path" },
+    "readiness": { "$ref": "task-view#/properties/readiness" },
+    "blocking": { "$ref": "task-view#/properties/blocking" }
+  },
+  "additionalProperties": false
+}
+```
+
+The names a caller may choose are these properties' names:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "task-field",
+  "type": "string",
+  "enum": ["schema", "id", "title", "priority", "created_at", "completed_at", "blocked_by", "tags", "extra", "folder", "notes_path", "readiness", "blocking"]
 }
 ```
 
@@ -1905,13 +1969,26 @@ Return the ready tasks — open, and not blocked — in the order to work on the
   "type": "object",
   "properties": {
     "folder": { "$ref": "folder-path", "default": "/", "description": "Only tasks in this folder are returned." },
-    "recursive": { "type": "boolean", "default": true, "description": "Also return tasks in the folder's subfolders." }
+    "recursive": { "type": "boolean", "default": true, "description": "Also return tasks in the folder's subfolders." },
+    "tags_any": { "$ref": "#/$defs/tag-set", "description": "Only tasks with at least one of these tags (see Narrowing tasks)." },
+    "tags_all": { "$ref": "#/$defs/tag-set", "description": "Only tasks with every one of these tags (see Narrowing tasks)." },
+    "limit": { "type": "integer", "minimum": 0, "maximum": 9007199254740991, "description": "At most this many tasks, the first in the operation's order; absent, no limit (see Narrowing tasks)." },
+    "fields": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "task-field" },
+      "description": "Return each task as a Task projection of these fields, id always included; absent, whole Task views (see Narrowing tasks)."
+    }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "$defs": {
+    "tag-set": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "task-file#/$defs/name" } }
+  }
 }
 ```
 
-With no input, `frontier` returns every ready task in the tree.
+With no input, `frontier` returns every ready task in the tree. `tags_any`, `tags_all`, `limit`, and `fields` narrow what is returned, per [Narrowing tasks](#narrowing-tasks).
 
 **Additional validation:** none.
 
@@ -1932,19 +2009,21 @@ With no input, `frontier` returns every ready task in the tree.
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "frontier-output",
   "type": "object",
-  "required": ["tasks"],
+  "required": ["tasks", "total", "truncated"],
   "properties": {
     "tasks": {
       "type": "array",
-      "items": { "$ref": "task-view" },
-      "description": "Every ready task in scope, in frontier order. May be empty."
-    }
+      "items": { "anyOf": [{ "$ref": "task-view" }, { "$ref": "task-projection" }] },
+      "description": "Every ready task in scope that passes the filters, in frontier order — the first limit of them, with a limit. Task views, or Task projections with fields. May be empty."
+    },
+    "total": { "type": "integer", "minimum": 0, "description": "How many ready tasks in scope pass the filters, before the limit." },
+    "truncated": { "type": "boolean", "description": "Whether the limit left some out: total is more than the number of tasks returned." }
   },
   "additionalProperties": false
 }
 ```
 
-Each item is a [Task view](#task-view); for `frontier`, `readiness` is always `ready` and `blocking` always empty. The shape is shared with `show` so that callers parse one form.
+Each item is a [Task view](#task-view), or with `fields` a [Task projection](#task-projection); for `frontier`, `readiness` is always `ready` and `blocking` always empty. The shape is shared with `show` so that callers parse one form.
 
 **Order:**
 
@@ -1952,13 +2031,13 @@ Each item is a [Task view](#task-view); for `frontier`, `readiness` is always `r
 2. Then `id`, lowest first — the oldest first, since IDs only increase.
 3. Copies of a duplicated ID in [tree order](#tree-order).
 
-Narrowing the result further — by tag, by `extra` fields, to the first N — is left to the caller (e.g. `jq`) or the CLI; it does not change the order (see [Conventions](#conventions)).
+A `limit` takes a prefix of this order, and the filters leave it unchanged (see [Narrowing tasks](#narrowing-tasks)). Narrowing further — by `extra` fields, by title — is left to the caller (e.g. `jq`).
 
 **Errors:**
 
 | Kind | When |
 |---|---|
-| `invalid-input` | `folder` is not a valid folder path, or `recursive` is not a boolean. |
+| `invalid-input` | `folder` is not a valid folder path, `recursive` is not a boolean, or a [narrowing](#narrowing-tasks) field is invalid: a tag set empty, repeating a tag, or holding an invalid one; `limit` not an integer from 0 up; `fields` empty, repeating a name, or naming no Task view field. |
 | `environment`, `not-initialized`, `corrupt`, `unsupported-format` | The config can't be located, or the root is not usable (see [Root states](#root-states)). |
 | `not-found`, `corrupt` | `folder` fails the [path walk](#path-walk) (`not-found`, or `corrupt` with `reason` `unexpected-file`). |
 
@@ -1970,6 +2049,8 @@ Narrowing the result further — by tag, by `extra` fields, to the first N — i
 | `duplicate-id` | An ID has more than one task file in scope (each copy is judged separately, and every ready copy is returned); or a blocker's ID of an open task in scope does, so that task counts as blocked. |
 | `dangling-reference` | An open task in scope has a `blocked_by` ID with no task file, so it counts as blocked. |
 | `unreadable-folder` | A folder could not be listed; tasks in it are missing from the frontier, and tasks blocked by tasks in it count as blocked. |
+
+Narrowing never removes a warning: filters and `limit` apply after every one is recorded (see [Narrowing tasks](#narrowing-tasks)).
 
 **Partial schema:** none.
 
@@ -1993,16 +2074,27 @@ Return every task in scope, whatever its readiness, with its readiness shown —
   "properties": {
     "folder": { "$ref": "folder-path", "default": "/", "description": "Only tasks (and folders) in this folder are returned." },
     "recursive": { "type": "boolean", "default": true, "description": "Also return tasks (and folders) in the folder's subfolders." },
-    "include_complete": { "type": "boolean", "default": false, "description": "Also return complete tasks." },
-    "include_folders": { "type": "boolean", "default": false, "description": "Also return the folders in scope: with recursive, every folder under folder; without, folder and its immediate subfolders." }
+    "readiness": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "task-view#/properties/readiness" },
+      "default": ["ready", "blocked"],
+      "description": "Only tasks with one of these readiness values. The default leaves out complete tasks."
+    },
+    "include_folders": { "type": "boolean", "default": false, "description": "Also return the folders in scope: with recursive, every folder under folder; without, folder and its immediate subfolders." },
+    "tags_any": { "$ref": "frontier-input#/properties/tags_any" },
+    "tags_all": { "$ref": "frontier-input#/properties/tags_all" },
+    "limit": { "$ref": "frontier-input#/properties/limit" },
+    "fields": { "$ref": "frontier-input#/properties/fields" }
   },
   "additionalProperties": false
 }
 ```
 
-With no input, `list` returns every open task in the tree.
+With no input, `list` returns every open task in the tree. `tags_any`, `tags_all`, `limit`, and `fields` narrow what is returned, per [Narrowing tasks](#narrowing-tasks).
 
-Notes: `include_complete` and `include_folders` change what the result *is* — "open tasks" versus "all tasks", "tasks" versus "tasks and folders" — so they are parameters rather than caller-side filtering (see [Conventions](#conventions)). Complete tasks accumulate forever; excluding them by default keeps the ordinary result about current work.
+Notes: the default `readiness` and `include_folders` change what the result *is* — "open tasks" versus "all tasks", "tasks" versus "tasks and folders" — so they would be parameters even without [Narrowing tasks](#narrowing-tasks) (see [Conventions](#conventions)). Complete tasks accumulate forever; leaving them out by default keeps the ordinary result about current work. Every task, complete ones included, is `["ready", "blocked", "complete"]`; only finished ones, `["complete"]`.
 
 **Additional validation:** none.
 
@@ -2021,32 +2113,34 @@ Notes: `include_complete` and `include_folders` change what the result *is* — 
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "list-output",
   "type": "object",
-  "required": ["tasks"],
+  "required": ["tasks", "total", "truncated"],
   "properties": {
     "folders": {
       "type": "array",
       "items": { "$ref": "folder-path" },
-      "description": "Present only when include_folders is true: folder itself, then — with recursive — every folder under it, or — without — its immediate subfolders; empty folders included; in tree order."
+      "description": "Present only when include_folders is true: folder itself, then — with recursive — every folder under it, or — without — its immediate subfolders; empty folders included; in tree order. Never narrowed."
     },
     "tasks": {
       "type": "array",
-      "items": { "$ref": "task-view" },
-      "description": "Every task in scope — open ones, plus complete ones if include_complete — in tree order. May be empty."
-    }
+      "items": { "anyOf": [{ "$ref": "task-view" }, { "$ref": "task-projection" }] },
+      "description": "Every task in scope with one of the readiness values asked for that passes the filters, in tree order — the first limit of them, with a limit. Task views, or Task projections with fields. May be empty."
+    },
+    "total": { "type": "integer", "minimum": 0, "description": "How many tasks in scope, of the readiness asked for, pass the filters, before the limit." },
+    "truncated": { "type": "boolean", "description": "Whether the limit left some out: total is more than the number of tasks returned." }
   },
   "additionalProperties": false
 }
 ```
 
-Each task is a [Task view](#task-view), the same shape `show` and `frontier` return.
+Each task is a [Task view](#task-view), the same shape `show` and `frontier` return — or with `fields`, a [Task projection](#task-projection).
 
-**Order:** [tree order](#tree-order), for both `folders` and `tasks`.
+**Order:** [tree order](#tree-order), for both `folders` and `tasks`. A `limit` takes a prefix of it.
 
 **Errors:**
 
 | Kind | When |
 |---|---|
-| `invalid-input` | `folder` is not a valid folder path, or a flag is not a boolean. |
+| `invalid-input` | `folder` is not a valid folder path, a flag is not a boolean, `readiness` is empty or repeats or doesn't name a readiness value, or a [narrowing](#narrowing-tasks) field is invalid, as for [`frontier`](#frontier). |
 | `environment`, `not-initialized`, `corrupt`, `unsupported-format` | The config can't be located, or the root is not usable (see [Root states](#root-states)). |
 | `not-found`, `corrupt` | `folder` fails the [path walk](#path-walk) (`not-found`, or `corrupt` with `reason` `unexpected-file`). |
 
@@ -2058,6 +2152,8 @@ Each task is a [Task view](#task-view), the same shape `show` and `frontier` ret
 | `duplicate-id` | An ID has more than one task file in scope (every copy in scope is listed); or a blocker's ID of an open task in scope does, so that task counts as blocked. |
 | `dangling-reference` | An open task in scope has a `blocked_by` ID with no task file, so it counts as blocked. |
 | `unreadable-folder` | A folder could not be listed; tasks in it are missing from the list, and tasks blocked by tasks in it count as blocked. |
+
+Narrowing never removes a warning: `readiness`, the filters, and `limit` apply after every one is recorded (see [Narrowing tasks](#narrowing-tasks)).
 
 **Partial schema:** none.
 

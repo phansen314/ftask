@@ -60,7 +60,7 @@ The command line is parsed in the conventional GNU style of Go's [cobra](https:/
 - **Value formats.** An argument or option value that sets an input field is converted by its field's type:
   - *Integers* are decimal, with an optional leading `-`: no `+`, no leading zeros, no fraction or exponent, the same rule as for [`--input`](#input).
   - *Null.* For a field that may be `null`, the value `null` converts to it: `--priority null` clears the priority. For any other field, `null` is an ordinary value.
-  - *Lists of items that cannot contain a comma* (tags, IDs) are comma-separated: `--tags travel,urgent`. Items are taken exactly and passed on: `a, b` (with a space), `a,,b`, and a duplicate item all reach the operation, which rejects them as `invalid-input`. An empty value (`''`) is the empty list. The option may be repeated; its lists are joined in order (`--tags a --tags b,c` is `a,b,c`).
+  - *Lists of items that cannot contain a comma* (tags, IDs, field names, readiness values) are comma-separated: `--tags travel,urgent`. Items are taken exactly and passed on: `a, b` (with a space), `a,,b`, and a duplicate item all reach the operation, which rejects them as `invalid-input`. An empty value (`''`) is the empty list. The option may be repeated; its lists are joined in order (`--tags a --tags b,c` is `a,b,c`).
   - *Lists of items that can contain a comma* (e.g. `extra` keys, which are arbitrary strings) use a **repeatable** option instead, one item per occurrence: `--extra-remove status --extra-remove owner`. Each occurrence is exactly one item, so `--extra-remove 'a,b'` names the single key `a,b`.
   - *JSON values* (e.g. `--extra`) are exactly one JSON value, held to the [input conventions](operations.md#conventions) (integer literals, no duplicate keys). Problems are reported at the option's field (e.g. `/extra`); the value's type — e.g. that it is an object — is checked by the operation.
   - *Encoding.* Every value is UTF-8; one that is not is `invalid-input` at its field.
@@ -676,7 +676,7 @@ ftask move 42 --to /archive/2025 -p | jq -r .result.notes_path
 
 Return the ready tasks — open, and not blocked — in the order to work on them. Runs [`frontier`](operations.md#frontier).
 
-**Synopsis:** `ftask frontier [--folder <path>] [--recursive=false]`, or `ftask frontier -i <file>`.
+**Synopsis:** `ftask frontier [--folder <path>] [--recursive=false] [--tags-any <tags>] [--tags-all <tags>] [--limit <n>] [--fields <names>]`, or `ftask frontier -i <file>`.
 
 **Operation:** [`frontier`](operations.md#frontier).
 
@@ -688,29 +688,34 @@ Return the ready tasks — open, and not blocked — in the order to work on the
 |---|---|---|
 | `--folder <path>` | `/folder` | `/`. An exact [folder path](#command-line). |
 | `--recursive` | `/recursive` | `true`. `--recursive=false` leaves out tasks in subfolders. |
+| `--tags-any <tags>` | `/tags_any` | None. Comma list: only tasks with at least one of them. |
+| `--tags-all <tags>` | `/tags_all` | None. Comma list: only tasks with every one of them. |
+| `--limit <n>` | `/limit` | None: every task. At most `n`, the first in frontier order. |
+| `--fields <names>` | `/fields` | None: whole task views. Comma list of task view field names; `id` is always included. |
 
 **Input:** none beyond the Options mapping.
 
-**Output:** Passthrough. `result.tasks` is in frontier order and may be empty; an empty frontier exits `0`.
+**Output:** Passthrough. `result.tasks` is in frontier order and may be empty; an empty frontier exits `0`. `result.total` and `result.truncated` say whether `--limit` cut it (see [Narrowing tasks](operations.md#narrowing-tasks)).
 
-Taking the first N, or filtering by tag or `extra`, is left to `jq` (see [Not included](#not-included)).
+Filtering by `extra` or title is left to `jq` (see [Not included](#not-included)).
 
 **Errors:** none beyond the operation's.
 
 **Examples:**
 
 ```sh
-ftask frontier | jq '.result.tasks[0]'                       # next task
+ftask frontier --limit 10 --fields id,title,priority,folder   # the next ten, briefly
+ftask frontier --limit 1 | jq '.result.tasks[0]'              # the next task, whole
 ftask frontier --folder /proj | jq -r '.result.tasks[] | "\(.id)\t\(.title)"'
-ftask frontier | jq '[.result.tasks[] | select(.tags | index("urgent"))]'
-ftask frontier | jq '.result.tasks[:5]'                      # the first five
+ftask frontier --tags-any urgent,today --fields id,title
+ftask frontier --limit 0 | jq .result.total                   # how many are ready
 ```
 
 ### list
 
 Return every task in scope, whatever its readiness, with its readiness shown — and optionally the folders in scope. Complete tasks are included only on request. Runs [`list`](operations.md#list).
 
-**Synopsis:** `ftask list [--folder <path>] [--recursive=false] [--include-complete] [--include-folders]`, or `ftask list -i <file>`.
+**Synopsis:** `ftask list [--folder <path>] [--recursive=false] [--readiness <states>] [--include-folders] [--tags-any <tags>] [--tags-all <tags>] [--limit <n>] [--fields <names>]`, or `ftask list -i <file>`.
 
 **Operation:** [`list`](operations.md#list).
 
@@ -722,29 +727,34 @@ Return every task in scope, whatever its readiness, with its readiness shown —
 |---|---|---|
 | `--folder <path>` | `/folder` | `/`. An exact [folder path](#command-line). |
 | `--recursive` | `/recursive` | `true`. `--recursive=false` leaves out tasks in subfolders, and folders below the immediate subfolders. |
-| `--include-complete` | `/include_complete` | `false`. |
+| `--readiness <states>` | `/readiness` | `ready,blocked`. Comma list of `ready`, `blocked`, `complete`: only tasks in one of these states. |
 | `--include-folders` | `/include_folders` | `false`. |
+| `--tags-any <tags>` | `/tags_any` | None. Comma list: only tasks with at least one of them. |
+| `--tags-all <tags>` | `/tags_all` | None. Comma list: only tasks with every one of them. |
+| `--limit <n>` | `/limit` | None: every task. At most `n`, the first in tree order. |
+| `--fields <names>` | `/fields` | None: whole task views. Comma list of task view field names; `id` is always included. |
 
 **Input:** none beyond the Options mapping.
 
-**Output:** Passthrough. `result.tasks` is in tree order and may be empty. `result.folders` is present only with `--include-folders`.
+**Output:** Passthrough. `result.tasks` is in tree order and may be empty. `result.total` and `result.truncated` say whether `--limit` cut it (see [Narrowing tasks](operations.md#narrowing-tasks)). `result.folders` is present only with `--include-folders`, and is never narrowed.
 
-Slicing, filtering, and grouping are left to `jq`; rendering the result as a tree is [Future work](design-spec.md#tree-view) outside the CLI (see [Not included](#not-included)).
+Filtering by `extra` or title, and grouping, are left to `jq`; rendering the result as a tree is [Future work](design-spec.md#tree-view) outside the CLI (see [Not included](#not-included)).
 
 **Errors:** none beyond the operation's.
 
 **Examples:**
 
 ```sh
-ftask list | jq -r '.result.tasks[] | "\(.id)\t\(.readiness)\t\(.title)"'
-ftask list --folder /proj --include-complete | jq '[.result.tasks[] | select(.completed_at != null)] | length'
-ftask list --include-folders | jq -r '.result.folders[]'
-ftask list | jq '.result.tasks | group_by(.folder) | map({folder: .[0].folder, ids: map(.id)})'
+ftask list --limit 50 --fields id,title,readiness,folder
+ftask list --folder /proj --readiness complete --limit 0 | jq .result.total   # how many are done
+ftask list --readiness blocked --fields id,title,blocking                    # what's stuck, and on what
+ftask list --readiness ready,blocked,complete --tags-all db,backend --fields id,title,readiness
+ftask list --include-folders --limit 0 | jq -r '.result.folders[]'
+ftask list --fields folder | jq '.result.tasks | group_by(.folder) | map({folder: .[0].folder, ids: map(.id)})'
 ```
 
 ## Not included
 
-- **`--limit`**: output shaping, left to `jq` (see the operations' [Parameters](operations.md#conventions) convention). Task lists are not expected to be large enough to need it.
-- **Filters** (e.g. `--tag`, or on `extra` fields): output shaping, left to `jq`, like `--limit`.
+- **Filters beyond [Narrowing tasks](operations.md#narrowing-tasks)** (on `extra` fields, on title text, or anything query-like): output shaping, left to `jq` (see the operations' [Parameters](operations.md#conventions) convention). `--limit`, `--fields`, and the tag and readiness filters are the exception, since `frontier`'s and `list`'s output lands in an agent's context.
 - **`--config` / `--root`**: there is one config and one root per user (see the design spec's [Assumptions](design-spec.md#assumptions)). A different config location is reached by setting `XDG_CONFIG_HOME` (or `HOME`), with the effects the design spec describes.
 - **Tree view**: rendering for people, which the JSON-only CLI does not do. Stays in the design spec's [Future work](design-spec.md#tree-view).
