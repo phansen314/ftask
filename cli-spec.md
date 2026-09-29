@@ -281,6 +281,76 @@ ftask create-folder /proj
 ftask create-folder -p /proj/travel/2026 | jq -r '.result.created[]'
 ```
 
+### delete-folder
+
+Permanently remove a folder and everything under it, and the removed tasks' IDs from every `blocked_by` outside it. Runs [`delete-folder`](operations.md#delete-folder).
+
+**Synopsis:** `ftask delete-folder <folder> [-r]`, or `ftask delete-folder -i <file>`.
+
+**Operation:** [`delete-folder`](operations.md#delete-folder).
+
+**Arguments:**
+
+| Argument | Field | Notes |
+|---|---|---|
+| `<folder>` | `/folder` | Required unless `--input` is given. An exact [folder path](#command-line); never `/`. |
+
+**Options:**
+
+| Option | Field | Default |
+|---|---|---|
+| `-r, --recursive` | `/recursive` | `false`. Without it, a folder holding tasks or folders is refused, as with `rmdir`. |
+
+**Input:** none beyond the Arguments and Options mapping.
+
+**Output:** Passthrough: the folders removed, the IDs of the tasks removed, and the `dependents` that lost references to them. There is no undo but git (see [Undo](operations.md#undo)).
+
+**Errors:** none beyond the operation's.
+
+**Examples:**
+
+```sh
+ftask delete-folder /proj/old
+ftask delete-folder -r /proj/travel | jq -c '{ids: .result.ids, dependents: .result.dependents}'
+```
+
+### move-folder
+
+Move a folder, and everything under it, to a new place — which also renames it. Runs [`move-folder`](operations.md#move-folder).
+
+**Synopsis:** `ftask move-folder <folder> --to <folder> [-p]`, or `ftask move-folder -i <file>`.
+
+**Operation:** [`move-folder`](operations.md#move-folder).
+
+**Arguments:**
+
+| Argument | Field | Notes |
+|---|---|---|
+| `<folder>` | `/folder` | Required unless `--input` is given. The folder to move. An exact [folder path](#command-line); never `/`. |
+
+**Options:**
+
+| Option | Field | Default |
+|---|---|---|
+| `--to <folder>` | `/to` | Required unless `--input` is given. An existing folder to move it into, or its new path. |
+| `-p, --parents` | `/parents` | `false`. |
+
+`--to` is an option rather than a second argument for the same reason as [`block`](#block)'s `--blockers`: the direction is explicit.
+
+**Input:** none beyond the Arguments and Options mapping.
+
+**Output:** Passthrough. A folder already at its target exits `0` with `changed: false`.
+
+**Errors:** none beyond the operation's.
+
+**Examples:**
+
+```sh
+ftask move-folder /proj/travel --to /archive              # → /archive/travel
+ftask move-folder /proj/travel --to /archive/travel-2025  # → moved and renamed
+ftask move-folder /proj/travel --to /archive/2025/trips -p | jq -r .result.folder
+```
+
 ### create
 
 Create a new, open task. Runs [`create`](operations.md#create).
@@ -537,6 +607,69 @@ ftask update 42 --priority 3 --tags-add urgent
 ftask update 42 --extra-merge '{"status":"waiting"}' | jq .result.changed
 ftask update 42 --priority null --tags-remove urgent --extra-remove status
 ftask update 42 --tags-replace-all ''
+```
+
+### delete
+
+Permanently remove a task, and its ID from every other task's `blocked_by`. Runs [`delete`](operations.md#delete).
+
+**Synopsis:** `ftask delete <id>`, or `ftask delete -i <file>`.
+
+**Operation:** [`delete`](operations.md#delete).
+
+**Arguments:**
+
+| Argument | Field | Notes |
+|---|---|---|
+| `<id>` | `/id` | Required unless `--input` is given. Bare digits, as for [`show`](#show). One ID per call. |
+
+**Options:** none.
+
+**Input:** none beyond the Arguments mapping.
+
+**Output:** Passthrough: the task's ID and folder, and the `dependents` that lost their reference to it. There is no undo but git (see [Undo](operations.md#undo)).
+
+**Errors:** none beyond the operation's.
+
+**Examples:**
+
+```sh
+ftask delete 42 | jq .result.dependents
+git log --diff-filter=D --oneline -- '*/42.json' '42.json'   # find it again later
+```
+
+### move
+
+Move a task into a folder. Runs [`move`](operations.md#move).
+
+**Synopsis:** `ftask move <id> --to <folder> [-p]`, or `ftask move -i <file>`.
+
+**Operation:** [`move`](operations.md#move).
+
+**Arguments:**
+
+| Argument | Field | Notes |
+|---|---|---|
+| `<id>` | `/id` | Required unless `--input` is given. Bare digits, as for [`show`](#show). One ID per call. |
+
+**Options:**
+
+| Option | Field | Default |
+|---|---|---|
+| `--to <folder>` | `/to` | Required unless `--input` is given. |
+| `-p, --parents` | `/parents` | `false`. Creates `--to` and any missing folders above it. |
+
+**Input:** none beyond the Arguments and Options mapping.
+
+**Output:** Passthrough: the task, plus `from`, `created`, and `changed`. A task already in `--to` exits `0` with `changed: false`.
+
+**Errors:** none beyond the operation's.
+
+**Examples:**
+
+```sh
+ftask move 42 --to /proj/travel
+ftask move 42 --to /archive/2025 -p | jq -r .result.notes_path
 ```
 
 ### frontier

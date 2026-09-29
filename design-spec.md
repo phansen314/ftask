@@ -12,7 +12,7 @@ Operations on this data model are specified in [operations.md](operations.md).
 - **Notes are the exception.** A task's `.md` may be edited directly with any editor. Notes carry no invariants, so an outside change to them cannot violate any. It can leave stray entries, though: editor side files (e.g. `42.md~`), and an orphaned `.md` if a task is moved or removed while its notes are open in an editor. Both are handled as [Walking the tree](#walking-the-tree) describes. If an editor save and an ftask write to the same `.md` overlap, one of them may be lost.
 - **One user.** ftask serves a single OS user. That user's config names exactly one root. Every process running as the user and reaching the root — shells, agents, editors — shares one [write lock](#write-lock). A process whose environment points to a different config location (`HOME`, `XDG_CONFIG_HOME`) sees that config, or none, and gets [`not-initialized`](operations.md#error-kinds); one that gives no config location at all gets [`environment`](operations.md#error-kinds) (see [Config file](#config-file)). Sharing one root between OS users is not supported.
 - **The root is on a local filesystem.** Network mounts (SMB, NFS, and the like) are not supported: their locking cannot be relied on, so the [write lock](#write-lock) may not exclude other writers. A synced folder is fine — its files are local, and a separate process syncs them.
-- **Syncing and committing are allowed.** The root may be a git repository or a synced folder, since those tools carry files ftask wrote. Anything they leave inconsistent — a merge that introduces a cycle, a missing blocker, a conflicting file — is an outside change; repairing it is the job of [`doctor`](#doctor), not of normal operation.
+- **Syncing and committing are allowed.** The root may be a git repository or a synced folder, since those tools carry files ftask wrote. Git is also the only undo for a delete (see [Undo](operations.md#undo)). Anything they leave inconsistent — a merge that introduces a cycle, a missing blocker, a conflicting file — is an outside change; repairing it is the job of [`doctor`](#doctor), not of normal operation.
 - **Hidden entries are ignored.** Any entry under the root whose name starts with `.` (e.g. `.git`, `.DS_Store`) is ignored by read and write operations. Only `doctor` looks at them, to find ftask's own leftover temp files.
 
 ## Supported platforms
@@ -52,13 +52,13 @@ An empty folder is valid, but does not survive git: git tracks files, not direct
 
 There is always a root, set by [`init`](operations.md#init), and it can never be deleted. In [folder paths](#folder-paths) the root is `/` — not to be confused with the machine's `/` directory.
 
-ftask writes nothing into the root but folders, tasks, and [`ftask.json`](#root-metadata) — apart from transient hidden temp files during a write. No lock file, no index, no database: the write lock is the root directory itself (see [Write lock](#write-lock)). That is what lets the tree be committed, synced, or moved without carrying a machine's coordination state with it, and what makes a task file mean the same thing on any machine that reads it. Anything else found under the root — hidden entries, editor side files — is ignored (see [Walking the tree](#walking-the-tree)).
+ftask writes nothing into the root but folders, tasks, and [`ftask.json`](#root-metadata) — apart from transient hidden temp files, and the hidden temp folder of a [`delete-folder`](operations.md#delete-folder), during a write. No lock file, no index, no database: the write lock is the root directory itself (see [Write lock](#write-lock)). That is what lets the tree be committed, synced, or moved without carrying a machine's coordination state with it, and what makes a task file mean the same thing on any machine that reads it. Anything else found under the root — hidden entries, editor side files — is ignored (see [Walking the tree](#walking-the-tree)).
 
 ### Tasks
 
 A task is two files sharing a stem: its task file (`.json`), holding the task's fields, and its notes file (`.md`). ftask always creates both, with an empty `.md` when there are no notes.
 
-The task file is **authoritative**: a task exists exactly when its task file does, and for existence the task's ID is the one in its filename — even if the file itself is unusable. The `.md` holds nothing but prose. A missing `.md` is allowed and reads as empty notes, so a crash between writing the two files leaves a valid task. ftask never leaves a `.md` without its task file; a `.md` without one (e.g. left by an editor) is not a task and is ignored by reads.
+The task file is **authoritative**: a task exists exactly when its task file does, and for existence the task's ID is the one in its filename — even if the file itself is unusable. The `.md` holds nothing but prose. A missing `.md` is allowed and reads as empty notes, so a crash between writing the two files leaves a valid task. Outside an interrupted write, ftask never leaves a `.md` without its task file. A `.md` without one — left by an editor, or by a [`move`](operations.md#move) or [`delete`](operations.md#delete) interrupted by an error or a crash — is not a task: reads ignore it, and [`doctor`](#doctor) reports it.
 
 #### Task file schema
 
@@ -331,7 +331,7 @@ These apply to write operations (see [Operation kinds](operations.md#operation-k
 
 ### Walking the tree
 
-These rules apply to every operation that walks the tree — reads and writes alike. (`version` and `info` inspect only a fixed set of files; `create-folder` and `create` without `blocked_by` only a path.)
+These rules apply to every operation that walks the tree — reads and writes alike. (`version` and `info` inspect only a fixed set of files; `create-folder`, `move-folder`, and `create` without `blocked_by` only paths.)
 
 **Which entries count.**
 
@@ -357,7 +357,7 @@ These rules apply to every operation that walks the tree — reads and writes al
 **Folders that can't be listed.** If the walk meets a folder it can't list (e.g. permission denied):
 
 - Operations that return a collection (`frontier`, `list`) report an [`unreadable-folder`](operations.md#warning-kinds) warning and carry on; the folder's tasks are missing from the result.
-- Operations that must find one ID, or prove it absent or unique (`show`, `complete`, `reopen`, `block`, `unblock`, `update`, `create` with `blocked_by`), fail with `io`: they cannot answer correctly without the whole tree.
+- Operations that must find one ID, or prove it absent or unique, or find every reference to one (`show`, `complete`, `reopen`, `block`, `unblock`, `update`, `move`, `delete`, `delete-folder`, `create` with `blocked_by`), fail with `io`: they cannot answer correctly without the whole tree.
 
 ### Reads
 
@@ -428,7 +428,7 @@ An operation for repairing trees affected by a system crash or an outside change
   - two task files with the same ID — reuse that has happened.
 - Entries that match neither the folder-name nor the task-filename rules.
 - A tree nested inside another: an `ftask.json` in any folder other than the root. Reported as the cause, alongside its symptoms (duplicate IDs, a stray file).
-- Leftover temp files from an interrupted write.
+- Leftover temp files from an interrupted write, and the hidden temp folder an interrupted [`delete-folder`](operations.md#delete-folder) leaves.
 - Partial changes left by an interrupted write (see [Crashes](#crashes)).
 
 `doctor` can also check a candidate path before `init`, with no root configured: it reports whether the path, or any directory above it, lies inside an existing tree. This is the check `init` deliberately does not make.

@@ -97,7 +97,7 @@ An error means the operation failed. `kind` and `details` are the contract; `mes
 | `not-initialized` | The root is *not initialized* (see [Root states](#root-states)). A file that exists but is unusable is never `not-initialized`. | `missing`: `config`, `root`, or `metadata` (meaning `ftask.json`) — the first absent piece. |
 | `environment` | The process's environment lacks what ftask needs to locate its files: the home directory, from which the config location is derived (see [Config file](design-spec.md#config-file)). Not a root state — no config was looked for. | `variable`: the environment variable that is unset or unusable; currently always `HOME`. |
 | `not-found` | A task or folder named by the input, or a filesystem directory it requires, does not exist. | `folders`: tree folder paths; `ids`: task IDs; `paths`: filesystem paths (e.g. `init`'s missing parent directory). All three always present, empty when not applicable. |
-| `conflict` | The operation was refused because it would violate an invariant, overwrite state it must not, or act on a task the tree cannot identify uniquely. | `rule`: the rule that refused it — currently `acyclic`, `id-exhausted` (no ID left under the [ID ceiling](design-spec.md#task-ids)), `config-exists`, `root-not-empty`, `duplicate-id` (a write names an ID that more than one task file has). `ids`: the tasks involved, always present, possibly empty. For `acyclic`, also `cycles`: `cycles[i]` is one cycle through `ids[i]`, chosen deterministically (see [`block`](#block)). |
+| `conflict` | The operation was refused because it would violate an invariant, overwrite state it must not, or act on a task the tree cannot identify uniquely. | `rule`: the rule that refused it — currently `acyclic`, `id-exhausted` (no ID left under the [ID ceiling](design-spec.md#task-ids)), `config-exists`, `root-not-empty`, `duplicate-id` (a write names an ID that more than one task file has), `id-above-last-id` (a task to remove has an ID above `last_id`), `not-empty` (a folder to delete holds tasks or folders), `destination-exists` (something is already where a folder would move). `ids`: the tasks involved, always present, possibly empty. For `acyclic`, also `cycles`: `cycles[i]` is one cycle through `ids[i]`, chosen deterministically (see [`block`](#block)). |
 | `busy` | Another write holds the write lock. Safe to retry. | none (`{}`). |
 | `corrupt` | A needed file — or an entry on an input path — is present and readable but its content or type is wrong (see [File validity](design-spec.md#file-validity)); or ftask found a file where, under its own invariants, none can exist (e.g. creating a task file that already exists). | `path`; `reason`: `not-json` (not parseable, or not an object), `invalid` (fails a file-level rule, including a missing `schema` or one not written as an integer literal within ±(2^53 − 1)), or `unexpected-file` (wrong entry type, e.g. `ftask.json` is a symlink or directory; or a file exists that must not). |
 | `io` | The environment refused an operation: an unreadable file, permission denied, disk full, read-only filesystem, and similar. An OS error with no symbolic name is `internal`, not `io`. | `path`: built from the root as stored (see [Root path](design-spec.md#root-path)), or the config's own path for an error on the config; `code`: the symbolic OS error, e.g. `ENOSPC`, never a number. |
@@ -326,6 +326,14 @@ How an operation checks a folder path given as input (e.g. `folder`). Entries ar
 - **A directory** → continue to the next segment.
 
 So a folder "exists" only if every entry on its path is a plain directory, not a symlink.
+
+### Undo
+
+[`delete`](#delete) and [`delete-folder`](#delete-folder) remove files for good: ftask keeps no trash and no history. Undo comes from git, when the root is a repository (see *Syncing and committing are allowed* in [Assumptions](design-spec.md#assumptions)), and reaches back only to the last commit — ftask never commits. Restoring from git is an [outside change](design-spec.md#assumptions):
+
+- **Restore only the removed paths**, never the whole tree: restoring `ftask.json` can lower `last_id` and let IDs be reused. A delete not yet committed is undone with `git restore -- proj/travel`; a committed one from a commit that still has the files, usually the parent of the one that removed them: `git restore --source=<commit>^ -- proj/travel`. A task is two paths, `42.json` and `42.md`.
+- **References don't come back.** The delete removed the task's ID from its dependents' `blocked_by`, and restoring their files too would undo any other change to them since. Re-[`block`](#block) the `dependents` the delete reported instead.
+- **What ftask would have checked is left to [`doctor`](design-spec.md#doctor):** a restored task's `blocked_by` may name tasks removed since, and its edges may close a cycle added while it was gone.
 
 ## Shared schemas
 
@@ -759,6 +767,223 @@ Present only when an error (e.g. `io`) interrupts a `parents` chain after at lea
 **Crash behavior:** creating one folder is a single atomic step. With `parents`, a crash can leave some of the missing folders created and not others. Empty folders are valid, so the tree satisfies every invariant and there is nothing for `doctor` to find.
 
 **Retry safety:** safe. An existing folder is not an error, so rerunning with the same input completes any interrupted chain and otherwise does nothing.
+
+### delete-folder
+
+Permanently remove a folder and everything under it, and remove the IDs of the tasks under it from every `blocked_by` outside it. ftask keeps no copy; see [Undo](#undo).
+
+**Kind:** write. Takes the write lock. Requires a usable root.
+
+**Input schema:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "delete-folder-input",
+  "type": "object",
+  "required": ["folder"],
+  "properties": {
+    "folder": { "$ref": "folder-path" },
+    "recursive": { "type": "boolean", "default": false, "description": "Delete the folder even if it holds tasks or folders." }
+  },
+  "additionalProperties": false
+}
+```
+
+**Additional validation:** `folder` is not `/`: the root can never be deleted (see [Folders](design-spec.md#folders)).
+
+**Preconditions:**
+
+- `folder` exists.
+- Without `recursive`, `folder` holds no task and no folder. Entries that count as neither — hidden entries, editor side files, a `.md` without a task file — don't make it non-empty, and are removed with it.
+- No task under `folder` has an ID with more than one task file, anywhere in the tree. A write must know which task it removes.
+- No task under `folder` has an ID above `last_id`: that state only arises from a system crash or an outside change, and removing the task would let its ID be reissued undetectably (see [Task IDs](design-spec.md#task-ids)).
+
+The tasks under `folder` may be open or complete, and their task files may be unusable: `delete-folder` needs only their filenames, never their contents.
+
+**Needed files:** the entries along `folder`'s path ([path walk](#path-walk)); the names of every entry under `folder`, at every depth; and, outside `folder`, every task file whose `blocked_by` names a task under it — those are rewritten. It lists everything under `folder` first, and fails with `io` if it meets a folder there it can't list: it must know every ID it removes. If `folder` holds a task, it then walks the rest of the tree — there is no index — and fails with `io` on a folder it can't list there too, since it must find every reference; if `folder` holds none, nothing outside it is read. Relevant files: every other task file outside `folder` — one that is unusable may hold a reference that can't be removed, so it is a warning, and the reference is left for [`doctor`](design-spec.md#doctor).
+
+**Effects:**
+
+- Every task file outside `folder` whose `blocked_by` contains an ID of a task under `folder` has those IDs removed. Every other field, the task file's `schema`, and the `.md` are unchanged.
+- `folder` no longer exists, nor does anything under it: its tasks and their notes, its folders, and every other entry, hidden ones included.
+
+Tasks that were blocked only by tasks under `folder` become ready, as they would if those tasks had been completed. References between tasks under `folder` go with it.
+
+**Invariants at risk:**
+
+- *No dangling references* — every reference to a removed task is removed, under the write lock, before the folder is.
+- *Unique IDs*, *IDs within `last_id`* — removing tasks cannot break either; the `last_id` precondition keeps a removed ID from being reissued.
+- *Acyclic* — cannot be broken: removing edges and tasks cannot create a cycle.
+
+**Output schema:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "delete-folder-output",
+  "type": "object",
+  "required": ["folder", "folders", "ids", "dependents"],
+  "properties": {
+    "folder": { "$ref": "folder-path", "description": "The folder deleted." },
+    "folders": { "type": "array", "minItems": 1, "items": { "$ref": "folder-path" }, "description": "Every folder removed — folder itself and each folder under it — in tree order." },
+    "ids": { "type": "array", "uniqueItems": true, "items": { "$ref": "task-file#/properties/id" }, "description": "The IDs of the tasks removed, in ascending order; empty if the folder held none." },
+    "dependents": { "type": "array", "uniqueItems": true, "items": { "$ref": "task-file#/properties/id" }, "description": "Tasks outside folder whose blocked_by lost at least one of ids, in ascending order." }
+  },
+  "additionalProperties": false
+}
+```
+
+`ids` is what to look for in git to restore a task; `dependents` is what to re-`block` after restoring one (see [Undo](#undo)).
+
+**Errors:**
+
+| Kind | When |
+|---|---|
+| `invalid-input` | `folder` is not a valid folder path, or is `/`. |
+| `environment`, `not-initialized`, `corrupt`, `unsupported-format` | The config can't be located, or the root is not usable (see [Root states](#root-states)). |
+| `busy` | Another write holds the write lock. |
+| `not-found`, `corrupt` | `folder` fails the [path walk](#path-walk) (`not-found`, `folders`: the outermost missing folder; or `corrupt`, `reason`: `unexpected-file`). |
+| `conflict` | (`rule`: `not-empty`) `recursive` is false and `folder` holds a task or folder. `ids`: the tasks under `folder`, ascending (empty if it holds only folders). |
+| `conflict` | (`rule`: `duplicate-id`) A task under `folder` has an ID with more than one task file. `ids`: every such ID, ascending. |
+| `conflict` | (`rule`: `id-above-last-id`) A task under `folder` has an ID above `last_id`. `ids`: every such ID, ascending. Repair with [`doctor`](design-spec.md#doctor) first. |
+
+The `conflict` rules are checked in the order listed; the first that applies is reported.
+
+**Warnings:**
+
+| Kind | When |
+|---|---|
+| `unusable-file` | A task file outside `folder` is unusable, so any reference it holds to a removed task can't be removed. |
+
+Every unusable task file outside `folder` is reported, not only those known to reference a removed task: an unusable file's `blocked_by` can't be read, so any of them may be one. None is reported when `folder` holds no task, since there is then no reference to remove.
+
+**Partial schema:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "delete-folder-partial",
+  "type": "object",
+  "required": ["dependents"],
+  "properties": {
+    "dependents": { "type": "array", "uniqueItems": true, "items": { "$ref": "task-file#/properties/id" }, "description": "Tasks whose references were removed before the failure, in ascending order. The folder was not removed." }
+  },
+  "additionalProperties": false
+}
+```
+
+Present only when an error (e.g. `io`) comes after at least one dependent was rewritten. The folder and everything under it are still in place; the rewritten dependents stay rewritten. Removing a reference to a task that still exists breaks no invariant, so the tree is valid.
+
+**Crash behavior:** steps run in this order:
+
+1. Each dependent is rewritten, one file at a time. A process crash here leaves some references removed and the folder in place — a valid tree.
+2. `folder` is renamed to a hidden temp name in the root — one atomic step, however large the folder. From here the folder is gone from the tree, and the operation has succeeded.
+3. The temp folder is removed. A process crash, or an error, here leaves a hidden leftover, which reads ignore and `doctor` reports; the operation still succeeds.
+
+After a [system crash](design-spec.md#crashes) the ordering may not survive: the rename can persist while a dependent's rewrite is lost, leaving a dangling reference for `doctor`.
+
+**Retry safety:** after `busy`, an error with `partial`, or a crash before step 2, safe: rerunning removes what is left. After success, rerunning fails with `not-found`.
+
+### move-folder
+
+Move a folder, and everything under it, to a new place in the tree — which also renames it. Like `mv`: into `to` if `to` is an existing folder, otherwise to the path `to`.
+
+**Kind:** write. Takes the write lock. Requires a usable root.
+
+**Input schema:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "move-folder-input",
+  "type": "object",
+  "required": ["folder", "to"],
+  "properties": {
+    "folder": { "$ref": "folder-path", "description": "The folder to move." },
+    "to": { "$ref": "folder-path", "description": "An existing folder to move it into, or its new path." },
+    "parents": { "type": "boolean", "default": false, "description": "Create missing folders above the new path instead of failing." }
+  },
+  "additionalProperties": false
+}
+```
+
+**Additional validation:**
+
+- `folder` is not `/`: the root can never be moved.
+- `to` is neither `folder` nor under it: a folder can't be moved into itself.
+
+**Preconditions:** `folder` exists. Where it goes — its **target** — depends on `to`:
+
+| State of `to` | Target |
+|---|---|
+| The [path walk](#path-walk) finds `to`, a plain directory | `to` + `/` + `folder`'s name: `/proj/travel` into `/archive` is `/archive/travel`. |
+| It stops at `to` itself, missing | `to`: `/proj/travel` to `/archive/travel-2025` moves and renames it. |
+| It stops at a folder above `to`, missing, `parents` false | `not-found` (`folders`: the outermost missing folder). |
+| It stops at a folder above `to`, missing, `parents` true | `to`. That folder and every folder below it on the path, up to but not including `to`, are created, outermost first. |
+| It stops at an entry that is not a directory, or is a symlink — including `to` itself | `corrupt` (`reason`: `unexpected-file`). |
+
+Then:
+
+- **Target is `folder` itself** (e.g. `/proj/travel` into `/proj`): nothing to do; succeeds with `changed` false.
+- **Anything exists at the target** — a folder, a file, a symlink: `conflict` (`rule`: `destination-exists`). Folders are never merged.
+
+**Needed files:** the entries along `folder`'s and `to`'s paths, checked by the [path walk](#path-walk) — `folder` first — and the entry at the target. `move-folder` does not walk the tree and reads no task file: a task's identity is its ID, not its location, so nothing inside the folder changes.
+
+**Effects:** `folder`, with everything under it, is at the target. Every task under it keeps its ID and fields; only its folder changes. With `parents`, any missing folders above the target exist.
+
+**Invariants at risk:** none. `blocked_by` names tasks by ID, so moving them changes no reference.
+
+**Output schema:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "move-folder-output",
+  "type": "object",
+  "required": ["folder", "from", "created", "changed"],
+  "properties": {
+    "folder": { "$ref": "folder-path", "description": "The folder's path after the operation: the target." },
+    "from": { "$ref": "folder-path", "description": "The folder's path before the operation." },
+    "created": { "type": "array", "items": { "$ref": "folder-path" }, "description": "Folders created above the target (parents), outermost first; empty if none." },
+    "changed": { "type": "boolean", "description": "True if the folder moved; false if it was already at the target." }
+  },
+  "additionalProperties": false
+}
+```
+
+**Errors:**
+
+| Kind | When |
+|---|---|
+| `invalid-input` | `folder` or `to` is not a valid folder path, `folder` is `/`, or `to` is `folder` or under it. |
+| `environment`, `not-initialized`, `corrupt`, `unsupported-format` | The config can't be located, or the root is not usable (see [Root states](#root-states)). |
+| `busy` | Another write holds the write lock. |
+| `not-found`, `corrupt` | Whichever the [path walk](#path-walk) meets first, `folder`'s path before `to`'s: a missing `folder`, or a missing folder above `to` while `parents` is false (`not-found`, `folders`: every missing one, both paths together); an entry that is not a directory, or is a symlink (`corrupt`, `reason`: `unexpected-file`). |
+| `conflict` | (`rule`: `destination-exists`) Something already exists at the target (`ids`: `[]`). |
+
+**Warnings:** none.
+
+**Partial schema:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "move-folder-partial",
+  "type": "object",
+  "required": ["created"],
+  "properties": {
+    "created": { "type": "array", "items": { "$ref": "folder-path" }, "description": "Folders created before the failure, outermost first. The folder did not move." }
+  },
+  "additionalProperties": false
+}
+```
+
+Present only when an error (e.g. `io`) comes after `parents` created at least one folder. The created folders stay.
+
+**Crash behavior:** moving the folder is one `rename`, so it is either at its old path or at the target, whole. With `parents`, a crash can leave some of the missing folders created and the folder not yet moved. Empty folders are valid, so there is nothing for `doctor` to find.
+
+**Retry safety:** after `busy`, an error with `partial`, or a crash, safe: folders already created are not an error, and a folder not yet moved is moved. After success, rerunning fails with `not-found`, since `folder` is gone; a caller unsure whether the move happened checks the target with [`list`](#list).
 
 ## Task operations
 
@@ -1440,6 +1665,231 @@ The task after the operation, per the [Task](#task) schema, plus `changed`.
 
 **Retry safety:** safe. Every form is idempotent: rerunning with the same input leaves the task as it is and returns `changed: []`.
 
+### delete
+
+Permanently remove a task, and remove its ID from every other task's `blocked_by`. ftask keeps no copy; see [Undo](#undo).
+
+**Kind:** write. Takes the write lock. Requires a usable root.
+
+**Input schema:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "delete-input",
+  "type": "object",
+  "required": ["id"],
+  "properties": {
+    "id": { "$ref": "task-file#/properties/id" }
+  },
+  "additionalProperties": false
+}
+```
+
+**Additional validation:** none.
+
+**Preconditions:**
+
+- Exactly one task file has ID `id`. The task may be open or complete, and its task file may be unusable: `delete` needs only its filename, never its contents — so it is also how an unusable task is removed.
+- `id` is at most `last_id`: a task above it only arises from a system crash or an outside change, and removing it would let its ID be reissued undetectably (see [Task IDs](design-spec.md#task-ids)).
+
+**Needed files:** every task file whose filename ID is `id`, and every task file whose `blocked_by` contains `id` — those are rewritten. There is no index, so `delete` walks the whole tree, and fails with `io` if it meets a folder it can't list: it must find every reference. Relevant files: every other task file — one that is unusable may hold a reference that can't be removed, so it is a warning, and the reference is left for [`doctor`](design-spec.md#doctor).
+
+**Effects:**
+
+- Every task file whose `blocked_by` contains `id` has it removed. Every other field, the task file's `schema`, and the `.md` are unchanged.
+- The task no longer exists, nor does its `.md`.
+
+Tasks that were blocked only by this one become ready, as they would if it had been completed: deleting a task says its work won't happen, like cancelling it.
+
+**Invariants at risk:**
+
+- *No dangling references* — every reference to `id` is removed, under the write lock, before the task is.
+- *Unique IDs*, *IDs within `last_id`* — removing a task cannot break either; the `last_id` precondition keeps `id` from being reissued.
+- *Acyclic* — cannot be broken: removing edges and a task cannot create a cycle.
+
+**Output schema:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "delete-output",
+  "type": "object",
+  "required": ["id", "folder", "dependents"],
+  "properties": {
+    "id": { "$ref": "task-file#/properties/id", "description": "The task deleted." },
+    "folder": { "$ref": "folder-path", "description": "The folder it was in." },
+    "dependents": { "type": "array", "uniqueItems": true, "items": { "$ref": "task-file#/properties/id" }, "description": "Tasks whose blocked_by contained id, in ascending order; each had it removed." }
+  },
+  "additionalProperties": false
+}
+```
+
+`id` and `folder` locate the task in git; `dependents` is what to re-`block` after restoring it (see [Undo](#undo)).
+
+**Errors:**
+
+| Kind | When |
+|---|---|
+| `invalid-input` | `id` is missing or not a valid task ID. |
+| `environment`, `not-initialized`, `corrupt`, `unsupported-format` | The config can't be located, or the root is not usable (see [Root states](#root-states)). |
+| `busy` | Another write holds the write lock. |
+| `not-found` | No task file has ID `id` (`ids`: `[id]`). |
+| `conflict` | (`rule`: `duplicate-id`) More than one task file has ID `id` (`ids`: `[id]`). A write must know which task it removes; repair the duplicate with [`doctor`](design-spec.md#doctor) first. |
+| `conflict` | (`rule`: `id-above-last-id`) `id` is above `last_id` (`ids`: `[id]`). Repair with `doctor` first. |
+
+The `conflict` rules are checked in the order listed; the first that applies is reported.
+
+**Warnings:**
+
+| Kind | When |
+|---|---|
+| `unusable-file` | Another task file is unusable, so any reference it holds to `id` can't be removed. |
+
+Every unusable task file in the tree is reported, not only those known to reference `id`: an unusable file's `blocked_by` can't be read, so any of them may be one, and each bears on whether the delete left a dangling reference.
+
+**Partial schema:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "delete-partial",
+  "type": "object",
+  "required": ["dependents"],
+  "properties": {
+    "dependents": { "type": "array", "uniqueItems": true, "items": { "$ref": "task-file#/properties/id" }, "description": "Tasks whose reference to id was removed before the failure, in ascending order. The task was not removed." }
+  },
+  "additionalProperties": false
+}
+```
+
+Present only when an error (e.g. `io`) comes after at least one dependent was rewritten. The task, with its notes, still exists; the rewritten dependents stay rewritten. Removing a reference to a task that still exists breaks no invariant, so the tree is valid. Once the task file is removed, `delete` cannot fail: removing the `.md` afterwards is cleanup, and if it fails the orphaned `.md` is left for `doctor`, with no warning.
+
+**Crash behavior:** steps run in this order, so a [process crash](design-spec.md#crashes) leaves a valid tree:
+
+1. Each dependent is rewritten, one file at a time. A crash here leaves some references removed and the task in place.
+2. The task file is removed. This is the moment the task is gone. Removing it before the `.md` means a failure never leaves a surviving task without its notes.
+3. The `.md` is removed. A crash before this leaves an orphaned `.md`, which reads ignore and `doctor` reports.
+
+After a system crash the ordering may not survive: the removal can persist while a dependent's rewrite is lost, leaving a dangling reference for `doctor`.
+
+**Retry safety:** after `busy`, an error with `partial`, or a crash before step 2, safe: rerunning removes what is left, and reports only the dependents it rewrote itself. After step 2, rerunning fails with `not-found`; an orphaned `.md` is left for `doctor`.
+
+### move
+
+Move a task into a folder. Its ID, fields, and notes go with it; moving a task to the folder it is already in changes nothing.
+
+**Kind:** write. Takes the write lock. Requires a usable root.
+
+**Input schema:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "move-input",
+  "type": "object",
+  "required": ["id", "to"],
+  "properties": {
+    "id": { "$ref": "task-file#/properties/id" },
+    "to": { "$ref": "folder-path", "description": "The folder to move the task into." },
+    "parents": { "type": "boolean", "default": false, "description": "Create to, and any missing folders above it, instead of failing." }
+  },
+  "additionalProperties": false
+}
+```
+
+**Additional validation:** none.
+
+**Preconditions:** exactly one task file has ID `id`; the task may be open or complete. `to` exists, or `parents` is true, as for [`create-folder`](#create-folder):
+
+| State of `to` | Outcome |
+|---|---|
+| The [path walk](#path-walk) finds every entry, including `to`, a plain directory | The task moves into `to` — or, if it is already there, nothing changes. |
+| It stops at a missing folder, `parents` false | `not-found` (`folders`: the outermost missing folder). |
+| It stops at a missing folder, `parents` true | That folder and every folder below it on the path, `to` included, are created, outermost first; the task moves into `to`. |
+| It stops at an entry that is not a directory, or is a symlink | `corrupt` (`reason`: `unexpected-file`). |
+
+**Needed files:** the entries along `to`'s path ([path walk](#path-walk)), and every task file whose filename ID is `id`. There is no index, so `move` walks the whole tree to find it — which also finds duplicates — and fails with `io` if it meets a folder it can't list. No relevant files beyond that: a task's identity is its ID, not its location, so neither its blockers nor its dependents are read.
+
+**Effects:**
+
+- The task is in `to`, with every field, its task file's `schema`, and its `.md` unchanged. A stray `.md` already in `to` under the task's name — left by an editor after an earlier move (see [Assumptions](design-spec.md#assumptions)) — is replaced by the task's notes, or removed if the task has none.
+- With `parents`, `to` and every folder above it exist.
+- If the task was already in `to`: nothing changes.
+
+**Invariants at risk:** none. `blocked_by` names tasks by ID, so moving one changes no reference.
+
+**Output schema:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "move-output",
+  "type": "object",
+  "required": ["schema", "id", "title", "priority", "created_at", "completed_at", "blocked_by", "tags", "extra", "folder", "notes_path", "from", "created", "changed"],
+  "properties": {
+    "schema": { "$ref": "task#/properties/schema" },
+    "id": { "$ref": "task#/properties/id" },
+    "title": { "$ref": "task#/properties/title" },
+    "priority": { "$ref": "task#/properties/priority" },
+    "created_at": { "$ref": "task#/properties/created_at" },
+    "completed_at": { "$ref": "task#/properties/completed_at" },
+    "blocked_by": { "$ref": "task#/properties/blocked_by" },
+    "tags": { "$ref": "task#/properties/tags" },
+    "extra": { "$ref": "task#/properties/extra" },
+    "folder": { "$ref": "task#/properties/folder" },
+    "notes_path": { "$ref": "task#/properties/notes_path" },
+    "from": { "$ref": "folder-path", "description": "The folder the task was in before the operation." },
+    "created": { "type": "array", "items": { "$ref": "folder-path" }, "description": "Folders created (parents), outermost first; empty if none." },
+    "changed": { "type": "boolean", "description": "True if the task moved; false if it was already in to." }
+  },
+  "additionalProperties": false
+}
+```
+
+The task after the operation, per the [Task](#task) schema, plus `from`, `created`, and `changed`.
+
+**Errors:**
+
+| Kind | When |
+|---|---|
+| `invalid-input` | `id` or `to` is missing or invalid. |
+| `environment`, `not-initialized`, `corrupt`, `unsupported-format` | The config can't be located, or the root is not usable (see [Root states](#root-states)). |
+| `busy` | Another write holds the write lock. |
+| `not-found`, `corrupt` | `to` fails the [path walk](#path-walk) while `parents` is false (`not-found`, or `corrupt` with `reason` `unexpected-file`); or no task file has ID `id` (`not-found`). A missing folder and a missing task are reported in one `not-found`. |
+| `corrupt`, `unsupported-format` | The task file is unusable. |
+| `conflict` | (`rule`: `duplicate-id`) More than one task file has ID `id` (`ids`: `[id]`). A write must know which task it moves; repair the duplicate with [`doctor`](design-spec.md#doctor) first. |
+
+**Warnings:** none.
+
+**Partial schema:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "move-partial",
+  "type": "object",
+  "required": ["created"],
+  "properties": {
+    "created": { "type": "array", "items": { "$ref": "folder-path" }, "description": "Folders created before the failure, outermost first. The task did not move." }
+  },
+  "additionalProperties": false
+}
+```
+
+Present only when an error (e.g. `io`) comes after `parents` created at least one folder. The created folders stay. Once the task file has moved, `move` cannot fail: removing the old `.md` afterwards is cleanup, and if it fails the stray `.md` is left for `doctor`, with no warning.
+
+**Crash behavior:** a task is two files, which can't move in one step. Moving each with a plain `rename` would make the notes look lost if a crash fell between the two, whichever went first. So the notes are copied before they are removed:
+
+1. With `parents`, missing folders are created, outermost first.
+2. The `.md` is hard-linked into `to`, replacing any stray `.md` there. A [process crash](design-spec.md#crashes) here leaves the task in place with its notes, and a stray `.md` in `to` that a retry replaces.
+3. The task file is renamed into `to`. This is the moment the task moves; its notes are already there.
+4. The old `.md` is removed. A crash before this leaves a stray `.md` in the old folder, which reads ignore and `doctor` reports.
+
+A task with no `.md` skips steps 2 and 4, and instead removes any stray `.md` in `to` under its name before step 3, so a stray can never become its notes. The notes are never lost, and the tree always satisfies every invariant.
+
+**Retry safety:** safe. After `busy`, an error with `partial`, or a crash, rerunning completes the move. After success, rerunning finds the task already in `to`, changes nothing, and returns `changed: false`.
+
 ### frontier
 
 Return the ready tasks — open, and not blocked — in the order to work on them.
@@ -1622,12 +2072,3 @@ Operations not yet specified, with the constraints already decided.
 ### migrate
 
 Upgrade a tree from one format version to the next — `ftask.json` and every task file — as a single explicit operation (see [Format versions](design-spec.md#format-versions)). Until then, a binary that supports a different format than the tree's cannot use it.
-
-### delete
-
-- Must remove the task's ID from every `blocked_by` before removing the task (see *No dangling references* in [Invariants](design-spec.md#invariants)).
-- Must refuse, or warn, when the task's ID exceeds `last_id`: that state only arises from a system crash or an outside change, and deleting the task would let its ID be reissued undetectably (see [Task IDs](design-spec.md#task-ids)).
-
-### move
-
-- A stale `.md` may already exist at the destination, left by an editor after an earlier move (see [Assumptions](design-spec.md#assumptions)). `move` overwrites it.
