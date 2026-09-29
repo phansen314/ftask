@@ -83,6 +83,25 @@ func TestErrnoAt(t *testing.T) {
 	}
 }
 
+// ErrnoAtMutating counts only calls that change the disk: the reads between
+// them do not move it on.
+func TestErrnoAtMutating(t *testing.T) {
+	dir := t.TempDir()
+	fsys := Fault{FS: OS{}, Hook: ErrnoAtMutating(2, syscall.EIO)}
+	r, err := fsys.OpenRoot(dir)
+	must(t, err)
+	defer r.Close()
+
+	must(t, r.Mkdir("a", 0o755))
+	_, err = r.ReadDir(".")
+	must(t, err)
+	wantErrno(t, r.Mkdir("b", 0o755), syscall.EIO)
+	must(t, r.Mkdir("c", 0o755))
+	if _, err := os.Stat(filepath.Join(dir, "b")); !os.IsNotExist(err) {
+		t.Errorf("b: %v; the failed mkdir must not happen", err)
+	}
+}
+
 func TestErrnoAtPath(t *testing.T) {
 	dir := t.TempDir()
 	must(t, os.WriteFile(filepath.Join(dir, "1.json"), nil, 0o644))

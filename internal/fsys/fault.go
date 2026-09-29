@@ -281,6 +281,26 @@ func ErrnoAt(name, path string, n int, errno syscall.Errno) Hook {
 	}
 }
 
+// ErrnoAtMutating fails the k-th mutating call (counting from 1) with errno:
+// the calls CrashBefore counts, so an error midway can be injected at each
+// step a crash can.
+func ErrnoAtMutating(k int, errno syscall.Errno) Hook {
+	var mu sync.Mutex
+	seen := 0
+	return func(op Op) error {
+		if !op.Mutating {
+			return nil
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		seen++
+		if seen == k {
+			return errno
+		}
+		return nil
+	}
+}
+
 // CrashBefore kills the process with SIGKILL just before the k-th mutating
 // call (counting from 1): what a crash leaves behind, with no deferred
 // cleanup run.
