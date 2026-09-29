@@ -115,4 +115,15 @@ var commands = []Command{
 		Example: `  ftask block 42 --blockers 41,43 | jq .result.added
   ftask block 42 --blockers 7 | jq -c 'select(.error.details.rule == "acyclic") | .error.details.cycles'`,
 	},
+	{
+		Name:    "unblock",
+		Op:      "unblock",
+		Summary: "Remove blockers from a task; removing one that isn't there changes nothing",
+		Args:    []Arg{{Name: "id", Field: "/id", Type: Int}},
+		Options: []Option{
+			{Name: "blockers", Field: "/blockers", Type: IDList, Required: true, Help: "comma-separated `ids` to remove from its blockers"},
+		},
+		Example: `  ftask unblock 42 --blockers 41 | jq .result.removed
+  ftask unblock 42 --blockers 99   # clears a dangling reference to a task that no longer exists`,
+	},
 }

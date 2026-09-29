@@ -399,8 +399,9 @@ func TestUpdate(t *testing.T) {
 	}
 }
 
-// block adds blockers that show then sees, and refuses a cycle.
-func TestBlock(t *testing.T) {
+// block adds blockers that show then sees, and refuses a cycle; unblock
+// removes them again.
+func TestBlockUnblock(t *testing.T) {
 	first := ftask(t, "init", "~/tasks")
 	same := func(args ...string) *exec.Cmd {
 		cmd := exec.Command(binary, args...)
@@ -423,6 +424,9 @@ func TestBlock(t *testing.T) {
 		{same("block", "1", "--blockers", "2"), 0, `"added":[]`},
 		{same("block", "1", "--blockers", "1"), 1, `"kind":"invalid-input"`},
 		{same("block", "1"), 2, `"kind":"usage"`},
+		{same("unblock", "1", "--blockers", "2,9"), 0, `"blocked_by":[],`},
+		{same("show", "1"), 0, `"readiness":"ready","blocking":[]`},
+		{same("unblock", "1", "--blockers", "2"), 0, `"removed":[]`},
 	} {
 		r := run(t, step.cmd)
 		envelope(t, r)

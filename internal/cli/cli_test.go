@@ -590,8 +590,9 @@ func TestUpdateInput(t *testing.T) {
 	}
 }
 
-// block's input, and --blockers required unless --input is given.
-func TestBlockInput(t *testing.T) {
+// block's and unblock's input, and --blockers required unless --input is
+// given.
+func TestBlockersInput(t *testing.T) {
 	saved := runOp
 	t.Cleanup(func() { runOp = saved })
 	var got string
@@ -600,21 +601,23 @@ func TestBlockInput(t *testing.T) {
 		got = string(b)
 		return ops.Envelope{OK: true, Result: struct{}{}, Warnings: []errs.Warning{}}
 	}
-	for _, tc := range []struct {
-		args        []string
-		stdin, want string
-	}{
-		{[]string{"block", "42", "--blockers", "41,43"}, "", `{"id":42,"blockers":[41,43]}`},
-		{[]string{"block", "42", "--blockers", "41", "--blockers", "43"}, "", `{"id":42,"blockers":[41,43]}`},
-		{[]string{"block", "-i", "-"}, `{"id": 42, "blockers": [7]}`, `{"id":42,"blockers":[7]}`},
-	} {
-		got = ""
-		if r := run(t, commands, tc.stdin, tc.args...); r.code != ExitOK || got != tc.want {
-			t.Errorf("%q: exit %d, input %s, want %s", tc.args, r.code, got, tc.want)
+	for _, name := range []string{"block", "unblock"} {
+		for _, tc := range []struct {
+			args        []string
+			stdin, want string
+		}{
+			{[]string{name, "42", "--blockers", "41,43"}, "", `{"id":42,"blockers":[41,43]}`},
+			{[]string{name, "42", "--blockers", "41", "--blockers", "43"}, "", `{"id":42,"blockers":[41,43]}`},
+			{[]string{name, "-i", "-"}, `{"id": 42, "blockers": [7]}`, `{"id":42,"blockers":[7]}`},
+		} {
+			got = ""
+			if r := run(t, commands, tc.stdin, tc.args...); r.code != ExitOK || got != tc.want {
+				t.Errorf("%q: exit %d, input %s, want %s", tc.args, r.code, got, tc.want)
+			}
 		}
-	}
-	r := run(t, commands, "", "block", "42")
-	if _, reason := r.usageProblem(t); r.code != ExitUsage || reason != "missing required option --blockers" {
-		t.Errorf("block without --blockers: exit %d, %q", r.code, reason)
+		r := run(t, commands, "", name, "42")
+		if _, reason := r.usageProblem(t); r.code != ExitUsage || reason != "missing required option --blockers" {
+			t.Errorf("%s without --blockers: exit %d, %q", name, r.code, reason)
+		}
 	}
 }

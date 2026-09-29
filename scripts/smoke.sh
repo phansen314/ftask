@@ -168,6 +168,15 @@ check "missing task and blocker" 1 '.error.details.ids == [97, 99]' -- block 97 
 check "a task can't block itself" 1 '.error.details.problems[0].field == "/blockers/0"' -- block 7 --blockers 7
 check "--blockers is required" 2 '.error.kind == "usage"' -- block 7
 
+echo "== unblock"
+check "unblock 7 from 5" 0 '.result | .removed == [5] and .blocked_by == [2, 3]' -- unblock 7 --blockers 5
+check "not there: nothing removed" 0 '.result | .removed == [] and .blocked_by == [2, 3]' -- unblock 7 --blockers 5,99
+check "the cycle is now allowed" 0 '.result.added == [7]' -- block 5 --blockers 7
+check "unblock the rest" 0 '.result | .removed == [2, 3] and .blocked_by == []' -- unblock 7 --blockers 3,2
+check "7 ready again" 0 '.result.tasks[0] | .readiness == "ready" and .blocking == []' -- show 7
+check "unblock: not found" 1 '.error.details.ids == [99]' -- unblock 99 --blockers 1
+check "unblock: --blockers is required" 2 '.error.kind == "usage"' -- unblock 7
+
 echo "== end state"
 check "last_id counts every task" 0 '.result.tree.last_id == 7' -- info
 
