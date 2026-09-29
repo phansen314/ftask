@@ -14,6 +14,9 @@ How the design spec's [write lock](design-spec.md#write-lock) and [Guarantees](d
 - **Non-blocking acquisition.** `LOCK_EX | LOCK_NB`; if the lock is held, fail immediately (see *Fail fast* in [Guarantees](design-spec.md#guarantees)).
 - **Platform check.** `flock` on a directory descriptor is verified on Linux. On macOS it is confirmed from the XNU kernel source: `flock` accepts any descriptor on a filesystem, directories included; the advisory-lock layer rejects only FIFOs; and the local lock code never checks the file type. Its behavior matches Linux: the lock belongs to the open file description, is shared by `fork` and `dup` copies, and is advisory. An empirical check on macOS — contention, release on crash, close-on-exec — belongs in the implementation's test suite. Network filesystems are excluded (see [Assumptions](design-spec.md#assumptions)).
 - **Atomic file writes.** Write a complete temp file in the same directory (a hidden entry), then publish it: `rename` to replace an existing file, `link` to create a new one so an existing file is never clobbered. A process crash between writing the temp file and removing it can leave the temp file behind; it is ignored by reads and reported by [`doctor`](design-spec.md#doctor).
+- **Moves never replace.** [`move`](operations.md#move)'s task file and [`move-folder`](operations.md#move-folder)'s folder move with a rename that fails with `EEXIST` rather than replace what is at the new name: `renameat2` with `RENAME_NOREPLACE` on Linux, `renameatx_np` with `RENAME_EXCL` on macOS, both from `golang.org/x/sys/unix`, between the two folders opened through the `os.Root`. Plain `rename(2)` silently replaces an empty folder, so a check made beforehand under the lock would be the only guard; the no-replace rename is the backstop against an outside change, and reports it as `corrupt` (`unexpected-file`).
+- **Notes move by hard link.** `move` links the `.md` to a temp name in the destination folder, then renames that over any stray `.md` there, before moving the task file; the old `.md` is removed last. The notes are therefore at the destination before the task is, and a crash never leaves the task without them.
+- **Folders are removed by renaming them aside.** [`delete-folder`](operations.md#delete-folder) renames the folder to a temp name in the root (`.ftask-tmp-<random>`, a hidden folder), then removes that with `RemoveAll`. The rename is the one step that takes the folder out of the tree; a crash or error during the removal leaves a hidden folder that reads ignore and `doctor` finds by its prefix.
 
 ## Toolchain
 
@@ -118,9 +121,9 @@ Apart from reading JSON option values and the input resolution a command lists (
 
 ## Filesystem access
 
-Every file operation under the root — reads and writes — goes through one `os.Root` (Go 1.25+, for `Root.Link` and `Root.Rename`), opened once per invocation with `os.OpenRoot` on the configured root path:
+Every file operation under the root — reads and writes — goes through one `os.Root` (Go 1.25+, for `Root.Link`, `Root.Rename`, and `Root.RemoveAll`), opened once per invocation with `os.OpenRoot` on the configured root path:
 
-- **One resolution.** The root path is resolved once, when the `os.Root` is opened; every open, stat, `Mkdir`, `Link`, `Rename`, and `Remove` is relative to that handle. This is the [Mechanism](#mechanism)'s *one resolution per write*, in the standard library. (The `syscall` package has no `openat`, `renameat`, or `linkat` on macOS, so the handle is the portable way to get it.)
+- **One resolution.** The root path is resolved once, when the `os.Root` is opened; every open, stat, `Mkdir`, `Link`, `Rename`, `Remove`, and `RemoveAll` is relative to that handle, and the no-replace rename (see [Mechanism](#mechanism)) is made between folders opened through it. This is the [Mechanism](#mechanism)'s *one resolution per write*, in the standard library. (The `syscall` package has no `openat`, `renameat`, or `linkat` on macOS, so the handle is the portable way to get it.)
 - **The lock** is taken on `root.Open(".")` — the same directory, through the same handle.
 - **No symlinks followed.** `os.Root` follows symlinks that stay inside the root; ftask never does. `os.Root.OpenFile` ignores a caller's `O_NOFOLLOW`: it adds the flag itself and, on `ELOOP`, resolves the symlink when its target stays inside the root. So `fsys` opens a file or folder in two steps: its parent folder through the `os.Root`, then the entry itself with `openat(2)` and `O_NOFOLLOW` relative to that folder, from `golang.org/x/sys/unix`, which has `openat` on Linux and macOS alike (the `syscall` package lacks it on macOS). A symlink fails with `ELOOP`, decided by the one call: there is no window between a check and the open, so an entry swapped for a symlink is refused, and a file replaced by a concurrent write's `rename` — `ftask.json`, read before the lock by every operation, under a burst of writes — is read whole, in one version or the other. `os.Root` also follows in-root symlinks in a name's *earlier* components, which is why the path walk `Lstat`s each component in turn. Files are opened with `O_NONBLOCK`, and anything that is not a regular file or folder — a FIFO, a socket, a device — reads as empty, so it can never block or read forever. Tests confirm each case — a symlink to a file, a symlink to a folder, a swap just before the open, and reads under concurrent replacement — on both platforms.
 - **A non-directory root is `ENOTDIR`.** `os.OpenRoot` opens the path without `O_DIRECTORY` and checks its type only afterwards, so a FIFO would block the open, and a regular file is reported by an error with no errno inside. `fsys` therefore hands it the path with `/.` appended: resolving that requires a directory, so the kernel refuses a FIFO or regular file with `ENOTDIR` before opening anything, with no window for a swap. The error's path and the root's `Name` are the configured path. The [OS errors](#meaning-is-decided-where-the-call-is-made) row for `os.OpenRoot` applies.
@@ -145,7 +148,8 @@ Task files are loaded on first use and cached for the rest of the operation — 
 
 Operations use the index through a few helpers:
 
-- **Find exactly one** — the targets of `show`, `complete`, `reopen`, `block`, `unblock`, `update`.
+- **Find exactly one** — the targets of `show`, `complete`, `reopen`, `block`, `unblock`, `update`, `move`, and `delete` (which reads only the filename, never the file).
+- **Find every reference** — `delete` and `delete-folder`: every task file outside what is removed is loaded, and those whose `blocked_by` names a removed ID are rewritten; the unusable ones are `unusable-file` warnings.
 - **Check existence** — `create`'s `blocked_by`, `block`'s blockers.
 - **Filter by scope** — `frontier` and `list`: tasks and folders under `folder`, recursively or not.
 - **Derive readiness** — for an open task only, evaluating every blocker even once one is known to block, per [Dependencies](design-spec.md#dependencies): no task file → blocking, `dangling-reference` (unless a folder the walk had to list was unreadable — then no warning, per [Warning kinds](operations.md#warning-kinds)); several → blocking, `duplicate-id`; unusable → blocking, `unusable-file`; complete → not blocking; open → blocking.
@@ -444,7 +448,7 @@ Each write operation's **Crash behavior** lists what each step can leave behind;
 - the tree is what Crash behavior says (e.g. `create` killed before step 2: `last_id` incremented, no task; before step 3: a task with no `.md`, whose notes read as empty);
 - every invariant holds, as the design spec promises after a process crash;
 - the next write succeeds — nothing is wedged;
-- the only leftovers are temp files, the only thing `doctor` should find;
+- the only leftovers are temp files — and the old `.md` an interrupted `delete` or `move` can leave — the only things `doctor` should find;
 - rerunning the operation gives exactly the outcome its **Retry safety** claims.
 
 **Errors midway.** The same steps with an injected errno instead of a kill: the envelope's `partial` matches the operation's partial schema and what took effect.

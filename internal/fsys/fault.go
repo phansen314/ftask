@@ -23,7 +23,9 @@ const (
 	OpCloseFile  = "closefile"
 	OpLink       = "link"
 	OpRename     = "rename"
+	OpRenameNR   = "rename-noreplace"
 	OpRemove     = "remove"
+	OpRemoveAll  = "removeall"
 	OpLock       = "lock"
 	OpUnlock     = "unlock"
 	OpCloseRoot  = "closeroot"
@@ -66,7 +68,7 @@ func (f Fault) before(op Op) error {
 	if err == nil {
 		return nil
 	}
-	if op.Name == OpLink || op.Name == OpRename {
+	if op.Name == OpLink || op.Name == OpRename || op.Name == OpRenameNR {
 		return &os.LinkError{Op: op.Name, Old: op.Path, New: op.NewPath, Err: err}
 	}
 	return &os.PathError{Op: op.Name, Path: op.Path, Err: err}
@@ -181,6 +183,20 @@ func (r *faultRoot) Rename(oldname, newname string) error {
 		return err
 	}
 	return r.r.Rename(oldname, newname)
+}
+
+func (r *faultRoot) RenameNoReplace(oldname, newname string) error {
+	if err := r.before(Op{Name: OpRenameNR, Path: oldname, NewPath: newname, Mutating: true}); err != nil {
+		return err
+	}
+	return r.r.RenameNoReplace(oldname, newname)
+}
+
+func (r *faultRoot) RemoveAll(name string) error {
+	if err := r.before(Op{Name: OpRemoveAll, Path: name, Mutating: true}); err != nil {
+		return err
+	}
+	return r.r.RemoveAll(name)
 }
 
 func (r *faultRoot) Remove(name string) error {

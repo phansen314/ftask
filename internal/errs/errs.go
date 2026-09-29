@@ -151,11 +151,14 @@ func NotFound(folders []string, ids []int64, paths []string) *Error {
 type Rule string
 
 const (
-	RuleAcyclic      Rule = "acyclic"
-	RuleIDExhausted  Rule = "id-exhausted"
-	RuleConfigExists Rule = "config-exists"
-	RuleRootNotEmpty Rule = "root-not-empty"
-	RuleDuplicateID  Rule = "duplicate-id"
+	RuleAcyclic           Rule = "acyclic"
+	RuleIDExhausted       Rule = "id-exhausted"
+	RuleConfigExists      Rule = "config-exists"
+	RuleRootNotEmpty      Rule = "root-not-empty"
+	RuleDuplicateID       Rule = "duplicate-id"
+	RuleIDAboveLastID     Rule = "id-above-last-id"
+	RuleNotEmpty          Rule = "not-empty"
+	RuleDestinationExists Rule = "destination-exists"
 )
 
 // ConflictDetails carries Cycles only for RuleAcyclic, where Cycles[i] is one
@@ -182,6 +185,12 @@ func Conflict(rule Rule, ids []int64) *Error {
 		msg = "the root is a non-empty directory without ftask.json"
 	case RuleDuplicateID:
 		msg = fmt.Sprintf("more than one task file has ID %s", joinIDs(ids))
+	case RuleIDAboveLastID:
+		msg = fmt.Sprintf("task ID %s is above last_id; repair the tree with doctor first", joinIDs(ids))
+	case RuleNotEmpty:
+		msg = "the folder holds tasks or folders; delete it recursively to remove them too"
+	case RuleDestinationExists:
+		msg = "something already exists where the folder would move"
 	default:
 		msg = "conflict: " + string(rule)
 	}

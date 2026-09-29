@@ -42,6 +42,10 @@ var runners = map[string]runner{
 	"update":        typed(runUpdate),
 	"block":         typed(runBlock),
 	"unblock":       typed(runUnblock),
+	"delete":        typed(runDelete),
+	"move":          typed(runMove),
+	"delete-folder": typed(runDeleteFolder),
+	"move-folder":   typed(runMoveFolder),
 	"list":          typed(runList),
 	"frontier":      typed(runFrontier),
 }

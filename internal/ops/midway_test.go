@@ -17,13 +17,19 @@ import (
 )
 
 // tree is a home's contents, relative to it: a file's bytes, with the home
-// written "~", or "/" for a directory. Temp files are left out.
+// written "~", or "/" for a directory. Temp files and folders are left out.
 func tree(t *testing.T, home string) map[string]string {
 	t.Helper()
 	out := map[string]string{}
 	err := filepath.WalkDir(home, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || p == home || strings.HasPrefix(d.Name(), fsys.TempPrefix) {
+		if err != nil || p == home {
 			return err
+		}
+		if strings.HasPrefix(d.Name(), fsys.TempPrefix) {
+			if d.IsDir() {
+				return filepath.SkipDir // delete-folder's folder, renamed aside
+			}
+			return nil
 		}
 		rel, _ := filepath.Rel(home, p)
 		if d.IsDir() {
@@ -110,6 +116,43 @@ var midwayCases = []midwayCase{
 	{
 		name: "unblock", setup: func(f *fixture) { f.task("", 5, false, 6); f.task("", 6, false) },
 		input: `{"id": 5, "blockers": [6]}`, order: [][]string{{"tasks/5.json"}}, outcome: replaced,
+	},
+	{
+		name: "delete", setup: func(f *fixture) { f.task("", 5, false); f.write("tasks/5.md", "n"); f.task("", 6, false, 5) },
+		input: `{"id": 5}`, order: [][]string{{"tasks/6.json"}, {"tasks/5.json"}, {"tasks/5.md"}},
+		// Once the task file is removed, delete cannot fail: removing the
+		// .md is cleanup.
+		outcome: func(stage int) string {
+			return []string{"error", `error partial {"dependents":[6]}`, "ok", "ok"}[stage]
+		},
+	},
+	{
+		name: "delete-folder", setup: func(f *fixture) { f.task("p/a", 5, false); f.task("", 6, false, 5) },
+		input: `{"folder": "/p", "recursive": true}`,
+		order: [][]string{{"tasks/6.json"}, {"tasks/p", "tasks/p/a", "tasks/p/a/5.json"}},
+		// Once the folder is renamed aside, delete-folder cannot fail:
+		// removing it is cleanup.
+		outcome: func(stage int) string {
+			return []string{"error", `error partial {"dependents":[6]}`, "ok"}[stage]
+		},
+	},
+	{
+		name: "move", setup: func(f *fixture) { f.task("", 5, false); f.write("tasks/5.md", "n") },
+		input: `{"id": 5, "to": "/p", "parents": true}`,
+		order: [][]string{{"tasks/p"}, {"tasks/p/5.md"}, {"tasks/5.json", "tasks/p/5.json"}, {"tasks/5.md"}},
+		// Once the task file has moved, move cannot fail: removing the old
+		// .md is cleanup.
+		outcome: func(stage int) string {
+			return []string{"error", `error partial {"created":["/p"]}`, `error partial {"created":["/p"]}`, "ok", "ok"}[stage]
+		},
+	},
+	{
+		name: "move-folder", setup: func(f *fixture) { f.task("a", 5, false) },
+		input: `{"folder": "/a", "to": "/x/y", "parents": true}`,
+		order: [][]string{{"tasks/x"}, {"tasks/a", "tasks/a/5.json", "tasks/x/y", "tasks/x/y/5.json"}},
+		outcome: func(stage int) string {
+			return []string{"error", `error partial {"created":["/x"]}`, "ok"}[stage]
+		},
 	},
 }
 

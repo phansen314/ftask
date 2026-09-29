@@ -58,7 +58,51 @@ func (r *osRoot) Mkdir(name string, perm fs.FileMode) error { return r.r.Mkdir(n
 func (r *osRoot) Link(oldname, newname string) error        { return r.r.Link(oldname, newname) }
 func (r *osRoot) Rename(oldname, newname string) error      { return r.r.Rename(oldname, newname) }
 func (r *osRoot) Remove(name string) error                  { return r.r.Remove(name) }
+func (r *osRoot) RemoveAll(name string) error               { return r.r.RemoveAll(name) }
 func (r *osRoot) Close() error                              { return r.r.Close() }
+
+// RenameNoReplace opens both names' folders through the root and renames
+// between them with the platform's no-replace rename (renameNoReplace).
+func (r *osRoot) RenameNoReplace(oldname, newname string) error {
+	od, err := r.r.Open(path.Dir(oldname))
+	if err != nil {
+		return err
+	}
+	defer od.Close()
+	nd, err := r.r.Open(path.Dir(newname))
+	if err != nil {
+		return err
+	}
+	defer nd.Close()
+	oc, err := od.SyscallConn()
+	if err != nil {
+		return err
+	}
+	nc, err := nd.SyscallConn()
+	if err != nil {
+		return err
+	}
+	var rerr error
+	cerr := oc.Control(func(ofd uintptr) {
+		if err := nc.Control(func(nfd uintptr) {
+			for {
+				rerr = renameNoReplace(int(ofd), path.Base(oldname), int(nfd), path.Base(newname))
+				if rerr != unix.EINTR {
+					return
+				}
+			}
+		}); err != nil {
+			rerr = err
+		}
+	})
+	if cerr != nil {
+		return cerr
+	}
+	if rerr != nil {
+		return &os.LinkError{Op: "rename", Old: oldname, New: newname, Err: rerr}
+	}
+	return nil
+}
 
 // ReadFile reads anything that is neither a regular file nor a directory —
 // a FIFO, a socket, a device — as empty, without reading it: a FIFO with a
@@ -140,10 +184,17 @@ func (r *osRoot) openNoFollow(name string) (*os.File, fs.FileInfo, error) {
 // TempPrefix begins the name of every temp file ftask creates.
 const TempPrefix = ".ftask-tmp-"
 
-func (r *osRoot) CreateTemp(dir string) (File, string, error) {
+// TempName is a fresh temp name in dir: hidden, recognizably ftask's, and
+// random, so two writes never collide. For a temp that is not created by
+// CreateTemp — a hard link, or a folder renamed aside.
+func TempName(dir string) string {
 	var b [12]byte
 	rand.Read(b[:])
-	name := path.Join(dir, TempPrefix+hex.EncodeToString(b[:]))
+	return path.Join(dir, TempPrefix+hex.EncodeToString(b[:]))
+}
+
+func (r *osRoot) CreateTemp(dir string) (File, string, error) {
+	name := TempName(dir)
 	f, err := r.r.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return nil, "", err

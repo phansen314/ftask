@@ -38,6 +38,9 @@ func snap(t *testing.T, home string) snapshot {
 		switch {
 		case strings.HasPrefix(d.Name(), fsys.TempPrefix):
 			s.temps = append(s.temps, rel)
+			if d.IsDir() {
+				return filepath.SkipDir // delete-folder's folder, renamed aside
+			}
 		case d.IsDir():
 			s.files[rel] = "/"
 		default:
@@ -146,6 +149,52 @@ var crashCases = []crashCase{
 		args:  []string{"unblock", "1", "--blockers", "2"},
 		order: [][]string{{"tasks/1.json"}},
 		rerun: safe(`"blocked_by":[]`),
+	},
+	{
+		name:  "delete",
+		setup: [][]string{{"create", "a", "--notes", "n"}, {"create", "b", "--blocked-by", "1"}},
+		args:  []string{"delete", "1"},
+		order: [][]string{{"tasks/2.json"}, {"tasks/1.json"}, {"tasks/1.md"}},
+		rerun: func(stage int) (int, string, bool) {
+			if stage >= 2 {
+				// The task is gone; an orphaned .md may be left for doctor.
+				return 1, `"kind":"not-found"`, false
+			}
+			return 0, `"id":1,"folder":"/"`, true
+		},
+	},
+	{
+		name:  "delete-folder",
+		setup: [][]string{{"create-folder", "-p", "/p/a"}, {"create", "a", "--folder", "/p/a"}, {"create", "b", "--blocked-by", "1"}},
+		args:  []string{"delete-folder", "-r", "/p"},
+		order: [][]string{{"tasks/2.json"}, {"tasks/p", "tasks/p/a", "tasks/p/a/1.json", "tasks/p/a/1.md"}},
+		rerun: func(stage int) (int, string, bool) {
+			if stage == 2 {
+				// Renamed aside: gone from the tree, a hidden leftover for doctor.
+				return 1, `"kind":"not-found"`, true
+			}
+			return 0, `"ids":[1]`, true
+		},
+	},
+	{
+		name:  "move",
+		setup: [][]string{{"create", "a", "--notes", "n"}},
+		args:  []string{"move", "1", "--to", "/p", "-p"},
+		order: [][]string{{"tasks/p"}, {"tasks/p/1.md"}, {"tasks/1.json", "tasks/p/1.json"}, {"tasks/1.md"}},
+		rerun: func(stage int) (int, string, bool) {
+			if stage == 3 {
+				// Moved; the old .md is left for doctor.
+				return 0, `"changed":false`, false
+			}
+			return 0, `"changed":true`, true
+		},
+	},
+	{
+		name:  "move-folder",
+		setup: [][]string{{"create-folder", "/a"}, {"create", "a", "--folder", "/a"}},
+		args:  []string{"move-folder", "/a", "--to", "/x/y", "-p"},
+		order: [][]string{{"tasks/x"}, {"tasks/a", "tasks/a/1.json", "tasks/a/1.md", "tasks/x/y", "tasks/x/y/1.json", "tasks/x/y/1.md"}},
+		rerun: safe(`"folder":"/x/y"`),
 	},
 }
 

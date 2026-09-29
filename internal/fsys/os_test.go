@@ -477,3 +477,47 @@ func TestFSLstatSeesDanglingSymlink(t *testing.T) {
 	_, err = OS{}.Stat(filepath.Join(dir, "link"))
 	wantErrno(t, err, syscall.ENOENT)
 }
+
+// RenameNoReplace moves a file or folder, across folders, but never onto
+// anything — not even an empty folder, which rename(2) would replace.
+func TestRenameNoReplace(t *testing.T) {
+	r, dir := newRoot(t, func(dir string) {
+		must(t, os.MkdirAll(filepath.Join(dir, "a/b"), 0o755))
+		must(t, os.WriteFile(filepath.Join(dir, "a/b/1.json"), []byte("x"), 0o644))
+		must(t, os.Mkdir(filepath.Join(dir, "empty"), 0o755))
+		must(t, os.Mkdir(filepath.Join(dir, "q"), 0o755))
+		must(t, os.WriteFile(filepath.Join(dir, "f"), nil, 0o644))
+	})
+	wantErrno(t, r.RenameNoReplace("a", "empty"), syscall.EEXIST)
+	wantErrno(t, r.RenameNoReplace("a", "f"), syscall.EEXIST)
+	wantErrno(t, r.RenameNoReplace("a/b/1.json", "f"), syscall.EEXIST)
+	wantErrno(t, r.RenameNoReplace("gone", "g"), syscall.ENOENT)
+	must(t, r.RenameNoReplace("a/b/1.json", "q/1.json"))
+	must(t, r.RenameNoReplace("a", "q/a"))
+	if _, err := os.Stat(filepath.Join(dir, "q/a/b")); err != nil {
+		t.Error(err)
+	}
+	if b, err := os.ReadFile(filepath.Join(dir, "q/1.json")); err != nil || string(b) != "x" {
+		t.Errorf("moved file: %q, %v", b, err)
+	}
+}
+
+// RemoveAll removes a folder with everything under it, and never follows a
+// symlink out of it.
+func TestRemoveAll(t *testing.T) {
+	r, dir := newRoot(t, func(dir string) {
+		must(t, os.MkdirAll(filepath.Join(dir, "a/b"), 0o755))
+		must(t, os.WriteFile(filepath.Join(dir, "a/b/1.json"), nil, 0o644))
+		must(t, os.Mkdir(filepath.Join(dir, "keep"), 0o755))
+		must(t, os.WriteFile(filepath.Join(dir, "keep/x"), nil, 0o644))
+		must(t, os.Symlink("../keep", filepath.Join(dir, "a/link")))
+	})
+	must(t, r.RemoveAll("a"))
+	must(t, r.RemoveAll("a"))
+	if _, err := os.Lstat(filepath.Join(dir, "a")); !os.IsNotExist(err) {
+		t.Errorf("a: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "keep/x")); err != nil {
+		t.Errorf("followed a symlink: %v", err)
+	}
+}

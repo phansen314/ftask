@@ -207,6 +207,24 @@ check "not recursive" 0 '.result.tasks == []' -- frontier --folder /proj --recur
 check "missing folder" 1 '.error.details.folders == ["/nope"]' -- frontier --folder /nope
 check "list's options aren't frontier's" 2 '.error.kind == "usage"' -- frontier --include-complete
 
+echo "== move and delete"
+# Here: complete 1, 2, 3 (/proj/travel), 6 (/proj/work, blocked by 5), 7 (/);
+# open 4 (/home, blocked by 2), 5 (/proj/work/q3, blocked by 7).
+check "move into a new folder" 0 '.result | .folder == "/archive" and .from == "/home" and .created == ["/archive"] and .changed' -- move 4 --to /archive -p
+check "move again changes nothing" 0 '.result.changed == false' -- move 4 --to /archive
+check "move: missing folder" 1 '.error.details.folders == ["/nope"]' -- move 4 --to /nope/x
+check "move: --to is required" 2 '.error.kind == "usage"' -- move 4
+check "move-folder into an existing folder" 0 '.result | .folder == "/archive/work" and .from == "/proj/work"' -- move-folder /proj/work --to /archive
+check "its tasks moved with it" 0 '[.result.tasks[].id] == [5]' -- list --folder /archive/work/q3
+check "move-folder: not into itself" 1 '.error.kind == "invalid-input"' -- move-folder /archive --to /archive/x
+check "delete-folder: not empty without -r" 1 '.error.details.rule == "not-empty"' -- delete-folder /archive
+check "delete: 5 no longer blocked by 7" 0 '.result | .id == 7 and .dependents == [5]' -- delete 7
+check "5 ready" 0 '.result.tasks[0] | .blocked_by == [] and .readiness == "ready"' -- show 5
+check "delete: gone" 1 '.error.details.ids == [7]' -- delete 7
+check "delete-folder -r: 4 no longer blocked by 2" 0 '.result | .ids == [1, 2, 3] and .dependents == [4]' -- delete-folder -r /proj
+check "delete-folder: the root never" 1 '.error.kind == "invalid-input"' -- delete-folder -r /
+check "what's left" 0 '[.result.tasks[].id] == [4, 6, 5] and .result.folders == ["/", "/archive", "/archive/work", "/archive/work/q3", "/home"]' -- list --include-complete --include-folders
+
 echo "== end state"
 check "last_id counts every task" 0 '.result.tree.last_id == 7' -- info
 

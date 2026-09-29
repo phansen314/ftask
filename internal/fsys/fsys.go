@@ -58,7 +58,16 @@ type Root interface {
 	Link(oldname, newname string) error
 	// Rename publishes a file over an existing one.
 	Rename(oldname, newname string) error
+	// RenameNoReplace moves a file or folder to a name that must be free: it
+	// fails with EEXIST rather than replace anything there — even an empty
+	// folder, which rename(2) would silently replace. The check and the move
+	// are one call (renameat2 RENAME_NOREPLACE on Linux, renameatx_np
+	// RENAME_EXCL on macOS).
+	RenameNoReplace(oldname, newname string) error
 	Remove(name string) error
+	// RemoveAll removes a folder and everything under it, never following a
+	// symlink; a name that is already gone is not an error.
+	RemoveAll(name string) error
 	// Lock takes the write lock: flock(LOCK_EX|LOCK_NB) on the root
 	// directory itself. A held lock fails with EAGAIN; EINTR is retried.
 	Lock() (Lock, error)

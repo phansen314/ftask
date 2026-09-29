@@ -40,6 +40,30 @@ var commands = []Command{
   ftask create-folder -p /proj/travel/2026 | jq -r '.result.created[]'`,
 	},
 	{
+		Name:    "delete-folder",
+		Op:      "delete-folder",
+		Summary: "Permanently remove a folder and everything under it; undo is git's",
+		Args:    []Arg{{Name: "folder", Field: "/folder", Type: String}},
+		Options: []Option{
+			{Name: "recursive", Short: "r", Field: "/recursive", Type: Bool, Help: "also remove the tasks and folders it holds"},
+		},
+		Example: `  ftask delete-folder /proj/old
+  ftask delete-folder -r /proj/travel | jq -c '{ids: .result.ids, dependents: .result.dependents}'`,
+	},
+	{
+		Name:    "move-folder",
+		Op:      "move-folder",
+		Summary: "Move a folder, and everything under it, to a new place, which also renames it",
+		Args:    []Arg{{Name: "folder", Field: "/folder", Type: String}},
+		Options: []Option{
+			{Name: "to", Field: "/to", Type: String, Required: true, Help: "an existing folder to move it into, or its new `path`"},
+			{Name: "parents", Short: "p", Field: "/parents", Type: Bool, Help: "create missing folders above the new path"},
+		},
+		Example: `  ftask move-folder /proj/travel --to /archive              # → /archive/travel
+  ftask move-folder /proj/travel --to /archive/travel-2025  # → moved and renamed
+  ftask move-folder /proj/travel --to /archive/2025/trips -p | jq -r .result.folder`,
+	},
+	{
 		Name:    "create",
 		Op:      "create",
 		Summary: "Create a new, open task",
@@ -103,6 +127,26 @@ var commands = []Command{
   ftask update 42 --extra-merge '{"status":"waiting"}' | jq .result.changed
   ftask update 42 --priority null --tags-remove urgent --extra-remove status
   ftask update 42 --tags-replace-all ''`,
+	},
+	{
+		Name:    "delete",
+		Op:      "delete",
+		Summary: "Permanently remove a task, and its ID from every blocked_by; undo is git's",
+		Args:    []Arg{{Name: "id", Field: "/id", Type: Int}},
+		Example: `  ftask delete 42 | jq .result.dependents
+  git log --diff-filter=D --oneline -- '*/42.json' '42.json'   # find it again later`,
+	},
+	{
+		Name:    "move",
+		Op:      "move",
+		Summary: "Move a task into a folder",
+		Args:    []Arg{{Name: "id", Field: "/id", Type: Int}},
+		Options: []Option{
+			{Name: "to", Field: "/to", Type: String, Required: true, Help: "the folder to move it into, as an exact `path`"},
+			{Name: "parents", Short: "p", Field: "/parents", Type: Bool, Help: "create the folder, and any missing above it"},
+		},
+		Example: `  ftask move 42 --to /proj/travel
+  ftask move 42 --to /archive/2025 -p | jq -r .result.notes_path`,
 	},
 	{
 		Name:    "block",

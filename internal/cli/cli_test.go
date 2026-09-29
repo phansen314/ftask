@@ -664,3 +664,41 @@ func TestListInput(t *testing.T) {
 		}
 	}
 }
+
+// delete's, delete-folder's, move's, and move-folder's input, and --to
+// required unless --input is given.
+func TestDeleteMoveInput(t *testing.T) {
+	saved := runOp
+	t.Cleanup(func() { runOp = saved })
+	var got string
+	runOp = func(_ string, in *jsonio.Object, _ []errs.Problem, _ ops.Env) ops.Envelope {
+		b, _ := json.Marshal(in)
+		got = string(b)
+		return ops.Envelope{OK: true, Result: struct{}{}, Warnings: []errs.Warning{}}
+	}
+	for _, tc := range []struct {
+		args        []string
+		stdin, want string
+	}{
+		{[]string{"delete", "42"}, "", `{"id":42}`},
+		{[]string{"delete-folder", "/proj"}, "", `{"folder":"/proj"}`},
+		{[]string{"delete-folder", "-r", "/proj"}, "", `{"folder":"/proj","recursive":true}`},
+		{[]string{"delete-folder", "/proj", "--recursive"}, "", `{"folder":"/proj","recursive":true}`},
+		{[]string{"move", "42", "--to", "/proj"}, "", `{"id":42,"to":"/proj"}`},
+		{[]string{"move", "-p", "42", "--to", "/proj/a"}, "", `{"id":42,"to":"/proj/a","parents":true}`},
+		{[]string{"move-folder", "/proj", "--to", "/archive"}, "", `{"folder":"/proj","to":"/archive"}`},
+		{[]string{"move-folder", "/proj", "--to", "/a/b", "-p"}, "", `{"folder":"/proj","to":"/a/b","parents":true}`},
+		{[]string{"move", "-i", "-"}, `{"id": 42, "to": "/a"}`, `{"id":42,"to":"/a"}`},
+	} {
+		got = ""
+		if r := run(t, commands, tc.stdin, tc.args...); r.code != ExitOK || got != tc.want {
+			t.Errorf("%q: exit %d, input %s, want %s", tc.args, r.code, got, tc.want)
+		}
+	}
+	for _, args := range [][]string{{"move", "42"}, {"move-folder", "/proj"}} {
+		r := run(t, commands, "", args...)
+		if _, reason := r.usageProblem(t); r.code != ExitUsage || reason != "missing required option --to" {
+			t.Errorf("%q without --to: exit %d, %q", args, r.code, reason)
+		}
+	}
+}
