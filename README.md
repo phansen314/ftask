@@ -9,25 +9,35 @@ Linux and macOS only.
 Needs Go 1.25 or later.
 
 ```sh
-go install github.com/phansen314/ftask/cmd/ftask@latest   # into $(go env GOPATH)/bin
-ftask init ~/tasks                                        # this machine's task tree
+GOBIN=~/.local/bin go install github.com/phansen314/ftask/cmd/ftask@latest   # any GOBIN on your PATH
+ftask init ~/ftasks                                                          # this machine's task tree
 ```
 
 ## Use it from Claude Code
 
-Needs `jq`.
+The repo is a Claude Code plugin marketplace; the `ftask` plugin carries the [ftask skill](claude/skills/ftask/SKILL.md).
 
 ```sh
-git clone git@github.com:phansen314/ftask.git && cd ftask
-scripts/install-claude.sh
+claude plugin marketplace add phansen314/ftask
+claude plugin install ftask@ftask
 ```
 
-This links the [ftask skill](claude/skills/ftask/SKILL.md) into `~/.claude/skills/ftask`, so a `git pull` updates it. It also adds three permission rules to `~/.claude/settings.json`, after backing the file up:
+Plugins can't ship permission rules, so add these three to `~/.claude/settings.json` so ftask commands run without a prompt, while `init`, which changes this machine's setup, still asks:
 
-- allow `Bash(ftask:*)` and `Bash(jq:*)`, so ftask commands run without a prompt;
-- ask `Bash(ftask init:*)`, since `init` changes this machine's setup.
+```json
+{
+  "permissions": {
+    "allow": ["Bash(ftask:*)", "Bash(jq:*)"],
+    "ask": ["Bash(ftask init:*)"]
+  }
+}
+```
 
-Then ask Claude things like "what should I work on next?" or "add a task to review the migration PR, blocked by 12". `scripts/install-claude.sh --uninstall` removes the link and the rules.
+Or, from a clone, `scripts/install-claude.sh` merges them in (backing the file up first, needs `jq`), and `--uninstall` takes them out again.
+
+Then ask Claude things like "what should I work on next?" or "add a task to review the migration PR, blocked by 12".
+
+The plugin tracks `main`: `claude plugin update ftask@ftask` picks up changes, or turn on auto-update for the `ftask` marketplace in `/plugin`. To try an edited skill before pushing, run `claude --plugin-dir .` in a clone.
 
 ## A taste
 

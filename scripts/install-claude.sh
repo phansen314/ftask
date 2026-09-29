@@ -1,22 +1,20 @@
 #!/usr/bin/env bash
-# Sets up Claude Code to use ftask, for the current user:
+# Adds the permission rules the ftask plugin can't ship itself (plugins
+# cannot carry permissions) to ~/.claude/settings.json: every ftask command
+# and jq run without prompting, except `ftask init`, which asks. The skill
+# comes from the plugin; see the README.
 #
-#   - links ~/.claude/skills/ftask to this repo's skill, so a git pull
-#     updates it;
-#   - adds permission rules to ~/.claude/settings.json: every ftask command
-#     and jq run without prompting, except `ftask init`, which asks.
-#
-#   scripts/install-claude.sh              # install, or repair an install
-#   scripts/install-claude.sh --uninstall  # remove the link and the rules
+#   scripts/install-claude.sh              # add the rules
+#   scripts/install-claude.sh --uninstall  # remove them
 #
 # Safe to rerun. settings.json is backed up before it changes, and only the
-# rules below are added or removed. Needs jq.
+# rules below are added or removed. Either way, a ~/.claude/skills/ftask link
+# left by an earlier version of this script is removed, since the plugin now
+# supplies the skill and the link would load it twice. Needs jq.
 set -euo pipefail
 
-repo=$(cd "$(dirname "$0")/.." && pwd)
-skill_src=$repo/claude/skills/ftask
 claude_dir=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
-skill_dst=$claude_dir/skills/ftask
+old_link=$claude_dir/skills/ftask
 settings=$claude_dir/settings.json
 
 allow='["Bash(ftask:*)", "Bash(jq:*)"]'
@@ -55,16 +53,12 @@ edit_settings() {
 	echo "settings: updated $settings"
 }
 
-if [[ $mode == install ]]; then
-	mkdir -p "$(dirname "$skill_dst")"
-	if [[ -L $skill_dst || ! -e $skill_dst ]]; then
-		ln -sfn "$skill_src" "$skill_dst"
-		echo "skill: $skill_dst -> $skill_src"
-	else
-		echo "skill: $skill_dst exists and is not a link; move it aside and rerun" >&2
-		exit 1
-	fi
+if [[ -L $old_link && $(readlink "$old_link") == */claude/skills/ftask ]]; then
+	rm "$old_link"
+	echo "skill: removed the old link $old_link (the plugin supplies the skill)"
+fi
 
+if [[ $mode == install ]]; then
 	# shellcheck disable=SC2016 # $allow and $ask are jq variables
 	edit_settings '
 		.permissions.allow = ((.permissions.allow // []) + ($allow - (.permissions.allow // [])))
@@ -73,21 +67,20 @@ if [[ $mode == install ]]; then
 	if ! command -v ftask >/dev/null; then
 		echo
 		echo "ftask is not on PATH. Install it with:"
-		echo "  go install github.com/phansen314/ftask/cmd/ftask@latest"
-		echo "and make sure \$(go env GOPATH)/bin is on PATH."
+		echo "  GOBIN=~/.local/bin go install github.com/phansen314/ftask/cmd/ftask@latest"
+		echo "with GOBIN a directory on PATH."
 	elif ! ftask info | jq -e .result.usable >/dev/null; then
 		echo
 		echo "ftask has no usable root yet. Set one up with, e.g.:"
-		echo "  ftask init ~/tasks"
+		echo "  ftask init ~/ftasks"
+	fi
+	if command -v claude >/dev/null && ! claude plugin list --json 2>/dev/null | jq -e 'any(.[]; .id == "ftask@ftask" and .enabled)' >/dev/null; then
+		echo
+		echo "The ftask plugin is not installed. Install it with:"
+		echo "  claude plugin marketplace add phansen314/ftask"
+		echo "  claude plugin install ftask@ftask"
 	fi
 else
-	if [[ -L $skill_dst ]]; then
-		rm "$skill_dst"
-		echo "skill: removed $skill_dst"
-	else
-		echo "skill: no link at $skill_dst"
-	fi
-
 	# shellcheck disable=SC2016 # $allow and $ask are jq variables
 	edit_settings '
 		if .permissions then
