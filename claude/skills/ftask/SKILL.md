@@ -10,10 +10,10 @@ description: Track and work through the user's tasks with the ftask CLI — a lo
 ## Before the first command
 
 ```sh
-ftask info | jq -e .result.usable >/dev/null && echo ready
+ftask info
 ```
 
-If not ready, `ftask info` says why. When no root is set up, tell the user and suggest `ftask init ~/tasks` (or a path they choose). **Never run `init` unasked** — it changes this machine's setup.
+Ready when `.result.usable` is true; if not, the rest of `.result` says why. When no root is set up, tell the user and suggest `ftask init ~/tasks` (or a path they choose). **Never run `init` unasked** — it changes this machine's setup.
 
 ## Reading output
 
@@ -53,7 +53,7 @@ Everything ftask prints lands in your context, and stays there for the rest of t
 - `--limit 0` gives just the count, in `total`.
 - For one task's full detail, `show` it.
 
-**Never trim a write's, `show`'s, or any small output's envelope with `jq`**: print it as is. When a big read needs `jq`, keep `ok`, `error` and `warnings` with `jq -c 'if .ok then .result |= <shape> else . end'`, where `<shape>` gives one value (`map(…)`, never `.[]`). A trimmed failure looks like success: the pipe's exit status is jq's, so the error kind and warnings just vanish.
+**Never trim a write's, `show`'s, or any small output's envelope with `jq`**: print it as is. When a big read needs `jq`, keep `ok`, `error` and `warnings` with `jq -c 'if .ok then .result |= <shape> else . end'`, where `<shape>` gives one value (`map(…)`, never `.[]`). A trimmed failure looks like success: the pipe's exit status is jq's, so the error kind and warnings just vanish. A filter that drops tasks must replace `total` and `truncated`, which count what ftask returned, with `scanned` (tasks it checked) and `unscanned` (tasks `--limit` cut, never checked), as in the `extra` example below. Before saying there are none, or giving a count, make `unscanned` 0 by raising or dropping `--limit`.
 
 ## The daily loop
 
@@ -75,7 +75,7 @@ ftask list --readiness blocked --limit 20 --fields id,title,blocking   # what's 
 ftask list --folder /proj --tags-any urgent --limit 20 --fields id,title,readiness
 ftask list --readiness complete --limit 0                          # how many are done: .result.total
 ftask list --include-folders --limit 0                             # every folder: .result.folders
-ftask list --fields id,title,extra --limit 200 | jq -c 'if .ok then .result |= (.tasks |= map(select(.extra.status == "waiting"))) else . end'
+ftask list --fields id,title,extra --limit 200 | jq -c 'if .ok then .result |= {tasks: (.tasks | map(select(.extra.status == "waiting"))), scanned: (.tasks | length), unscanned: (.total - (.tasks | length))} else . end'
 ```
 
 `list` returns open tasks (`ready` and `blocked`) unless `--readiness` says otherwise: `--readiness complete` for finished ones, `--readiness ready,blocked,complete` for all.

@@ -196,8 +196,7 @@ A root that is not initialized or not usable is reported as state (`ok: true`, `
 **Examples:**
 
 ```sh
-ftask info | jq -e .result.usable >/dev/null && echo ready
-ftask info
+ftask info   # ready when .result.usable is true; if not, the rest of .result says why
 ```
 
 ### init

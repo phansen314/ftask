@@ -12,7 +12,7 @@ var commands = []Command{
 		Name:    "info",
 		Op:      "info",
 		Summary: "Report the state of this machine's configured root",
-		Example: "  ftask info | jq -e .result.usable >/dev/null && echo ready\n  ftask info",
+		Example: "  ftask info   # ready when .result.usable is true; if not, the rest of .result says why",
 	},
 	{
 		Name:    "init",
