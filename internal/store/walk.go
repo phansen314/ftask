@@ -92,29 +92,27 @@ func (x *Index) Locations(id model.ID) []Location { return x.byID[id] }
 // Complete reports whether every folder was listed.
 func (x *Index) Complete() bool { return len(x.Unreadable) == 0 }
 
-// InScope returns the folders and tasks under f — in f itself, or anywhere
-// below it when recursive — in tree order.
+// InScope returns the tasks under f — in f itself, or anywhere below it
+// when recursive — and the folders in scope: f, then every folder below it
+// when recursive, or only its immediate subfolders when not; all in tree
+// order.
 func (x *Index) InScope(f model.FolderPath, recursive bool) ([]model.FolderPath, []Location) {
-	in := func(g model.FolderPath) bool {
-		switch {
-		case g == f:
-			return true
-		case !recursive:
-			return false
-		case f == model.RootFolder:
-			return true
-		}
-		return strings.HasPrefix(string(g), string(f)+"/")
+	below := func(g model.FolderPath) bool {
+		return f == model.RootFolder && g != f || strings.HasPrefix(string(g), string(f)+"/")
+	}
+	child := func(g model.FolderPath) bool {
+		rest := strings.TrimPrefix(strings.TrimPrefix(string(g), string(f)), "/")
+		return below(g) && !strings.Contains(rest, "/")
 	}
 	var folders []model.FolderPath
 	for _, g := range x.Folders {
-		if in(g) {
+		if g == f || below(g) && (recursive || child(g)) {
 			folders = append(folders, g)
 		}
 	}
 	var tasks []Location
 	for _, l := range x.Tasks {
-		if in(l.Folder) {
+		if l.Folder == f || recursive && below(l.Folder) {
 			tasks = append(tasks, l)
 		}
 	}
@@ -150,6 +148,9 @@ func (tx *Tx) walk(x *Index, f model.FolderPath) {
 		if f != model.RootFolder && (isErrno(err, syscall.ENOENT) || isErrno(err, syscall.ENOTDIR) || isErrno(err, syscall.ELOOP)) {
 			return
 		}
+		// It exists — its parent listed it — so it is a folder; only its
+		// contents are unknown.
+		x.Folders = append(x.Folders, f)
 		x.Unreadable = append(x.Unreadable, UnreadableFolder{Folder: f, Err: err})
 		return
 	}

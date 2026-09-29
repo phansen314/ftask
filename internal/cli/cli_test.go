@@ -621,3 +621,32 @@ func TestBlockersInput(t *testing.T) {
 		}
 	}
 }
+
+// list's input: options only, --recursive a flag that --recursive=false
+// turns off.
+func TestListInput(t *testing.T) {
+	saved := runOp
+	t.Cleanup(func() { runOp = saved })
+	var got string
+	runOp = func(_ string, in *jsonio.Object, _ []errs.Problem, _ ops.Env) ops.Envelope {
+		b, _ := json.Marshal(in)
+		got = string(b)
+		return ops.Envelope{OK: true, Result: struct{}{}, Warnings: []errs.Warning{}}
+	}
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"list"}, `{}`},
+		{[]string{"list", "--folder", "/proj", "--recursive=false"}, `{"folder":"/proj","recursive":false}`},
+		{[]string{"list", "--include-complete", "--include-folders"}, `{"include_complete":true,"include_folders":true}`},
+	} {
+		got = ""
+		if r := run(t, commands, "", tc.args...); r.code != ExitOK || got != tc.want {
+			t.Errorf("%q: exit %d, input %s, want %s", tc.args, r.code, got, tc.want)
+		}
+	}
+	if r := run(t, commands, "", "list", "/proj"); r.code != ExitUsage {
+		t.Errorf("list with an argument: exit %d: %s", r.code, r.raw)
+	}
+}

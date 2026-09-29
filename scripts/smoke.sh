@@ -177,6 +177,20 @@ check "7 ready again" 0 '.result.tasks[0] | .readiness == "ready" and .blocking 
 check "unblock: not found" 1 '.error.details.ids == [99]' -- unblock 99 --blockers 1
 check "unblock: --blockers is required" 2 '.error.kind == "usage"' -- unblock 7
 
+echo "== list"
+# Here: open 2 (/proj/travel), 4 (/home), 5 (/proj/work/q3), 7 (/);
+# complete 1, 3 (/proj/travel) and 6 (/proj/work).
+check "every open task, in tree order" 0 '[.result.tasks[].id] == [7, 4, 2, 5] and (.result | has("folders") | not)' -- list
+check "readiness shown" 0 '[.result.tasks[] | {id, readiness}] == [{id: 7, readiness: "ready"}, {id: 4, readiness: "blocked"}, {id: 2, readiness: "ready"}, {id: 5, readiness: "blocked"}]' -- list
+check "with complete tasks" 0 '[.result.tasks[].id] == [7, 4, 1, 2, 3, 6, 5]' -- list --include-complete
+check "one folder" 0 '[.result.tasks[].id] == [5]' -- list --folder /proj/work
+check "one folder with complete" 0 '[.result.tasks[].id] == [6, 5]' -- list --folder /proj/work --include-complete
+check "not recursive" 0 '.result.tasks == []' -- list --folder /proj --recursive=false
+check "folders" 0 '.result.folders == ["/", "/home", "/proj", "/proj/travel", "/proj/work", "/proj/work/q3"]' -- list --include-folders
+check "folders, not recursive" 0 '.result.folders == ["/proj", "/proj/travel", "/proj/work"]' -- list --folder /proj --recursive=false --include-folders
+check "missing folder" 1 '.error.details.folders == ["/nope"]' -- list --folder /nope
+check "list takes no arguments" 2 '.error.kind == "usage"' -- list /proj
+
 echo "== end state"
 check "last_id counts every task" 0 '.result.tree.last_id == 7' -- info
 

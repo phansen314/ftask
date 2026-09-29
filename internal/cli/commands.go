@@ -126,4 +126,19 @@ var commands = []Command{
 		Example: `  ftask unblock 42 --blockers 41 | jq .result.removed
   ftask unblock 42 --blockers 99   # clears a dangling reference to a task that no longer exists`,
 	},
+	{
+		Name:    "list",
+		Op:      "list",
+		Summary: "Return every task in scope with its readiness, and optionally the folders",
+		Options: []Option{
+			{Name: "folder", Field: "/folder", Type: String, Help: "only tasks in this folder, an exact `path` (default /)"},
+			{Name: "recursive", Field: "/recursive", Type: Bool, Help: "also tasks in subfolders (default true; --recursive=false for none)"},
+			{Name: "include-complete", Field: "/include_complete", Type: Bool, Help: "also return complete tasks"},
+			{Name: "include-folders", Field: "/include_folders", Type: Bool, Help: "also return the folders in scope"},
+		},
+		Example: `  ftask list | jq -r '.result.tasks[] | "\(.id)\t\(.readiness)\t\(.title)"'
+  ftask list --folder /proj --include-complete | jq '[.result.tasks[] | select(.completed_at != null)] | length'
+  ftask list --include-folders | jq -r '.result.folders[]'
+  ftask list | jq '.result.tasks | group_by(.folder) | map({folder: .[0].folder, ids: map(.id)})'`,
+	},
 }

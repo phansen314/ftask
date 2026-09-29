@@ -197,3 +197,69 @@ func findOne(tx *store.Tx, id model.ID) (*store.Loaded, *errs.Error) {
 	}
 	return copies[0], nil
 }
+
+// inScope is the query behind list and frontier (implementation-spec.md,
+// Queries: filter by scope): the path walk of in.Folder, then every folder
+// that could not be listed as a warning, then the folders in scope and the
+// usable tasks in scope as views, both in tree order — complete tasks only
+// if in.IncludeComplete. An unusable task file in scope is a warning and is
+// left out; an ID with several copies in scope is a duplicate-id warning,
+// whether or not every copy is returned.
+func inScope(tx *store.Tx, in ScopeInput) ([]model.FolderPath, []model.TaskView, *errs.Error) {
+	n, e := tx.WalkFolder(in.Folder)
+	if e != nil {
+		return nil, nil, e
+	}
+	if n < len(in.Folder.Segments()) {
+		return nil, nil, errs.NotFound([]string{string(folderPrefix(in.Folder, n+1))}, nil, nil)
+	}
+	x := tx.Index()
+	if e := tx.WarnUnreadable(x); e != nil {
+		return nil, nil, e
+	}
+	folders, locs := x.InScope(in.Folder, in.Recursive)
+
+	inScope := map[store.Location]bool{}
+	counts := map[model.ID]int{}
+	for _, l := range locs {
+		inScope[l] = true
+		counts[l.ID]++
+	}
+	checked := map[model.ID]bool{}
+	for _, l := range locs {
+		if counts[l.ID] < 2 || checked[l.ID] {
+			continue
+		}
+		checked[l.ID] = true
+		copies, e := tx.Copies(l.ID)
+		if e != nil {
+			return nil, nil, e
+		}
+		copies = slices.DeleteFunc(copies, func(m store.Location) bool { return !inScope[m] })
+		if len(copies) > 1 {
+			duplicateID(tx, l.ID, copies)
+		}
+	}
+
+	views := []model.TaskView{}
+	for _, l := range locs {
+		ld := tx.Load(l)
+		switch {
+		case ld.State == store.Vanished:
+			continue
+		case ld.State != store.Usable:
+			if e := tx.Relevant(ld); e != nil {
+				return nil, nil, e
+			}
+			continue
+		case !ld.Task.Open() && !in.IncludeComplete:
+			continue
+		}
+		v, e := view(tx, ld)
+		if e != nil {
+			return nil, nil, e
+		}
+		views = append(views, v)
+	}
+	return folders, views, nil
+}

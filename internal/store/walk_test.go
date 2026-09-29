@@ -156,7 +156,8 @@ func TestIndexUnreadableFolder(t *testing.T) {
 		if want := []Location{{"/b", 3}}; !reflect.DeepEqual(x.Tasks, want) {
 			t.Errorf("tasks %v, want %v", x.Tasks, want)
 		}
-		if want := []model.FolderPath{"/", "/b"}; !reflect.DeepEqual(x.Folders, want) {
+		// Unreadable folders exist, so they are listed; /a/sub is unknown.
+		if want := []model.FolderPath{"/", "/a", "/b", "/c"}; !reflect.DeepEqual(x.Folders, want) {
 			t.Errorf("folders %v, want %v", x.Folders, want)
 		}
 		wantErr(t, tx.RequireWholeTree(x), errs.KindIO, errs.IODetails{Path: tx.Path("a"), Code: "EACCES"})
@@ -205,8 +206,8 @@ func TestIndexVanishedFolder(t *testing.T) {
 
 func TestInScope(t *testing.T) {
 	x := &Index{
-		Folders: []model.FolderPath{"/", "/proj", "/proj/travel", "/proj-b"},
-		Tasks:   []Location{{"/", 1}, {"/proj", 2}, {"/proj/travel", 3}, {"/proj-b", 4}},
+		Folders: []model.FolderPath{"/", "/proj", "/proj/travel", "/proj/travel/x", "/proj-b"},
+		Tasks:   []Location{{"/", 1}, {"/proj", 2}, {"/proj/travel", 3}, {"/proj/travel/x", 5}, {"/proj-b", 4}},
 	}
 	for _, tc := range []struct {
 		f         model.FolderPath
@@ -214,11 +215,15 @@ func TestInScope(t *testing.T) {
 		folders   []model.FolderPath
 		ids       []model.ID
 	}{
-		{"/", false, []model.FolderPath{"/"}, []model.ID{1}},
-		{"/", true, x.Folders, []model.ID{1, 2, 3, 4}},
-		{"/proj", false, []model.FolderPath{"/proj"}, []model.ID{2}},
-		{"/proj", true, []model.FolderPath{"/proj", "/proj/travel"}, []model.ID{2, 3}},
-		{"/proj/travel", true, []model.FolderPath{"/proj/travel"}, []model.ID{3}},
+		// Without recursive: tasks in f only, folders f and its immediate
+		// subfolders.
+		{"/", false, []model.FolderPath{"/", "/proj", "/proj-b"}, []model.ID{1}},
+		{"/", true, x.Folders, []model.ID{1, 2, 3, 5, 4}},
+		{"/proj", false, []model.FolderPath{"/proj", "/proj/travel"}, []model.ID{2}},
+		{"/proj", true, []model.FolderPath{"/proj", "/proj/travel", "/proj/travel/x"}, []model.ID{2, 3, 5}},
+		{"/proj/travel", false, []model.FolderPath{"/proj/travel", "/proj/travel/x"}, []model.ID{3}},
+		{"/proj/travel/x", true, []model.FolderPath{"/proj/travel/x"}, []model.ID{5}},
+		{"/proj-b", true, []model.FolderPath{"/proj-b"}, []model.ID{4}},
 	} {
 		folders, tasks := x.InScope(tc.f, tc.recursive)
 		var ids []model.ID
