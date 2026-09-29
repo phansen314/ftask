@@ -170,8 +170,7 @@ Report the version and build of the ftask binary, and the data format versions i
 **Examples:**
 
 ```sh
-ftask version | jq -r .result.version
-ftask version | jq .result.schemas
+ftask version
 ```
 
 ### info
@@ -198,7 +197,7 @@ A root that is not initialized or not usable is reported as state (`ok: true`, `
 
 ```sh
 ftask info | jq -e .result.usable >/dev/null && echo ready
-ftask info | jq .result.config.root
+ftask info
 ```
 
 ### init
@@ -278,7 +277,7 @@ Create a folder, and optionally any missing parent folders. Runs [`create-folder
 
 ```sh
 ftask create-folder /proj
-ftask create-folder -p /proj/travel/2026 | jq -r '.result.created[]'
+ftask create-folder -p /proj/travel/2026   # .result.created: the folders it made
 ```
 
 ### delete-folder
@@ -311,7 +310,7 @@ Permanently remove a folder and everything under it, and the removed tasks' IDs 
 
 ```sh
 ftask delete-folder /proj/old
-ftask delete-folder -r /proj/travel | jq -c '{ids: .result.ids, dependents: .result.dependents}'
+ftask delete-folder -r /proj/travel        # .result.ids: the tasks removed; .result.dependents: the tasks they no longer block
 ```
 
 ### move-folder
@@ -348,7 +347,7 @@ Move a folder, and everything under it, to a new place — which also renames it
 ```sh
 ftask move-folder /proj/travel --to /archive              # → /archive/travel
 ftask move-folder /proj/travel --to /archive/travel-2025  # → moved and renamed
-ftask move-folder /proj/travel --to /archive/2025/trips -p | jq -r .result.folder
+ftask move-folder /proj/travel --to /archive/2025/trips -p  # → /archive/2025/trips, creating /archive/2025
 ```
 
 ### create
@@ -398,7 +397,7 @@ A `create` that exits `3` or with any other [outcome-unknown](#exit-codes) statu
 
 ```sh
 ftask create 'Book flights' --folder /proj/travel --tags travel,urgent --priority 2
-ftask create 'Deploy' --blocked-by 41,42 | jq .result.id
+ftask create 'Deploy' --blocked-by 41,42   # the new ID is .result.id
 gh issue view 12 --json body -q .body | ftask create 'Fix login bug' --notes-file -
 ftask create 'Wait on quote' --extra '{"status":"waiting"}'
 ```
@@ -432,10 +431,8 @@ Notes are not included, as in the operation; `notes_path` locates them. The CLI 
 **Examples:**
 
 ```sh
-ftask show 42 | jq '.result.tasks[0]'
-ftask show 42 | jq -r '.result.tasks[0].readiness'
-cat "$(ftask show 42 | jq -r '.result.tasks[0].notes_path')"
-for id in 41 42 43; do ftask show "$id"; done | jq -s '[.[].result.tasks[]?]'
+ftask show 42                                   # readiness, blocking, notes_path: all in .result.tasks[0]
+for id in 41 42 43; do ftask show "$id"; done   # one envelope each
 ```
 
 ### complete
@@ -463,8 +460,8 @@ Mark a task complete. Completing an already complete task changes nothing. Runs 
 **Examples:**
 
 ```sh
-ftask complete 42 | jq .result.changed
-for id in 41 42; do ftask complete "$id"; done | jq -c '{id: .result.id, changed: .result.changed}'
+ftask complete 42                               # .result.changed is false if it was already complete
+for id in 41 42; do ftask complete "$id"; done  # one envelope each
 ```
 
 ### reopen
@@ -492,7 +489,7 @@ Reopen a complete task. Reopening an already open task changes nothing. The coun
 **Examples:**
 
 ```sh
-ftask reopen 42 | jq -r .result.completed_at   # null
+ftask reopen 42   # .result.completed_at is null again
 ```
 
 ### block
@@ -526,8 +523,8 @@ Add one or more blockers to a task's `blocked_by`, all-or-nothing. Runs [`block`
 **Examples:**
 
 ```sh
-ftask block 42 --blockers 41,43 | jq .result.added
-ftask block 42 --blockers 7 | jq -c 'select(.error.details.rule == "acyclic") | .error.details.cycles'
+ftask block 42 --blockers 41,43   # .result.added: the ones not already there
+ftask block 42 --blockers 7       # a cycle is refused: .error.details.cycles shows it
 ```
 
 ### unblock
@@ -559,7 +556,7 @@ Remove one or more blockers from a task's `blocked_by`. Removing an ID that isn'
 **Examples:**
 
 ```sh
-ftask unblock 42 --blockers 41 | jq .result.removed
+ftask unblock 42 --blockers 41   # .result.removed: the ones that were there
 ftask unblock 42 --blockers 99   # clears a dangling reference to a task that no longer exists
 ```
 
@@ -604,7 +601,7 @@ Notes are not set by `update`, as in the operation: they are edited directly in 
 
 ```sh
 ftask update 42 --priority 3 --tags-add urgent
-ftask update 42 --extra-merge '{"status":"waiting"}' | jq .result.changed
+ftask update 42 --extra-merge '{"status":"waiting"}'   # .result.changed names the fields that changed
 ftask update 42 --priority null --tags-remove urgent --extra-remove status
 ftask update 42 --tags-replace-all ''
 ```
@@ -634,7 +631,7 @@ Permanently remove a task, and its ID from every other task's `blocked_by`. Runs
 **Examples:**
 
 ```sh
-ftask delete 42 | jq .result.dependents
+ftask delete 42                                              # .result.dependents: the tasks it no longer blocks
 git log --diff-filter=D --oneline -- '*/42.json' '42.json'   # find it again later
 ```
 
@@ -669,7 +666,7 @@ Move a task into a folder. Runs [`move`](operations.md#move).
 
 ```sh
 ftask move 42 --to /proj/travel
-ftask move 42 --to /archive/2025 -p | jq -r .result.notes_path
+ftask move 42 --to /archive/2025 -p   # creates /archive/2025; the notes move too
 ```
 
 ### frontier
@@ -705,10 +702,10 @@ Filtering by `extra` or title is left to `jq` (see [Not included](#not-included)
 
 ```sh
 ftask frontier --limit 10 --fields id,title,priority,folder   # the next ten, briefly
-ftask frontier --limit 1 | jq '.result.tasks[0]'              # the next task, whole
-ftask frontier --folder /proj | jq -r '.result.tasks[] | "\(.id)\t\(.title)"'
+ftask frontier --limit 1                                     # the next task, whole
+ftask frontier --folder /proj --limit 20 --fields id,title   # ready under /proj
 ftask frontier --tags-any urgent,today --fields id,title
-ftask frontier --limit 0 | jq .result.total                   # how many are ready
+ftask frontier --limit 0                                     # how many are ready: .result.total
 ```
 
 ### list
@@ -746,11 +743,11 @@ Filtering by `extra` or title, and grouping, are left to `jq`; rendering the res
 
 ```sh
 ftask list --limit 50 --fields id,title,readiness,folder
-ftask list --folder /proj --readiness complete --limit 0 | jq .result.total   # how many are done
+ftask list --folder /proj --readiness complete --limit 0                     # how many are done: .result.total
 ftask list --readiness blocked --fields id,title,blocking                    # what's stuck, and on what
 ftask list --readiness ready,blocked,complete --tags-all db,backend --fields id,title,readiness
-ftask list --include-folders --limit 0 | jq -r '.result.folders[]'
-ftask list --fields folder | jq '.result.tasks | group_by(.folder) | map({folder: .[0].folder, ids: map(.id)})'
+ftask list --include-folders --limit 0                                      # every folder: .result.folders
+ftask list --fields folder | jq -c 'if .ok then .result |= (.tasks |= (group_by(.folder) | map({folder: .[0].folder, ids: map(.id)}))) else . end'
 ```
 
 ## Not included

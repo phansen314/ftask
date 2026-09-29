@@ -6,13 +6,13 @@ var commands = []Command{
 		Name:    "version",
 		Op:      "version",
 		Summary: "Report the version and build of the ftask binary",
-		Example: "  ftask version | jq -r .result.version",
+		Example: "  ftask version",
 	},
 	{
 		Name:    "info",
 		Op:      "info",
 		Summary: "Report the state of this machine's configured root",
-		Example: "  ftask info | jq -e .result.usable >/dev/null && echo ready\n  ftask info | jq .result.config.root",
+		Example: "  ftask info | jq -e .result.usable >/dev/null && echo ready\n  ftask info",
 	},
 	{
 		Name:    "init",
@@ -37,7 +37,7 @@ var commands = []Command{
 			{Name: "parents", Short: "p", Field: "/parents", Type: Bool, Help: "create missing parent folders"},
 		},
 		Example: `  ftask create-folder /proj
-  ftask create-folder -p /proj/travel/2026 | jq -r '.result.created[]'`,
+  ftask create-folder -p /proj/travel/2026   # .result.created: the folders it made`,
 	},
 	{
 		Name:    "delete-folder",
@@ -48,7 +48,7 @@ var commands = []Command{
 			{Name: "recursive", Short: "r", Field: "/recursive", Type: Bool, Help: "also remove the tasks and folders it holds"},
 		},
 		Example: `  ftask delete-folder /proj/old
-  ftask delete-folder -r /proj/travel | jq -c '{ids: .result.ids, dependents: .result.dependents}'`,
+  ftask delete-folder -r /proj/travel        # .result.ids: the tasks removed; .result.dependents: the tasks they no longer block`,
 	},
 	{
 		Name:    "move-folder",
@@ -61,7 +61,7 @@ var commands = []Command{
 		},
 		Example: `  ftask move-folder /proj/travel --to /archive              # → /archive/travel
   ftask move-folder /proj/travel --to /archive/travel-2025  # → moved and renamed
-  ftask move-folder /proj/travel --to /archive/2025/trips -p | jq -r .result.folder`,
+  ftask move-folder /proj/travel --to /archive/2025/trips -p  # → /archive/2025/trips, creating /archive/2025`,
 	},
 	{
 		Name:    "create",
@@ -79,7 +79,7 @@ var commands = []Command{
 		},
 		Exclusive: [][]string{{"notes", "notes-file"}},
 		Example: `  ftask create 'Book flights' --folder /proj/travel --tags travel,urgent --priority 2
-  ftask create 'Deploy' --blocked-by 41,42 | jq .result.id
+  ftask create 'Deploy' --blocked-by 41,42   # the new ID is .result.id
   gh issue view 12 --json body -q .body | ftask create 'Fix login bug' --notes-file -
   ftask create 'Wait on quote' --extra '{"status":"waiting"}'`,
 	},
@@ -88,25 +88,23 @@ var commands = []Command{
 		Op:      "show",
 		Summary: "Return one task by ID, with its readiness and where its notes live",
 		Args:    []Arg{{Name: "id", Field: "/id", Type: Int}},
-		Example: `  ftask show 42 | jq '.result.tasks[0]'
-  ftask show 42 | jq -r '.result.tasks[0].readiness'
-  cat "$(ftask show 42 | jq -r '.result.tasks[0].notes_path')"
-  for id in 41 42 43; do ftask show "$id"; done | jq -s '[.[].result.tasks[]?]'`,
+		Example: `  ftask show 42                                   # readiness, blocking, notes_path: all in .result.tasks[0]
+  for id in 41 42 43; do ftask show "$id"; done   # one envelope each`,
 	},
 	{
 		Name:    "complete",
 		Op:      "complete",
 		Summary: "Mark a task complete; completing a complete task changes nothing",
 		Args:    []Arg{{Name: "id", Field: "/id", Type: Int}},
-		Example: `  ftask complete 42 | jq .result.changed
-  for id in 41 42; do ftask complete "$id"; done | jq -c '{id: .result.id, changed: .result.changed}'`,
+		Example: `  ftask complete 42                               # .result.changed is false if it was already complete
+  for id in 41 42; do ftask complete "$id"; done  # one envelope each`,
 	},
 	{
 		Name:    "reopen",
 		Op:      "reopen",
 		Summary: "Reopen a complete task; reopening an open task changes nothing",
 		Args:    []Arg{{Name: "id", Field: "/id", Type: Int}},
-		Example: "  ftask reopen 42 | jq -r .result.completed_at   # null",
+		Example: "  ftask reopen 42   # .result.completed_at is null again",
 	},
 	{
 		Name:    "update",
@@ -124,7 +122,7 @@ var commands = []Command{
 			{Name: "extra-replace-all", Field: "/extra/replace_all", Type: JSON, Help: "the complete new extra, a JSON `object`; {} clears it"},
 		},
 		Example: `  ftask update 42 --priority 3 --tags-add urgent
-  ftask update 42 --extra-merge '{"status":"waiting"}' | jq .result.changed
+  ftask update 42 --extra-merge '{"status":"waiting"}'   # .result.changed names the fields that changed
   ftask update 42 --priority null --tags-remove urgent --extra-remove status
   ftask update 42 --tags-replace-all ''`,
 	},
@@ -133,7 +131,7 @@ var commands = []Command{
 		Op:      "delete",
 		Summary: "Permanently remove a task, and its ID from every blocked_by; undo is git's",
 		Args:    []Arg{{Name: "id", Field: "/id", Type: Int}},
-		Example: `  ftask delete 42 | jq .result.dependents
+		Example: `  ftask delete 42                                              # .result.dependents: the tasks it no longer blocks
   git log --diff-filter=D --oneline -- '*/42.json' '42.json'   # find it again later`,
 	},
 	{
@@ -146,7 +144,7 @@ var commands = []Command{
 			{Name: "parents", Short: "p", Field: "/parents", Type: Bool, Help: "create the folder, and any missing above it"},
 		},
 		Example: `  ftask move 42 --to /proj/travel
-  ftask move 42 --to /archive/2025 -p | jq -r .result.notes_path`,
+  ftask move 42 --to /archive/2025 -p   # creates /archive/2025; the notes move too`,
 	},
 	{
 		Name:    "block",
@@ -156,8 +154,8 @@ var commands = []Command{
 		Options: []Option{
 			{Name: "blockers", Field: "/blockers", Type: IDList, Required: true, Help: "comma-separated `ids` of the tasks that block it"},
 		},
-		Example: `  ftask block 42 --blockers 41,43 | jq .result.added
-  ftask block 42 --blockers 7 | jq -c 'select(.error.details.rule == "acyclic") | .error.details.cycles'`,
+		Example: `  ftask block 42 --blockers 41,43   # .result.added: the ones not already there
+  ftask block 42 --blockers 7       # a cycle is refused: .error.details.cycles shows it`,
 	},
 	{
 		Name:    "unblock",
@@ -167,7 +165,7 @@ var commands = []Command{
 		Options: []Option{
 			{Name: "blockers", Field: "/blockers", Type: IDList, Required: true, Help: "comma-separated `ids` to remove from its blockers"},
 		},
-		Example: `  ftask unblock 42 --blockers 41 | jq .result.removed
+		Example: `  ftask unblock 42 --blockers 41   # .result.removed: the ones that were there
   ftask unblock 42 --blockers 99   # clears a dangling reference to a task that no longer exists`,
 	},
 	{
@@ -185,11 +183,11 @@ var commands = []Command{
 			{Name: "fields", Field: "/fields", Type: StringList, Help: "return only these comma-separated task `fields`, and id"},
 		},
 		Example: `  ftask list --limit 50 --fields id,title,readiness,folder
-  ftask list --folder /proj --readiness complete --limit 0 | jq .result.total   # how many are done
+  ftask list --folder /proj --readiness complete --limit 0                     # how many are done: .result.total
   ftask list --readiness blocked --fields id,title,blocking                    # what's stuck, and on what
   ftask list --readiness ready,blocked,complete --tags-all db,backend --fields id,title,readiness
-  ftask list --include-folders --limit 0 | jq -r '.result.folders[]'
-  ftask list --fields folder | jq '.result.tasks | group_by(.folder) | map({folder: .[0].folder, ids: map(.id)})'`,
+  ftask list --include-folders --limit 0                                      # every folder: .result.folders
+  ftask list --fields folder | jq -c 'if .ok then .result |= (.tasks |= (group_by(.folder) | map({folder: .[0].folder, ids: map(.id)}))) else . end'`,
 	},
 	{
 		Name:    "frontier",
@@ -204,9 +202,9 @@ var commands = []Command{
 			{Name: "fields", Field: "/fields", Type: StringList, Help: "return only these comma-separated task `fields`, and id"},
 		},
 		Example: `  ftask frontier --limit 10 --fields id,title,priority,folder   # the next ten, briefly
-  ftask frontier --limit 1 | jq '.result.tasks[0]'              # the next task, whole
-  ftask frontier --folder /proj | jq -r '.result.tasks[] | "\(.id)\t\(.title)"'
+  ftask frontier --limit 1                                     # the next task, whole
+  ftask frontier --folder /proj --limit 20 --fields id,title   # ready under /proj
   ftask frontier --tags-any urgent,today --fields id,title
-  ftask frontier --limit 0 | jq .result.total                   # how many are ready`,
+  ftask frontier --limit 0                                     # how many are ready: .result.total`,
 	},
 }

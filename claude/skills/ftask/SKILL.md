@@ -5,7 +5,7 @@ description: Track and work through the user's tasks with the ftask CLI — a lo
 
 # ftask
 
-`ftask` keeps the user's tasks as files under one root directory per machine. Tasks live in folders, can block each other, and each has a notes file. Every command prints **one line of JSON** and nothing else; use `jq` to pick it apart.
+`ftask` keeps the user's tasks as files under one root directory per machine. Tasks live in folders, can block each other, and each has a notes file. Every command prints **one line of JSON** and nothing else.
 
 ## Before the first command
 
@@ -13,7 +13,7 @@ description: Track and work through the user's tasks with the ftask CLI — a lo
 ftask info | jq -e .result.usable >/dev/null && echo ready
 ```
 
-If not ready, `ftask info | jq .result` says why. When no root is set up, tell the user and suggest `ftask init ~/tasks` (or a path they choose). **Never run `init` unasked** — it changes this machine's setup.
+If not ready, `ftask info` says why. When no root is set up, tell the user and suggest `ftask init ~/tasks` (or a path they choose). **Never run `init` unasked** — it changes this machine's setup.
 
 ## Reading output
 
@@ -53,14 +53,14 @@ Everything ftask prints lands in your context, and stays there for the rest of t
 - `--limit 0` gives just the count, in `total`.
 - For one task's full detail, `show` it.
 
-Printing the envelope as is, without `jq`, also keeps `warnings` in view.
+**Never trim a write's, `show`'s, or any small output's envelope with `jq`**: print it as is. When a big read needs `jq`, keep `ok`, `error` and `warnings` with `jq -c 'if .ok then .result |= <shape> else . end'`, where `<shape>` gives one value (`map(…)`, never `.[]`). A trimmed failure looks like success: the pipe's exit status is jq's, so the error kind and warnings just vanish.
 
 ## The daily loop
 
 ```sh
 ftask frontier --limit 10 --fields id,title,priority,folder,tags   # what's ready, in work order
-ftask show 42 | jq '.result.tasks[0]'                              # one task, whole
-ftask complete 42 | jq -c '.result | {id, completed_at, changed}'  # done
+ftask show 42                                                      # one task, whole
+ftask complete 42                                                  # done
 ```
 
 `frontier` lists open, unblocked tasks in the order to work on them: highest priority first, unprioritized after, ties oldest (lowest ID) first. Scope it with `--folder /proj` and `--recursive=false`, or by tag with `--tags-any`.
@@ -74,7 +74,8 @@ ftask list --limit 50 --fields id,title,readiness,folder           # open tasks,
 ftask list --readiness blocked --limit 20 --fields id,title,blocking   # what's stuck, and on what
 ftask list --folder /proj --tags-any urgent --limit 20 --fields id,title,readiness
 ftask list --readiness complete --limit 0                          # how many are done: .result.total
-ftask list --include-folders --limit 0 | jq -c '{folders: .result.folders, warnings}'
+ftask list --include-folders --limit 0                             # every folder: .result.folders
+ftask list --fields id,title,extra --limit 200 | jq -c 'if .ok then .result |= (.tasks |= map(select(.extra.status == "waiting"))) else . end'
 ```
 
 `list` returns open tasks (`ready` and `blocked`) unless `--readiness` says otherwise: `--readiness complete` for finished ones, `--readiness ready,blocked,complete` for all.
@@ -107,8 +108,8 @@ Rules the commands enforce:
 ftask move 42 --to /proj/api                   # a task into a folder; -p creates it
 ftask move-folder /proj/api --to /archive      # into an existing folder: /archive/api
 ftask move-folder /proj/api --to /proj/backend # otherwise to that path: a rename
-ftask delete 42 | jq .result.dependents        # the tasks it no longer blocks
-ftask delete-folder -r /proj/old | jq -c '.result | {ids, dependents}'
+ftask delete 42                                # .result.dependents: the tasks it no longer blocks
+ftask delete-folder -r /proj/old               # .result.ids: what went; .result.dependents: as for delete
 ```
 
 - Moving never changes blockers: tasks are named by ID, not location. Notes move with the task.
