@@ -17,6 +17,20 @@ import (
 // nothing: whether several copies are a warning or a conflict is the
 // caller's.
 func findCopies(tx *store.Tx, id model.ID) ([]*store.Loaded, *errs.Error) {
+	found, e := loadCopies(tx, id)
+	if e != nil {
+		return nil, e
+	}
+	if len(found) == 0 {
+		return nil, errs.NotFound(nil, []int64{int64(id)}, nil)
+	}
+	return found, nil
+}
+
+// loadCopies is findCopies without the not-found, for a caller that reports
+// id's absence together with other missing IDs: no copies and no error when
+// id has no task file.
+func loadCopies(tx *store.Tx, id model.ID) ([]*store.Loaded, *errs.Error) {
 	if e := tx.RequireWholeTree(tx.Index()); e != nil {
 		return nil, e
 	}
@@ -34,9 +48,6 @@ func findCopies(tx *store.Tx, id model.ID) ([]*store.Loaded, *errs.Error) {
 			return nil, e
 		}
 		found = append(found, ld)
-	}
-	if len(found) == 0 {
-		return nil, errs.NotFound(nil, []int64{int64(id)}, nil)
 	}
 	return found, nil
 }
@@ -154,6 +165,13 @@ func requireIDs(tx *store.Tx, found map[model.ID][]*store.Loaded) *errs.Error {
 			return e
 		}
 	}
+	warnDuplicates(tx, found)
+	return nil
+}
+
+// warnDuplicates records a duplicate-id warning for each ID found with
+// several copies.
+func warnDuplicates(tx *store.Tx, found map[model.ID][]*store.Loaded) {
 	for id, copies := range found {
 		if len(copies) > 1 {
 			locs := make([]store.Location, len(copies))
@@ -163,7 +181,6 @@ func requireIDs(tx *store.Tx, found map[model.ID][]*store.Loaded) *errs.Error {
 			duplicateID(tx, id, locs)
 		}
 	}
-	return nil
 }
 
 // findOne finds id's one task file for a write that changes it

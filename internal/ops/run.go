@@ -40,6 +40,7 @@ var runners = map[string]runner{
 	"complete":      typed(runComplete),
 	"reopen":        typed(runReopen),
 	"update":        typed(runUpdate),
+	"block":         typed(runBlock),
 }
 
 // typed adapts an operation's function over its own input type to a runner.

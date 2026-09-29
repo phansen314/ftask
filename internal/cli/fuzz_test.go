@@ -28,7 +28,7 @@ func (noFiles) Lstat(string) (fs.FileInfo, error)  { return nil, syscall.ENOENT 
 // Any command line yields help or exactly one envelope line with exit 0-2,
 // never a panic (implementation-spec.md, Generated and cross-cutting).
 func FuzzRun(f *testing.F) {
-	for _, s := range []string{"", "version", "version\x00-i\x00-", "version\x00-i\x00f.json", "init\x00~/t", "init\x00rel", "create\x00t\x00--notes-file\x00-", "create\x00t\x00--notes-file\x00f\x00--blocked-by\x001,x", "create\x00-i\x00-", "create-folder\x00-p\x00/a/b", "complete\x001", "reopen\x00-i\x00-", "update\x001\x00--tags-add\x00a,b\x00--extra-remove\x00k", "t\x001\x00x\x00--mode\x00m", "--help", "t\x00--extra\x00{"} {
+	for _, s := range []string{"", "version", "version\x00-i\x00-", "version\x00-i\x00f.json", "init\x00~/t", "init\x00rel", "create\x00t\x00--notes-file\x00-", "create\x00t\x00--notes-file\x00f\x00--blocked-by\x001,x", "create\x00-i\x00-", "create-folder\x00-p\x00/a/b", "complete\x001", "reopen\x00-i\x00-", "update\x001\x00--tags-add\x00a,b\x00--extra-remove\x00k", "block\x001\x00--blockers\x002,x", "t\x001\x00x\x00--mode\x00m", "--help", "t\x00--extra\x00{"} {
 		f.Add(s, "{}")
 	}
 	cmds := append(slices.Clone(commands), synthetic...)

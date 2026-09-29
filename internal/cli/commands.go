@@ -104,4 +104,15 @@ var commands = []Command{
   ftask update 42 --priority null --tags-remove urgent --extra-remove status
   ftask update 42 --tags-replace-all ''`,
 	},
+	{
+		Name:    "block",
+		Op:      "block",
+		Summary: "Add blockers to a task, all or nothing; a cycle is refused",
+		Args:    []Arg{{Name: "id", Field: "/id", Type: Int}},
+		Options: []Option{
+			{Name: "blockers", Field: "/blockers", Type: IDList, Required: true, Help: "comma-separated `ids` of the tasks that block it"},
+		},
+		Example: `  ftask block 42 --blockers 41,43 | jq .result.added
+  ftask block 42 --blockers 7 | jq -c 'select(.error.details.rule == "acyclic") | .error.details.cycles'`,
+	},
 }

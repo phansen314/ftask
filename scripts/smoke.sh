@@ -150,6 +150,24 @@ check "replace_all with add" 1 '.error.kind == "invalid-input"' -- update 7 --ta
 check "update: not found" 1 '.error.details.ids == [99]' -- update 99 --title x
 check "show sees the update" 0 '.result.tasks[0] | .title == "Water the plants" and .tags == []' -- show 7
 
+echo "== block"
+# Here: 1 complete; 2 open (reopened), blocked by 1; 3 complete; 4 blocked
+# by 2 and 3; 5 open; 6 complete, blocked by 5; 7 open.
+check "block 7 by 5 and 2" 0 '.result | .added == [2, 5] and .blocked_by == [2, 5]' -- block 7 --blockers 5,2
+check "7 blocked by both" 0 '.result.tasks[0] | .readiness == "blocked" and .blocking == [2, 5]' -- show 7
+check "blockers already present: nothing added" 0 '.result | .added == [] and .blocked_by == [2, 5]' -- block 7 --blockers 2,5
+check "some new, some present" 0 '.result.added == [3]' -- block 7 --blockers 2,3
+check "a complete blocker doesn't block" 0 '.result.tasks[0].blocking == [2, 5]' -- show 7
+check "direct cycle refused" 1 '.error.details | .rule == "acyclic" and .ids == [7] and .cycles == [[5, 7]]' -- block 5 --blockers 7
+check "longer cycle refused" 1 '.error.details.cycles == [[2, 4]]' -- block 2 --blockers 4
+check "through a complete task" 1 '.error.details.cycles == [[3, 7]]' -- block 3 --blockers 7
+check "every offending blocker" 1 '.error.details | .ids == [4, 7] and .cycles == [[2, 4], [2, 7]]' -- block 2 --blockers 4,7,1
+check "refused block wrote nothing" 0 '.result.tasks[0].blocked_by == [1]' -- show 2
+check "missing blockers" 1 '.error.details.ids == [98, 99]' -- block 7 --blockers 99,98
+check "missing task and blocker" 1 '.error.details.ids == [97, 99]' -- block 97 --blockers 99
+check "a task can't block itself" 1 '.error.details.problems[0].field == "/blockers/0"' -- block 7 --blockers 7
+check "--blockers is required" 2 '.error.kind == "usage"' -- block 7
+
 echo "== end state"
 check "last_id counts every task" 0 '.result.tree.last_id == 7' -- info
 
