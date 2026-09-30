@@ -125,9 +125,9 @@ func TestCompletedAtCases(t *testing.T) {
 		{"not found", "complete", func(f *fixture) { f.task("", 8, false) },
 			`not-found {"folders":[],"ids":[7],"paths":[]}`, ""},
 		{"corrupt", "complete", func(f *fixture) { f.write("tasks/7.json", "{") },
-			`corrupt {"path":"~/tasks/7.json","reason":"not-json"}`, "{"},
+			`corrupt {"path":"~/tasks/7.json","reason":"not-json","detail":"not valid JSON: unexpected end of input"}`, "{"},
 		{"invalid", "complete", func(f *fixture) { f.write("tasks/7.json", `{"schema": 1}`) },
-			`corrupt {"path":"~/tasks/7.json","reason":"invalid"}`, ""},
+			`corrupt {"path":"~/tasks/7.json","reason":"invalid","problems":[{"field":"/blocked_by","reason":"required"},{"field":"/completed_at","reason":"required"},{"field":"/created_at","reason":"required"},{"field":"/extra","reason":"required"},{"field":"/id","reason":"required"},{"field":"/priority","reason":"required"},{"field":"/tags","reason":"required"},{"field":"/title","reason":"required"},{"field":"/updated_at","reason":"required"}]}`, ""},
 		{"unsupported", "complete", func(f *fixture) { f.write("tasks/7.json", `{"schema": 2}`) },
 			`unsupported-format {"path":"~/tasks/7.json","found":2,"supported":[1]}`, `{"schema": 2}`},
 		{"unreadable", "complete", func(f *fixture) { f.task("", 7, false); f.fail(fsys.OpReadFile, "7.json", syscall.EACCES) },
@@ -135,7 +135,7 @@ func TestCompletedAtCases(t *testing.T) {
 		{"duplicate", "complete", func(f *fixture) { f.write("tasks/7.json", richTask(false)); f.task("p", 7, false) },
 			`conflict {"rule":"duplicate-id","ids":[7]}`, richTask(false)},
 		{"duplicate with a corrupt copy: corrupt first", "complete", func(f *fixture) { f.task("", 7, false); f.write("tasks/p/7.json", "{") },
-			`corrupt {"path":"~/tasks/p/7.json","reason":"not-json"}`, ""},
+			`corrupt {"path":"~/tasks/p/7.json","reason":"not-json","detail":"not valid JSON: unexpected end of input"}`, ""},
 		{"duplicate, one copy vanished", "complete", func(f *fixture) {
 			f.task("", 7, false)
 			f.task("p", 7, false)
@@ -148,7 +148,7 @@ func TestCompletedAtCases(t *testing.T) {
 		},
 			`io {"path":"~/tasks/p","code":"EACCES"}`, ""},
 		{"corrupt ftask.json", "complete", func(f *fixture) { f.task("", 7, false); f.write("tasks/ftask.json", "{") },
-			`corrupt {"path":"~/tasks/ftask.json","reason":"not-json"}`, ""},
+			`corrupt {"path":"~/tasks/ftask.json","reason":"not-json","detail":"not valid JSON: unexpected end of input"}`, ""},
 
 		// The write fails: all-or-nothing.
 		{"replace fails", "complete", func(f *fixture) {

@@ -92,7 +92,7 @@ func TestInit(t *testing.T) {
 		}, "tasks", false,
 			"attached 5 root_created=false metadata_created=false", `{"schema": 1, "last_id": 5}`, `root = "~/tasks"` + "\n"},
 		{"corrupt ftask.json", func(f *initFixture) { f.write("tasks/ftask.json", `{"schema": 1}`) }, "tasks", false,
-			`corrupt {"path":"~/tasks/ftask.json","reason":"invalid"} root_created=false metadata_created=false`, "", "<none>"},
+			`corrupt {"path":"~/tasks/ftask.json","reason":"invalid","problems":[{"field":"/last_id","reason":"required"}]} root_created=false metadata_created=false`, "", "<none>"},
 		{"ftask.json a directory", func(f *initFixture) { f.mkdir("tasks/ftask.json") }, "tasks", false,
 			`corrupt {"path":"~/tasks/ftask.json","reason":"unexpected-file"} root_created=false metadata_created=false`, "", "<none>"},
 		{"ftask.json a symlink", func(f *initFixture) {

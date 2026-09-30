@@ -3,6 +3,7 @@ package errs_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"testing"
 
 	"github.com/phansen314/ftask/internal/errs"
@@ -39,7 +40,11 @@ func TestErrorsMatchSchema(t *testing.T) {
 		{"conflict duplicate-id", errs.Conflict(errs.RuleDuplicateID, []int64{4})},
 		{"acyclic", errs.Acyclic([]int64{3, 5}, [][]int64{{1, 3}, {1, 5, 2}})},
 		{"busy", errs.Busy()},
-		{"corrupt", errs.Corrupt("/r/5.json", errs.CorruptInvalid)},
+		{"corrupt", errs.Corrupt("/r/5.json", errs.CorruptUnexpectedFile)},
+		{"corrupt problems", errs.CorruptBy("/r/5.json", errs.CorruptCause{Reason: errs.CorruptInvalid, Problems: []errs.Problem{{Field: "/updated_at", Reason: "required"}}})},
+		{"corrupt problems truncated", errs.CorruptBy("/r/5.json", errs.CorruptCause{Reason: errs.CorruptInvalid, Problems: manyProblems(25)})},
+		{"corrupt not-json", errs.CorruptBy("/r/5.json", errs.CorruptCause{Reason: errs.CorruptNotJSON, Detail: "empty"})},
+		{"corrupt config", errs.CorruptBy("/c/config.toml", errs.CorruptCause{Reason: errs.CorruptInvalid, Detail: "line 1: no closing quote"})},
 		{"corrupt partial", errs.Corrupt("/r/5.json", errs.CorruptUnexpectedFile).WithPartial(map[string]int{"id": 5})},
 		{"io", errs.IO("/r/5.json", "ENOSPC")},
 		{"unsupported-format", errs.UnsupportedFormat("/r/ftask.json", 2, []int64{1})},
@@ -55,6 +60,41 @@ func TestErrorsMatchSchema(t *testing.T) {
 				t.Errorf("%s: details fail usage-details: %s", tc.name, f)
 			}
 		}
+	}
+}
+
+func manyProblems(n int) []errs.Problem {
+	ps := make([]errs.Problem, n)
+	for i := range ps {
+		ps[i] = errs.Problem{Field: fmt.Sprintf("/k%02d", i), Reason: "unknown field"}
+	}
+	return ps
+}
+
+// The corrupt schema rejects details that say too little or mix the shapes.
+func TestCorruptSchemaRejects(t *testing.T) {
+	const pr = `[{"field":"/x","reason":"r"}]`
+	for _, details := range []string{
+		`{"path":"/p","reason":"invalid"}`,
+		`{"path":"/p","reason":"not-json"}`,
+		`{"path":"/p","reason":"not-json","problems":` + pr + `,"detail":"d"}`,
+		`{"path":"/p","reason":"invalid","problems":` + pr + `,"detail":"d"}`,
+		`{"path":"/p","reason":"invalid","detail":"d","problems_truncated":true}`,
+		`{"path":"/p","reason":"invalid","problems":` + pr + `,"problems_truncated":false}`,
+		`{"path":"/p","reason":"invalid","problems":[]}`,
+		`{"path":"/p","reason":"invalid","detail":""}`,
+		`{"path":"/p","reason":"unexpected-file","detail":"d"}`,
+		`{"path":"/p","reason":"unexpected-file","problems":` + pr + `}`,
+	} {
+		data := []byte(`{"kind":"corrupt","message":"m","details":` + details + `}`)
+		if ok, _ := schematest.Check(t, "error", data); ok {
+			t.Errorf("error accepts %s", details)
+		}
+	}
+	ps := encode(t, manyProblems(21))
+	data := []byte(`{"kind":"corrupt","message":"m","details":{"path":"/p","reason":"invalid","problems":` + string(bytes.TrimSpace(ps)) + `}}`)
+	if ok, _ := schematest.Check(t, "error", data); ok {
+		t.Errorf("error accepts 21 problems")
 	}
 }
 

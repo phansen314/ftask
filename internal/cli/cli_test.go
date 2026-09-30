@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -57,11 +58,14 @@ func (r result) usageProblem(t *testing.T) (string, string) {
 
 func run(t *testing.T, cmds []Command, stdin string, args ...string) result {
 	t.Helper()
-	env, out, _ := testEnv(stdin)
-	b, code := execute(cmds, args, env)
-	code = deliver(env, b, code)
+	env, out, errOut := testEnv(stdin)
+	b, code, note := execute(cmds, args, env)
+	code = deliver(env, b, code, note)
 	r := result{code: code, raw: out.String()}
 	if !strings.HasPrefix(r.raw, "{") {
+		if errOut.Len() != 0 {
+			t.Errorf("%q: help with stderr %q", args, errOut)
+		}
 		return r // help text
 	}
 	if strings.Count(r.raw, "\n") != 1 || !strings.HasSuffix(r.raw, "\n") {
@@ -73,6 +77,7 @@ func run(t *testing.T, cmds []Command, stdin string, args ...string) result {
 	if err := json.Unmarshal(out.Bytes(), &r.envelope); err != nil {
 		t.Fatal(err)
 	}
+	wantNote(t, r, errOut.String())
 	if r.kind() == "usage" {
 		d, _ := json.Marshal(r.envelope["error"].(map[string]any)["details"])
 		if ok, f := schematest.Check(t, "usage-details", d); !ok {
@@ -80,6 +85,50 @@ func run(t *testing.T, cmds []Command, stdin string, args ...string) result {
 		}
 	}
 	return r
+}
+
+// wantNote checks stderr against the delivered envelope (cli-spec.md,
+// Output): one line naming a failure's kind and message, or counting
+// warnings; nothing for a clean success.
+func wantNote(t *testing.T, r result, stderr string) {
+	t.Helper()
+	var want string
+	switch n := len(r.envelope["warnings"].([]any)); {
+	case r.envelope["ok"] != true:
+		e := r.envelope["error"].(map[string]any)
+		want = oneLine(fmt.Sprintf("ftask: %s: %s", e["kind"], e["message"])) + "\n"
+	case n == 1:
+		want = "ftask: 1 warning (see .warnings in the output)\n"
+	case n > 1:
+		want = fmt.Sprintf("ftask: %d warnings (see .warnings in the output)\n", n)
+	}
+	if stderr != want {
+		t.Errorf("stderr %q, want %q", stderr, want)
+	}
+}
+
+// A failure's note is its error line alone, even with warnings; no command
+// yields that today, but an operation may.
+func TestFailureNoteIgnoresWarnings(t *testing.T) {
+	env := ops.Envelope{Error: errs.Busy(), Warnings: []errs.Warning{errs.CorruptFile("/r/1.json", 1), errs.CorruptFile("/r/2.json", 2)}}
+	_, code, note := envelopeLine(env)
+	if want := "ftask: busy: another write holds the write lock; retry"; code != ExitError || note != want {
+		t.Errorf("exit %d, note %q; want 1, %q", code, note, want)
+	}
+}
+
+func TestOneLine(t *testing.T) {
+	for in, want := range map[string]string{
+		"plain":                       "plain",
+		`at "/a": x \ y`:              `at "/a": x \ y`,
+		"/home/a\nb/tasks: é 😀":       `/home/a\nb/tasks: é 😀`,
+		"a\r\tb\x1b[31mc\x7fd\u0085e": `a\r\tb\x1b[31mc\x7fd\u0085e`,
+		"a\u2028b\u2029c":             `a\u2028b\u2029c`,
+	} {
+		if got := oneLine(in); got != want {
+			t.Errorf("oneLine(%q) = %q, want %q", in, got, want)
+		}
+	}
 }
 
 func TestVersion(t *testing.T) {
@@ -354,24 +403,50 @@ func TestShape(t *testing.T) {
 
 type failWriter struct{ writeErr, closeErr error }
 
+// stderrWriter records what is written, and fails every write when err is
+// set.
+type stderrWriter struct {
+	buf bytes.Buffer
+	err error
+}
+
+func (w *stderrWriter) Write(p []byte) (int, error) {
+	if w.err != nil {
+		return 0, w.err
+	}
+	return w.buf.Write(p)
+}
+
 func (w failWriter) Write(p []byte) (int, error) { return len(p), w.writeErr }
 func (w failWriter) Close() error                { return w.closeErr }
 
 func TestDeliver(t *testing.T) {
+	const note = "ftask: busy: another write holds the write lock; retry"
 	for _, tc := range []struct {
-		name string
-		w    failWriter
-		want int
+		name      string
+		w         failWriter
+		stderrErr error
+		want      int
+		stderr    string // "notice" for the not-delivered notice
 	}{
-		{"ok", failWriter{}, ExitUsage},
-		{"write fails", failWriter{writeErr: errors.New("EPIPE")}, ExitNotDelivered},
-		{"close fails", failWriter{closeErr: errors.New("EIO")}, ExitNotDelivered},
+		{"ok", failWriter{}, nil, ExitUsage, note + "\n"},
+		{"write fails", failWriter{writeErr: errors.New("EPIPE")}, nil, ExitNotDelivered, "notice"},
+		{"close fails", failWriter{closeErr: errors.New("EIO")}, nil, ExitNotDelivered, "notice"},
+		{"stderr fails", failWriter{}, errors.New("EPIPE"), ExitUsage, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			var stderr bytes.Buffer
-			got := deliver(Env{Stdout: tc.w, Stderr: &stderr}, []byte("x\n"), ExitUsage)
-			if got != tc.want || (got == ExitNotDelivered) != strings.HasPrefix(stderr.String(), "ftask: result not delivered: ") {
-				t.Errorf("exit %d, stderr %q", got, stderr.String())
+			stderr := &stderrWriter{err: tc.stderrErr}
+			got := deliver(Env{Stdout: tc.w, Stderr: stderr}, []byte("x\n"), ExitUsage, note)
+			s := stderr.buf.String()
+			if tc.stderr == "notice" {
+				if !strings.HasPrefix(s, "ftask: result not delivered: ") || strings.Count(s, "\n") != 1 {
+					t.Errorf("stderr %q, want only the notice", s)
+				}
+			} else if s != tc.stderr {
+				t.Errorf("stderr %q, want %q", s, tc.stderr)
+			}
+			if got != tc.want {
+				t.Errorf("exit %d, want %d", got, tc.want)
 			}
 		})
 	}

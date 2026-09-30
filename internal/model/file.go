@@ -24,8 +24,8 @@ const (
 // FileResult is a checked file's status. Versioned reports whether the file
 // passed step 1 (parseable and versioned); Found is then its schema version,
 // whatever the final Status — info reports it even for a file corrupt at
-// step 3. Problems says what made it corrupt; it is for diagnostics only,
-// since corrupt reports no detail beyond its reason. SchemaProblems are those
+// step 3. Problems says what made it corrupt, each at a JSON Pointer into
+// the file; the corrupt error reports them. SchemaProblems are those
 // of a file corrupt at step 3 that its published schema also finds: not
 // repeated keys, nor the rules beyond the schema (see Problems.SchemaList).
 // The integer-literal rule is the exception: its problems are included,

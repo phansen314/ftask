@@ -20,8 +20,8 @@ const (
 	Vanished
 	// Unreadable: the file could not be read; Loaded.Err holds the OS error.
 	Unreadable
-	// Corrupt: the file failed File validity step 1 or 3; Loaded.Reason says
-	// how.
+	// Corrupt: the file failed File validity step 1 or 3; Loaded.Cause says
+	// how, and what is wrong.
 	Corrupt
 	// Unsupported: the file's schema is not the supported version;
 	// Loaded.Found holds it.
@@ -30,12 +30,12 @@ const (
 
 // Loaded is a loaded task file: usable, or unusable with its reason.
 type Loaded struct {
-	Loc    Location
-	State  LoadState
-	Task   model.TaskFile
-	Err    error
-	Reason errs.CorruptReason
-	Found  int64
+	Loc   Location
+	State LoadState
+	Task  model.TaskFile
+	Err   error
+	Cause errs.CorruptCause
+	Found int64
 }
 
 // Load reads and checks the task file at l, once per operation: later calls
@@ -61,7 +61,7 @@ func (tx *Tx) load(l Location) *Loaded {
 	}
 	obj, repeated, err := jsonio.ParseObject(data)
 	if err != nil {
-		ld.State, ld.Reason = Corrupt, errs.CorruptNotJSON
+		ld.State, ld.Cause = Corrupt, notJSON(err)
 		return ld
 	}
 	t, res := model.DecodeTaskFile(obj, repeated, l.ID)
@@ -71,9 +71,19 @@ func (tx *Tx) load(l Location) *Loaded {
 	case model.FileUnsupported:
 		ld.State, ld.Found = Unsupported, res.Found
 	default:
-		ld.State, ld.Reason = Corrupt, errs.CorruptInvalid
+		ld.State, ld.Cause = Corrupt, invalid(res)
 	}
 	return ld
+}
+
+// notJSON is the cause of a file jsonio could not read, err its ReadError.
+func notJSON(err error) errs.CorruptCause {
+	return errs.CorruptCause{Reason: errs.CorruptNotJSON, Detail: err.Error()}
+}
+
+// invalid is the cause of a file that failed File validity (res).
+func invalid(res model.FileResult) errs.CorruptCause {
+	return errs.CorruptCause{Reason: errs.CorruptInvalid, Problems: res.Problems}
 }
 
 // Needed is the error a needed file's problem is (operations.md,
@@ -86,7 +96,7 @@ func (tx *Tx) Needed(ld *Loaded) *errs.Error {
 	case Unreadable:
 		return tx.OSError(ld.Loc.Rel(), ld.Err)
 	case Corrupt:
-		return errs.Corrupt(p, ld.Reason)
+		return errs.CorruptBy(p, ld.Cause)
 	case Unsupported:
 		return errs.UnsupportedFormat(p, ld.Found, []int64{model.TaskSchema})
 	}

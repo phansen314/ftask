@@ -88,7 +88,7 @@ func TestUnblockCases(t *testing.T) {
 		{"not found", `{"id": 1, "blockers": [2]}`, func(f *fixture) { f.task("", 2, false) },
 			`not-found {"folders":[],"ids":[1],"paths":[]}`, true},
 		{"corrupt", `{"id": 1, "blockers": [2]}`, func(f *fixture) { f.write("tasks/1.json", "{") },
-			`corrupt {"path":"~/tasks/1.json","reason":"not-json"}`, true},
+			`corrupt {"path":"~/tasks/1.json","reason":"not-json","detail":"not valid JSON: unexpected end of input"}`, true},
 		{"duplicate", `{"id": 1, "blockers": [2]}`, func(f *fixture) { f.task("", 1, false, 2); f.task("p", 1, false, 2) },
 			`conflict {"rule":"duplicate-id","ids":[1]}`, true},
 		{"unlistable folder", `{"id": 1, "blockers": [2]}`, func(f *fixture) {

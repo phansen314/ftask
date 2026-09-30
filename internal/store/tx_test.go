@@ -70,11 +70,17 @@ func TestRootStates(t *testing.T) {
 			must(t, os.Mkdir(cfgPath(f), 0o755))
 		}, errs.KindIO, func(f *fixture) any { return errs.IODetails{Path: cfgPath(f), Code: "EISDIR"} }},
 		{"corrupt config", func(f *fixture) { f.write("cfg/"+ConfigName, "root = /x\n") },
-			errs.KindCorrupt, func(f *fixture) any { return errs.CorruptDetails{Path: cfgPath(f), Reason: errs.CorruptInvalid} }},
+			errs.KindCorrupt, func(f *fixture) any {
+				return errs.CorruptDetails{Path: cfgPath(f), Reason: errs.CorruptInvalid, Detail: "line 1: root must be a double-quoted string"}
+			}},
 		{"illegal root form", func(f *fixture) { f.write("cfg/"+ConfigName, "root = \"tasks\"\n") },
-			errs.KindCorrupt, func(f *fixture) any { return errs.CorruptDetails{Path: cfgPath(f), Reason: errs.CorruptInvalid} }},
+			errs.KindCorrupt, func(f *fixture) any {
+				return errs.CorruptDetails{Path: cfgPath(f), Reason: errs.CorruptInvalid, Detail: "root must be an absolute path or begin with ~/"}
+			}},
 		{"root with ..", func(f *fixture) { f.write("cfg/"+ConfigName, "root = \"/a/../tasks\"\n") },
-			errs.KindCorrupt, func(f *fixture) any { return errs.CorruptDetails{Path: cfgPath(f), Reason: errs.CorruptInvalid} }},
+			errs.KindCorrupt, func(f *fixture) any {
+				return errs.CorruptDetails{Path: cfgPath(f), Reason: errs.CorruptInvalid, Detail: "root must not contain a .. segment"}
+			}},
 		{"~/ root without home", func(f *fixture) {
 			f.write("cfg/"+ConfigName, "root = \"~/tasks\"\n")
 			f.env.Home = ""
@@ -100,11 +106,18 @@ func TestRootStates(t *testing.T) {
 			must(t, syscall.Mkfifo(meta(f), 0o644))
 		}, errs.KindCorrupt, func(f *fixture) any { return errs.CorruptDetails{Path: meta(f), Reason: errs.CorruptUnexpectedFile} }},
 		{"ftask.json not JSON", func(f *fixture) { f.write("tasks/"+MetaName, "{") },
-			errs.KindCorrupt, func(f *fixture) any { return errs.CorruptDetails{Path: meta(f), Reason: errs.CorruptNotJSON} }},
+			errs.KindCorrupt, func(f *fixture) any {
+				return errs.CorruptDetails{Path: meta(f), Reason: errs.CorruptNotJSON, Detail: "not valid JSON: unexpected end of input"}
+			}},
 		{"ftask.json empty", func(f *fixture) { f.write("tasks/"+MetaName, "") },
-			errs.KindCorrupt, func(f *fixture) any { return errs.CorruptDetails{Path: meta(f), Reason: errs.CorruptNotJSON} }},
+			errs.KindCorrupt, func(f *fixture) any {
+				return errs.CorruptDetails{Path: meta(f), Reason: errs.CorruptNotJSON, Detail: "empty"}
+			}},
 		{"ftask.json invalid", func(f *fixture) { f.write("tasks/"+MetaName, `{"schema": 1, "last_id": -1}`) },
-			errs.KindCorrupt, func(f *fixture) any { return errs.CorruptDetails{Path: meta(f), Reason: errs.CorruptInvalid} }},
+			errs.KindCorrupt, func(f *fixture) any {
+				return errs.CorruptDetails{Path: meta(f), Reason: errs.CorruptInvalid,
+					Problems: []errs.Problem{{Field: "/last_id", Reason: "must be between 0 and 999999999999999"}}}
+			}},
 		{"ftask.json unsupported", func(f *fixture) { f.write("tasks/"+MetaName, `{"schema": 2, "whatever": true}`) },
 			errs.KindUnsupportedFormat, func(f *fixture) any {
 				return errs.UnsupportedFormatDetails{Path: meta(f), Found: 2, Supported: []int64{1}}
@@ -151,7 +164,7 @@ func TestWriteBusy(t *testing.T) {
 	// Root states come before busy.
 	f.write("tasks/"+MetaName, "{")
 	wantErr(t, Write(f.env, nil, nil), errs.KindCorrupt,
-		errs.CorruptDetails{Path: f.root + "/" + MetaName, Reason: errs.CorruptNotJSON})
+		errs.CorruptDetails{Path: f.root + "/" + MetaName, Reason: errs.CorruptNotJSON, Detail: "not valid JSON: unexpected end of input"})
 }
 
 // The lock is held while fn runs, and released when it returns.

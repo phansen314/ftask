@@ -39,12 +39,18 @@ func FuzzRun(f *testing.F) {
 		}
 		env, _, _ := testEnv(stdin)
 		env.Ops.FS = noFiles{}
-		out, code := execute(cmds, args, env)
+		out, code, note := execute(cmds, args, env)
 		if code == ExitOK && !bytes.HasPrefix(out, []byte("{")) {
+			if note != "" {
+				t.Fatalf("%q: help with note %q", args, note)
+			}
 			return // help or completion
 		}
 		if code < ExitOK || code > ExitUsage || !bytes.HasSuffix(out, []byte("\n")) || bytes.Count(out, []byte("\n")) != 1 {
 			t.Fatalf("%q: exit %d, output %q", args, code, out)
+		}
+		if (code != ExitOK && note == "") || strings.ContainsFunc(note, isLineControl) {
+			t.Fatalf("%q: exit %d, note %q", args, code, note)
 		}
 	})
 }

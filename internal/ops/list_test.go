@@ -215,7 +215,7 @@ func TestListCases(t *testing.T) {
 				f.t.Fatal(err)
 			}
 		}, `corrupt {"path":"~/tasks/a","reason":"unexpected-file"}`},
-		{"corrupt ftask.json", `{}`, func(f *fixture) { f.write("tasks/ftask.json", "{") }, `corrupt {"path":"~/tasks/ftask.json","reason":"not-json"}`},
+		{"corrupt ftask.json", `{}`, func(f *fixture) { f.write("tasks/ftask.json", "{") }, `corrupt {"path":"~/tasks/ftask.json","reason":"not-json","detail":"not valid JSON: unexpected end of input"}`},
 		{"bad input", `{"recursive": "no"}`, nil, `invalid-input {"problems":[{"field":"/recursive","reason":"expected a boolean"}]}`},
 		{"include_complete is gone", `{"include_complete": true}`, nil, `invalid-input {"problems":[{"field":"/include_complete","reason":"unknown field"}]}`},
 		{"bad readiness", `{"readiness": ["ready", "done", "ready"]}`, nil,

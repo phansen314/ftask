@@ -71,15 +71,22 @@ func InvalidInput(problems []Problem) *Error {
 	if len(problems) == 0 {
 		return Internal("invalid-input with no problems")
 	}
-	ps := slices.Clone(problems)
-	slices.SortFunc(ps, func(a, b Problem) int {
-		return cmp.Or(strings.Compare(a.Field, b.Field), strings.Compare(a.Reason, b.Reason))
-	})
+	ps := sortProblems(problems)
 	msg := fmt.Sprintf("%d invalid inputs", len(ps))
 	if len(ps) == 1 {
 		msg = fmt.Sprintf("invalid input at %q: %s", ps[0].Field, ps[0].Reason)
 	}
 	return &Error{Kind: KindInvalidInput, Message: msg, Details: InvalidInputDetails{Problems: ps}}
+}
+
+// sortProblems returns a sorted copy of problems: by field, then by reason,
+// both compared byte by byte.
+func sortProblems(problems []Problem) []Problem {
+	ps := slices.Clone(problems)
+	slices.SortFunc(ps, func(a, b Problem) int {
+		return cmp.Or(strings.Compare(a.Field, b.Field), strings.Compare(a.Reason, b.Reason))
+	})
+	return ps
 }
 
 type EnvironmentDetails struct {
@@ -235,17 +242,59 @@ const (
 	CorruptUnexpectedFile CorruptReason = "unexpected-file"
 )
 
-type CorruptDetails struct {
-	Path   string        `json:"path"`
-	Reason CorruptReason `json:"reason"`
+// CorruptCause is why a file is corrupt, with what is wrong: Problems for an
+// invalid JSON file, each at a JSON Pointer into the file; Detail for a file
+// that is not-json, or for an invalid config, which is not JSON.
+type CorruptCause struct {
+	Reason   CorruptReason
+	Problems []Problem
+	Detail   string
 }
 
+type CorruptDetails struct {
+	Path              string        `json:"path"`
+	Reason            CorruptReason `json:"reason"`
+	Problems          []Problem     `json:"problems,omitempty"`
+	ProblemsTruncated bool          `json:"problems_truncated,omitempty"`
+	Detail            string        `json:"detail,omitempty"`
+}
+
+// MaxCorruptProblems is how many problems a corrupt error lists at most, so
+// a garbage file cannot produce a huge error.
+const MaxCorruptProblems = 20
+
+// Corrupt reports a file corrupt for a reason that carries nothing more:
+// unexpected-file.
 func Corrupt(path string, reason CorruptReason) *Error {
-	return &Error{
-		Kind:    KindCorrupt,
-		Message: fmt.Sprintf("%s: corrupt (%s)", path, reason),
-		Details: CorruptDetails{Path: path, Reason: reason},
+	return CorruptBy(path, CorruptCause{Reason: reason})
+}
+
+// CorruptBy reports a file corrupt for cause c. Problems are sorted as
+// InvalidInput sorts them, then cut to the first MaxCorruptProblems; the
+// message names the first, or the detail. A not-json or invalid cause with
+// nothing to say what is wrong is a bug, reported as internal.
+func CorruptBy(path string, c CorruptCause) *Error {
+	d := CorruptDetails{Path: path, Reason: c.Reason, Detail: c.Detail}
+	var msg string
+	switch {
+	case len(c.Problems) > 0:
+		ps := sortProblems(c.Problems)
+		msg = fmt.Sprintf("%s: corrupt: at %q: %s", path, ps[0].Field, ps[0].Reason)
+		if len(ps) > 1 {
+			msg += fmt.Sprintf(" (and %d more)", len(ps)-1)
+		}
+		if len(ps) > MaxCorruptProblems {
+			ps, d.ProblemsTruncated = ps[:MaxCorruptProblems], true
+		}
+		d.Problems = ps
+	case c.Detail != "":
+		msg = fmt.Sprintf("%s: corrupt: %s", path, c.Detail)
+	case c.Reason == CorruptUnexpectedFile:
+		msg = fmt.Sprintf("%s: corrupt (%s)", path, c.Reason)
+	default:
+		return Internal(fmt.Sprintf("%s: corrupt (%s) with nothing to say why", path, c.Reason))
 	}
+	return &Error{Kind: KindCorrupt, Message: msg, Details: d}
 }
 
 type IODetails struct {

@@ -302,7 +302,7 @@ func TestMoveCases(t *testing.T) {
 		{"not-found before an unusable task", `{"id": 5, "to": "/p"}`, func(f *fixture) { f.write("tasks/5.json", "{") },
 			`not-found {"folders":["/p"],"ids":[],"paths":[]}`, "5.json"},
 		{"unusable", `{"id": 5, "to": "/p"}`, func(f *fixture) { f.write("tasks/5.json", "{"); f.write("tasks/p/.keep", "") },
-			`corrupt {"path":"~/tasks/5.json","reason":"not-json"}`, "5.json p/ p/.keep"},
+			`corrupt {"path":"~/tasks/5.json","reason":"not-json","detail":"not valid JSON: unexpected end of input"}`, "5.json p/ p/.keep"},
 		{"to is a file", `{"id": 5, "to": "/p"}`, func(f *fixture) { f.task("", 5, false); f.write("tasks/p", "") },
 			`corrupt {"path":"~/tasks/p","reason":"unexpected-file"}`, "5.json p"},
 		{"duplicated", `{"id": 5, "to": "/p"}`, func(f *fixture) { f.task("", 5, false); f.task("p", 5, false) },

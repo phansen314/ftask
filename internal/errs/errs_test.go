@@ -3,6 +3,7 @@ package errs
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"testing"
 )
 
@@ -59,6 +60,57 @@ func TestDetailsShapes(t *testing.T) {
 	} {
 		if got := details(t, tc.e); got != tc.want {
 			t.Errorf("%s: got %s, want %s", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestCorruptBy(t *testing.T) {
+	many := make([]Problem, 25)
+	for i := range many {
+		many[len(many)-1-i] = Problem{Field: fmt.Sprintf("/k%02d", i), Reason: "unknown field"} // reversed: sorting picks the first 20
+	}
+	for _, tc := range []struct {
+		name         string
+		cause        CorruptCause
+		details, msg string
+	}{
+		{"one problem", CorruptCause{Reason: CorruptInvalid, Problems: []Problem{{Field: "/updated_at", Reason: "required"}}},
+			`{"path":"/r/1.json","reason":"invalid","problems":[{"field":"/updated_at","reason":"required"}]}`,
+			`/r/1.json: corrupt: at "/updated_at": required`},
+		{"sorted", CorruptCause{Reason: CorruptInvalid, Problems: []Problem{{Field: "/title", Reason: "b"}, {Field: "/id", Reason: "z"}, {Field: "/title", Reason: "a"}}},
+			`{"path":"/r/1.json","reason":"invalid","problems":[{"field":"/id","reason":"z"},{"field":"/title","reason":"a"},{"field":"/title","reason":"b"}]}`,
+			`/r/1.json: corrupt: at "/id": z (and 2 more)`},
+		{"field quoted", CorruptCause{Reason: CorruptInvalid, Problems: []Problem{{Field: "/a\nb", Reason: "repeated key"}}},
+			`{"path":"/r/1.json","reason":"invalid","problems":[{"field":"/a\nb","reason":"repeated key"}]}`,
+			`/r/1.json: corrupt: at "/a\nb": repeated key`},
+		{"detail", CorruptCause{Reason: CorruptNotJSON, Detail: "empty"},
+			`{"path":"/r/1.json","reason":"not-json","detail":"empty"}`, `/r/1.json: corrupt: empty`},
+		{"unexpected-file", CorruptCause{Reason: CorruptUnexpectedFile},
+			`{"path":"/r/1.json","reason":"unexpected-file"}`, `/r/1.json: corrupt (unexpected-file)`},
+	} {
+		e := CorruptBy("/r/1.json", tc.cause)
+		if got := details(t, e); got != tc.details {
+			t.Errorf("%s: details %s, want %s", tc.name, got, tc.details)
+		}
+		if e.Message != tc.msg {
+			t.Errorf("%s: message %q, want %q", tc.name, e.Message, tc.msg)
+		}
+	}
+
+	e := CorruptBy("/r/1.json", CorruptCause{Reason: CorruptInvalid, Problems: many})
+	d := e.Details.(CorruptDetails)
+	if len(d.Problems) != MaxCorruptProblems || !d.ProblemsTruncated || d.Problems[0].Field != "/k00" || d.Problems[19].Field != "/k19" {
+		t.Errorf("25 problems: got %d, truncated %v, %v", len(d.Problems), d.ProblemsTruncated, d.Problems)
+	}
+	if want := `/r/1.json: corrupt: at "/k00": unknown field (and 24 more)`; e.Message != want {
+		t.Errorf("25 problems: message %q, want %q", e.Message, want)
+	}
+	if d := CorruptBy("/r/1.json", CorruptCause{Reason: CorruptInvalid, Problems: many[:20]}).Details.(CorruptDetails); d.ProblemsTruncated {
+		t.Errorf("20 problems: truncated")
+	}
+	for _, r := range []CorruptReason{CorruptInvalid, CorruptNotJSON} {
+		if e := CorruptBy("/r/1.json", CorruptCause{Reason: r}); e.Kind != KindInternal {
+			t.Errorf("%s with no cause: got %s", r, e.Kind)
 		}
 	}
 }

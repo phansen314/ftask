@@ -106,7 +106,7 @@ func TestBlockCases(t *testing.T) {
 
 		// id's own copies come first.
 		{"corrupt id before a missing blocker", `{"id": 1, "blockers": [9]}`, func(f *fixture) { f.write("tasks/1.json", "{") },
-			`corrupt {"path":"~/tasks/1.json","reason":"not-json"}`},
+			`corrupt {"path":"~/tasks/1.json","reason":"not-json","detail":"not valid JSON: unexpected end of input"}`},
 		{"duplicate id", `{"id": 1, "blockers": [2]}`, func(f *fixture) { f.task("", 1, false); f.task("p", 1, false); f.task("", 2, false) },
 			`conflict {"rule":"duplicate-id","ids":[1]}`},
 		{"missing blocker before duplicate id", `{"id": 1, "blockers": [9]}`, func(f *fixture) { f.task("", 1, false); f.task("p", 1, false) },
@@ -118,13 +118,13 @@ func TestBlockCases(t *testing.T) {
 			f.task("p", 1, false)
 			f.task("", 2, false, 3)
 			f.write("tasks/3.json", "{")
-		}, `corrupt {"path":"~/tasks/3.json","reason":"not-json"}`},
+		}, `corrupt {"path":"~/tasks/3.json","reason":"not-json","detail":"not valid JSON: unexpected end of input"}`},
 
 		// Blockers' own files.
 		{"duplicated blocker: a warning", `{"id": 1, "blockers": [2]}`, func(f *fixture) { f.task("", 1, false); f.task("", 2, false); f.task("p", 2, true) },
 			"blocked_by [2] added [2]; duplicate-id [2] [~/tasks/2.json ~/tasks/p/2.json]"},
 		{"corrupt blocker", `{"id": 1, "blockers": [2]}`, func(f *fixture) { f.task("", 1, false); f.write("tasks/2.json", "{") },
-			`corrupt {"path":"~/tasks/2.json","reason":"not-json"}`},
+			`corrupt {"path":"~/tasks/2.json","reason":"not-json","detail":"not valid JSON: unexpected end of input"}`},
 		{"unsupported blocker", `{"id": 1, "blockers": [2]}`, func(f *fixture) { f.task("", 1, false); f.write("tasks/2.json", `{"schema": 2}`) },
 			`unsupported-format {"path":"~/tasks/2.json","found":2,"supported":[1]}`},
 		{"not-found before a corrupt blocker", `{"id": 1, "blockers": [2, 9]}`, func(f *fixture) { f.task("", 1, false); f.write("tasks/2.json", "{") },
@@ -184,13 +184,13 @@ func TestBlockCases(t *testing.T) {
 			f.task("", 1, false)
 			f.task("", 2, false, 1, 3)
 			f.write("tasks/z/3.json", "{")
-		}, `corrupt {"path":"~/tasks/z/3.json","reason":"not-json"}`},
+		}, `corrupt {"path":"~/tasks/z/3.json","reason":"not-json","detail":"not valid JSON: unexpected end of input"}`},
 		{"first unusable in tree order", `{"id": 1, "blockers": [2]}`, func(f *fixture) {
 			f.task("", 1, false)
 			f.task("", 2, false, 3, 4)
 			f.write("tasks/z/3.json", "{")
 			f.write("tasks/a/4.json", "{")
-		}, `corrupt {"path":"~/tasks/a/4.json","reason":"not-json"}`},
+		}, `corrupt {"path":"~/tasks/a/4.json","reason":"not-json","detail":"not valid JSON: unexpected end of input"}`},
 		{"unreachable corrupt file ignored", `{"id": 1, "blockers": [2]}`, func(f *fixture) { f.task("", 1, false); f.task("", 2, false); f.write("tasks/3.json", "{") },
 			"blocked_by [2] added [2]"},
 		{"id is never expanded", `{"id": 1, "blockers": [2]}`, func(f *fixture) { f.task("", 1, false, 3); f.task("", 2, false); f.write("tasks/3.json", "{") },

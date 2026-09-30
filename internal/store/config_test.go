@@ -43,48 +43,49 @@ func TestParseConfig(t *testing.T) {
 		"# comment with\ttab\nroot = \"/a\"":   "/a",
 	}
 	for in, want := range valid {
-		got, ok := parseConfig([]byte(in))
-		if !ok || got != want {
-			t.Errorf("parseConfig(%q) = %q, %v; want %q", in, got, ok, want)
+		got, err := parseConfig([]byte(in))
+		if err != nil || got != want {
+			t.Errorf("parseConfig(%q) = %q, %v; want %q", in, got, err, want)
 		}
 	}
-	invalid := []string{
-		"",
-		"# only a comment\n",
-		"\xEF\xBB\xBFroot = \"/a\"",
-		"root = \"/\xff\"",
-		"root = \"/a\"\nroot = \"/b\"",
-		"other = \"/a\"",
-		"root = \"/a\"\nother = 1",
-		"[table]\nroot = \"/a\"",
-		`"root" = "/a"`,
-		`roots = "/a"`,
-		`root = '/a'`,
-		`root = """/a"""`,
-		`root = /a`,
-		`root "/a"`,
-		`root = "/a`,
-		`root = "/a" x`,
-		`root = "/a" "b"`,
-		`root = "/a\b"`,
-		`root = "/a\r"`,
-		`root = "/a\x"`,
-		`root = "/a\uD800"`,
-		`root = "/a\U00110000"`,
-		`root = "/a\u00e"`,
-		`root = "/a\u+0e9"`,
-		`root = "/a\`,
-		"root = \"/a\x01\"",
-		"root = \"/a\x7f\"",
-		"root = \"/a\rb\"",
-		"root = \"/a\" # c\x01",
-		"# c\x01\nroot = \"/a\"",
-		"root = \"/a\"\r",
-		"\rroot = \"/a\"",
+	invalid := map[string]string{
+		"":                             `no root = "..." line`,
+		"# only a comment\n":           `no root = "..." line`,
+		"\xEF\xBB\xBFroot = \"/a\"":    "starts with a byte-order mark",
+		"root = \"/\xff\"":             "not valid UTF-8",
+		"root = \"/a\"\nroot = \"/b\"": "line 2: root repeated (first on line 1)",
+		"other = \"/a\"":               `line 1: expected root = "..."`,
+		"root = \"/a\"\nother = 1":     `line 2: expected root = "..."`,
+		"[table]\nroot = \"/a\"":       `line 1: expected root = "..."`,
+		`"root" = "/a"`:                `line 1: expected root = "..."`,
+		`roots = "/a"`:                 `line 1: expected root = "..."`,
+		`root = '/a'`:                  "line 1: root must be a double-quoted string",
+		`root = """/a"""`:              "line 1: unexpected text after the string",
+		`root = /a`:                    "line 1: root must be a double-quoted string",
+		`root "/a"`:                    `line 1: expected root = "..."`,
+		`root = "/a`:                   "line 1: no closing quote",
+		`root = "/a" x`:                "line 1: unexpected text after the string",
+		`root = "/a" "b"`:              "line 1: unexpected text after the string",
+		`root = "/a\b"`:                "line 1: invalid escape in the string",
+		`root = "/a\r"`:                "line 1: invalid escape in the string",
+		`root = "/a\x"`:                "line 1: invalid escape in the string",
+		`root = "/a\uD800"`:            "line 1: invalid escape in the string",
+		`root = "/a\U00110000"`:        "line 1: invalid escape in the string",
+		`root = "/a\u00e"`:             "line 1: invalid escape in the string",
+		`root = "/a\u+0e9"`:            "line 1: invalid escape in the string",
+		`root = "/a\`:                  "line 1: invalid escape in the string",
+		"root = \"/a\x01\"":            "line 1: control character in the string",
+		"root = \"/a\x7f\"":            "line 1: control character in the string",
+		"root = \"/a\rb\"":             "line 1: control character in the string",
+		"root = \"/a\" # c\x01":        "line 1: control character in a comment",
+		"# c\x01\nroot = \"/a\"":       "line 1: control character in a comment",
+		"root = \"/a\"\r":              "line 1: unexpected text after the string",
+		"\rroot = \"/a\"":              `line 1: expected root = "..."`,
+		"\n\n# c\n  root = \"/a\" x\n": "line 4: unexpected text after the string",
 	}
-	for _, in := range invalid {
-		if got, ok := parseConfig([]byte(in)); ok {
-			t.Errorf("parseConfig(%q) = %q, want corrupt", in, got)
+	for in, want := range invalid {
+		if got, err := parseConfig([]byte(in)); err == nil || err.Error() != want {
+			t.Errorf("parseConfig(%q) = %q, %v; want error %q", in, got, err, want)
 		}
 	}
 }
@@ -98,14 +99,18 @@ func TestParseRootPath(t *testing.T) {
 		"~/tasks/":   {UnderHome: true, Path: "tasks"},
 		"~//tasks/x": {UnderHome: true, Path: "tasks/x"},
 	} {
-		got, ok := ParseRootPath(raw)
-		if !ok || got != want {
-			t.Errorf("ParseRootPath(%q) = %+v, %v; want %+v", raw, got, ok, want)
+		got, err := ParseRootPath(raw)
+		if err != nil || got != want {
+			t.Errorf("ParseRootPath(%q) = %+v, %v; want %+v", raw, got, err, want)
 		}
 	}
-	for _, raw := range []string{"", "~", "~user/x", "rel", "./a", "/a/../b", "/..", "~/..", "~/a/../b"} {
-		if got, ok := ParseRootPath(raw); ok {
-			t.Errorf("ParseRootPath(%q) = %+v, want an illegal form", raw, got)
+	const form, dotDot = "root must be an absolute path or begin with ~/", "root must not contain a .. segment"
+	for raw, want := range map[string]string{
+		"": form, "~": form, "~user/x": form, "rel": form, "./a": form,
+		"/a/../b": dotDot, "/..": dotDot, "~/..": dotDot, "~/a/../b": dotDot,
+	} {
+		if got, err := ParseRootPath(raw); err == nil || err.Error() != want {
+			t.Errorf("ParseRootPath(%q) = %+v, %v; want error %q", raw, got, err, want)
 		}
 	}
 }
@@ -137,9 +142,9 @@ func TestEncodeConfig(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 	for _, root := range []string{"/", "/a b", "/\"\\", "/\x00\x1f\x7f", "/\t\n", "/é😀", "/ "} {
-		got, ok := parseConfig(EncodeConfig(root))
-		if !ok || got != root {
-			t.Errorf("round trip of %q: got %q, %v", root, got, ok)
+		got, err := parseConfig(EncodeConfig(root))
+		if err != nil || got != root {
+			t.Errorf("round trip of %q: got %q, %v", root, got, err)
 		}
 	}
 }

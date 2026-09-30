@@ -3,6 +3,7 @@ package e2e
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -80,7 +81,8 @@ func run(t *testing.T, cmd *exec.Cmd) result {
 }
 
 // envelope checks that r delivered exactly one complete envelope line, as
-// every exit 0, 1, or 2 must.
+// every exit 0, 1, or 2 must, and stderr's one line to match (cli-spec.md,
+// Output).
 func envelope(t *testing.T, r result) {
 	t.Helper()
 	if strings.Count(r.stdout, "\n") != 1 || !strings.HasSuffix(r.stdout, "\n") {
@@ -89,9 +91,36 @@ func envelope(t *testing.T, r result) {
 	if ok, f := schematest.Check(t, "envelope", []byte(r.stdout)); !ok {
 		t.Errorf("envelope schema rejects at %s: %s", f, r.stdout)
 	}
-	if r.stderr != "" {
-		t.Errorf("stderr is not empty: %q", r.stderr)
+	if want := note(t, r.stdout); r.stderr != want {
+		t.Errorf("stderr %q, want %q", r.stderr, want)
 	}
+}
+
+// note is the stderr line the envelope in stdout calls for: the error's kind
+// and message, or a count of warnings; "" for a clean success. A message
+// with a control character in it is left to TestStderr.
+func note(t *testing.T, stdout string) string {
+	t.Helper()
+	var env struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Kind    string `json:"kind"`
+			Message string `json:"message"`
+		} `json:"error"`
+		Warnings []any `json:"warnings"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &env); err != nil {
+		t.Fatal(err)
+	}
+	switch n := len(env.Warnings); {
+	case !env.OK:
+		return "ftask: " + env.Error.Kind + ": " + env.Error.Message + "\n"
+	case n == 1:
+		return "ftask: 1 warning (see .warnings in the output)\n"
+	case n > 1:
+		return fmt.Sprintf("ftask: %d warnings (see .warnings in the output)\n", n)
+	}
+	return ""
 }
 
 // tree is a root that init created at ~/tasks in a home of its own.

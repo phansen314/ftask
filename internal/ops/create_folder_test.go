@@ -83,7 +83,7 @@ func TestCreateFolder(t *testing.T) {
 
 		// Root states come first.
 		{"corrupt ftask.json", func(f *fixture) { f.write("tasks/ftask.json", "{") }, `{"folder": "/a"}`,
-			`corrupt {"path":"~/tasks/ftask.json","reason":"not-json"}`, nil, nil},
+			`corrupt {"path":"~/tasks/ftask.json","reason":"not-json","detail":"not valid JSON: unexpected end of input"}`, nil, nil},
 
 		// Failures midway: what was created stays, and is the partial.
 		{"first mkdir fails", func(f *fixture) { f.fail(fsys.OpMkdir, "a", syscall.EACCES) }, `{"folder": "/a/b", "parents": true}`,

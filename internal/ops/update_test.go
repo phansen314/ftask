@@ -149,11 +149,11 @@ func TestUpdateErrors(t *testing.T) {
 		intact      bool
 	}{
 		{"corrupt", `{"id": 7, "title": "x"}`, func(f *fixture) { f.write("tasks/7.json", "{") },
-			`corrupt {"path":"~/tasks/7.json","reason":"not-json"}`, false},
+			`corrupt {"path":"~/tasks/7.json","reason":"not-json","detail":"not valid JSON: unexpected end of input"}`, false},
 		{"duplicate", `{"id": 7, "title": "x"}`, func(f *fixture) { f.write("tasks/7.json", richTask(false)); f.task("p", 7, false) },
 			`conflict {"rule":"duplicate-id","ids":[7]}`, true},
 		{"duplicate with a corrupt copy", `{"id": 7, "title": "x"}`, func(f *fixture) { f.write("tasks/7.json", richTask(false)); f.write("tasks/p/7.json", "{") },
-			`corrupt {"path":"~/tasks/p/7.json","reason":"not-json"}`, true},
+			`corrupt {"path":"~/tasks/p/7.json","reason":"not-json","detail":"not valid JSON: unexpected end of input"}`, true},
 		{"unlistable folder", `{"id": 7, "title": "x"}`, func(f *fixture) {
 			f.write("tasks/7.json", richTask(false))
 			f.mkdir("tasks/p")

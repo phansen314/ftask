@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"path"
 	"strconv"
@@ -66,9 +67,8 @@ type RootPath struct {
 }
 
 // ParseRootPath checks a config's root: absolute or beginning "~/", with no
-// ".." segment. ok is false for any other form, which makes the config
-// corrupt.
-func ParseRootPath(raw string) (r RootPath, ok bool) {
+// ".." segment. Any other form makes the config corrupt; the error says why.
+func ParseRootPath(raw string) (r RootPath, err error) {
 	switch {
 	case strings.HasPrefix(raw, "/"):
 		r.Path = model.CleanPath(raw)
@@ -76,12 +76,12 @@ func ParseRootPath(raw string) (r RootPath, ok bool) {
 		r.UnderHome = true
 		r.Path = model.CleanPath(strings.TrimLeft(raw[2:], "/"))
 	default:
-		return RootPath{}, false
+		return RootPath{}, errors.New("root must be an absolute path or begin with ~/")
 	}
 	if model.HasDotDot(r.Path) {
-		return RootPath{}, false
+		return RootPath{}, errors.New("root must not contain a .. segment")
 	}
-	return r, true
+	return r, nil
 }
 
 // Expand returns the root as ftask reports it: cleaned, with "~/" expanded
@@ -100,12 +100,16 @@ func (r RootPath) Expand(home string) (string, bool) {
 // parseConfig reads the config with ftask's parser for a strict subset of
 // TOML (implementation-spec.md, Config file): UTF-8 without a byte-order
 // mark; blank and comment lines; and exactly one line root = "<basic
-// string>". ok is false for anything else, which makes the config corrupt.
-func parseConfig(data []byte) (root string, ok bool) {
-	if !utf8.Valid(data) || bytes.HasPrefix(data, []byte{0xEF, 0xBB, 0xBF}) {
-		return "", false
+// string>". Anything else makes the config corrupt; the error says why,
+// naming the line at fault if there is one.
+func parseConfig(data []byte) (root string, err error) {
+	if !utf8.Valid(data) {
+		return "", errors.New("not valid UTF-8")
 	}
-	found := false
+	if bytes.HasPrefix(data, []byte{0xEF, 0xBB, 0xBF}) {
+		return "", errors.New("starts with a byte-order mark")
+	}
+	found := 0 // the root line's number, once found
 	lines := strings.Split(string(data), "\n")
 	for i, line := range lines {
 		if i < len(lines)-1 {
@@ -117,58 +121,65 @@ func parseConfig(data []byte) (root string, ok bool) {
 			continue
 		case line[0] == '#':
 			if !validComment(line) {
-				return "", false
+				return "", fmt.Errorf("line %d: control character in a comment", i+1)
 			}
 			continue
 		}
-		if found {
-			return "", false
+		r, why := parseRootLine(line)
+		switch {
+		case why != "":
+			return "", fmt.Errorf("line %d: %s", i+1, why)
+		case found > 0:
+			return "", fmt.Errorf("line %d: root repeated (first on line %d)", i+1, found)
 		}
-		r, ok := parseRootLine(line)
-		if !ok {
-			return "", false
-		}
-		root, found = r, true
+		root, found = r, i+1
 	}
-	return root, found
+	if found == 0 {
+		return "", errors.New(`no root = "..." line`)
+	}
+	return root, nil
 }
 
 // parseRootLine parses root = "<basic string>", then optional whitespace and
-// an optional comment.
-func parseRootLine(line string) (string, bool) {
+// an optional comment. why is "" on success, else what is wrong.
+func parseRootLine(line string) (root, why string) {
+	const expected = `expected root = "..."`
 	rest, ok := strings.CutPrefix(line, "root")
 	if !ok {
-		return "", false
+		return "", expected
 	}
 	rest = strings.TrimLeft(rest, " \t")
 	if rest, ok = strings.CutPrefix(rest, "="); !ok {
-		return "", false
+		return "", expected
 	}
 	rest = strings.TrimLeft(rest, " \t")
 	if rest, ok = strings.CutPrefix(rest, `"`); !ok {
-		return "", false
+		return "", "root must be a double-quoted string"
 	}
 	var b strings.Builder
 	for {
 		r, size := utf8.DecodeRuneInString(rest)
 		switch {
 		case size == 0:
-			return "", false // no closing quote
+			return "", "no closing quote"
 		case r == '"':
 			rest = strings.TrimLeft(rest[1:], " \t")
 			if rest != "" && (rest[0] != '#' || !validComment(rest)) {
-				return "", false
+				if rest[0] == '#' {
+					return "", "control character in a comment"
+				}
+				return "", "unexpected text after the string"
 			}
-			return b.String(), true
+			return b.String(), ""
 		case r == '\\':
 			dec, n, ok := unescape(rest)
 			if !ok {
-				return "", false
+				return "", "invalid escape in the string"
 			}
 			b.WriteRune(dec)
 			rest = rest[n:]
 		case isTOMLControl(r):
-			return "", false
+			return "", "control character in the string"
 		default:
 			b.WriteRune(r)
 			rest = rest[size:]

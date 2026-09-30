@@ -408,3 +408,77 @@ func TestReleaseIgnoresHooks(t *testing.T) {
 		t.Errorf("exit %d: %s", r.code, r.stdout)
 	}
 }
+
+// stderr gets one line after the envelope: a failure's kind and message, a
+// count of warnings, or nothing (cli-spec.md, Output).
+func TestStderr(t *testing.T) {
+	tr := newTree(t)
+	for _, title := range []string{"a", "b", "c", "d"} {
+		steps(t, []step{{tr.cmd("create", title), 0, `"ok":true`}})
+	}
+	for _, id := range []string{"2", "3", "4"} {
+		if err := os.WriteFile(filepath.Join(tr.root(), id+".json"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		name   string
+		cmd    *exec.Cmd
+		code   int
+		stderr string
+	}{
+		{"failure", tr.cmd("complete", "999"), 1, "ftask: not-found: not found: task 999\n"},
+		{"usage", tr.cmd("nosuch"), 2, "ftask: usage: usage: unknown command\n"},
+		{"warnings", tr.cmd("list"), 0, "ftask: 3 warnings (see .warnings in the output)\n"},
+		{"clean", tr.cmd("version"), 0, ""},
+		{"corrupt", tr.cmd("show", "2"), 1, "ftask: corrupt: " + filepath.Join(tr.root(), "2.json") + ": corrupt: empty\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := run(t, tc.cmd)
+			envelope(t, r)
+			if r.code != tc.code || r.stderr != tc.stderr {
+				t.Errorf("exit %d, stderr %q; want %d, %q", r.code, r.stderr, tc.code, tc.stderr)
+			}
+		})
+	}
+
+	t.Run("not delivered", func(t *testing.T) {
+		if runtime.GOOS != "linux" {
+			t.Skip("/dev/full is Linux-only")
+		}
+		full, err := os.OpenFile("/dev/full", os.O_WRONLY, 0)
+		if err != nil {
+			t.Skip(err)
+		}
+		defer full.Close()
+		cmd := tr.cmd("show", "999") // a failure, so it would have a line
+		cmd.Stdout = full
+		r := run(t, cmd)
+		if r.code != 3 || !strings.HasPrefix(r.stderr, "ftask: result not delivered: ") || strings.Count(r.stderr, "\n") != 1 {
+			t.Errorf("exit %d, stderr %q; want 3 and only the notice", r.code, r.stderr)
+		}
+	})
+
+	t.Run("help", func(t *testing.T) {
+		if r := run(t, tr.cmd("--help")); r.code != 0 || r.stderr != "" {
+			t.Errorf("exit %d, stderr %q", r.code, r.stderr)
+		}
+	})
+
+	// A newline in the root's path is escaped, so the line stays one line.
+	t.Run("newline in path", func(t *testing.T) {
+		cmd := ftask(t, "init", "~/a\nb")
+		r := run(t, cmd)
+		envelope(t, r)
+		home := envHome(cmd)
+		if err := os.WriteFile(filepath.Join(home, "a\nb", "1.json"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		show := exec.Command(binary, "show", "1")
+		show.Env = cmd.Env
+		r = run(t, show)
+		if want := "ftask: corrupt: " + home + `/a\nb/1.json: corrupt: empty` + "\n"; r.code != 1 || r.stderr != want {
+			t.Errorf("exit %d, stderr %q; want 1, %q", r.code, r.stderr, want)
+		}
+	})
+}

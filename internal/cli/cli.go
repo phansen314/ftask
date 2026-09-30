@@ -7,7 +7,9 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -23,7 +25,7 @@ type Env struct {
 	Ops    ops.Env
 	Stdin  io.Reader              // read only when a value names it (--input -)
 	Stdout io.Writer              // closed after the one write, if it is an io.Closer
-	Stderr io.Writer              // only for the notice when the result is not delivered
+	Stderr io.Writer              // only for one line after the result, or the notice when it is not delivered
 	Getwd  func() (string, error) // the working directory, for a relative path
 }
 
@@ -54,14 +56,16 @@ func ProcessEnv() Env {
 }
 
 // Run runs the command line args, without the program name, and returns the
-// exit code. It writes exactly one envelope line, or help text, to stdout.
+// exit code. It writes exactly one envelope line, or help text, to stdout,
+// and at most one line to stderr.
 func Run(args []string, env Env) int {
-	out, code := execute(commands, args, env)
-	return deliver(env, out, code)
+	out, code, note := execute(commands, args, env)
+	return deliver(env, out, code, note)
 }
 
-// execute runs args against cmds and returns what to write and the exit code.
-func execute(cmds []Command, args []string, env Env) ([]byte, int) {
+// execute runs args against cmds and returns what to write, the exit code,
+// and the note for stderr ("" for none).
+func execute(cmds []Command, args []string, env Env) ([]byte, int, string) {
 	var help bytes.Buffer
 	var result *ops.Envelope
 	root := newRoot(cmds, env, &result)
@@ -76,7 +80,7 @@ func execute(cmds []Command, args []string, env Env) ([]byte, int) {
 	case err != nil:
 		return envelopeLine(ops.Failed(usage(err)))
 	}
-	return help.Bytes(), ExitOK // --help, or cobra's own help and completion
+	return help.Bytes(), ExitOK, "" // --help, or cobra's own help and completion
 }
 
 func newRoot(cmds []Command, env Env, result **ops.Envelope) *cobra.Command {
@@ -247,8 +251,9 @@ func flagToken(name, shorts string) *string {
 	return &t
 }
 
-// envelopeLine encodes env as the one output line, with its exit code.
-func envelopeLine(env ops.Envelope) ([]byte, int) {
+// envelopeLine encodes env as the one output line, with its exit code and
+// its note for stderr.
+func envelopeLine(env ops.Envelope) ([]byte, int, string) {
 	b, err := jsonio.MarshalLine(env)
 	if err != nil {
 		env = ops.Failed(errs.Internal("encoding the envelope: " + err.Error()))
@@ -258,17 +263,59 @@ func envelopeLine(env ops.Envelope) ([]byte, int) {
 	}
 	switch {
 	case env.OK:
-		return b, ExitOK
+		return b, ExitOK, warningsNote(len(env.Warnings))
 	case env.Error.Kind == errs.KindUsage:
-		return b, ExitUsage
+		return b, ExitUsage, errorNote(env.Error)
 	}
-	return b, ExitError
+	return b, ExitError, errorNote(env.Error)
+}
+
+// errorNote is the stderr line for a failure (cli-spec.md, Output), so it
+// stays visible when stdout goes into a pipeline.
+func errorNote(e *errs.Error) string {
+	return oneLine("ftask: " + string(e.Kind) + ": " + e.Message)
+}
+
+// warningsNote is the stderr line for a success with n warnings; they are
+// counted, never listed.
+func warningsNote(n int) string {
+	switch n {
+	case 0:
+		return ""
+	case 1:
+		return "ftask: 1 warning (see .warnings in the output)"
+	}
+	return fmt.Sprintf("ftask: %d warnings (see .warnings in the output)", n)
+}
+
+// oneLine writes each control character in s as a Go escape (\n, \x1b,
+// \u2028), so that none, e.g. a newline in a root path, can split the line or
+// drive a terminal. Everything else is left as it is.
+func oneLine(s string) string {
+	if !strings.ContainsFunc(s, isLineControl) {
+		return s
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if isLineControl(r) {
+			q := strconv.QuoteRune(r)
+			b.WriteString(q[1 : len(q)-1])
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func isLineControl(r rune) bool {
+	return unicode.IsControl(r) || r == '\u2028' || r == '\u2029'
 }
 
 // deliver writes out in one write and closes stdout; exit codes 0-2 are
 // reported only once both succeed (implementation-spec.md, Writing the
-// envelope).
-func deliver(env Env, out []byte, code int) int {
+// envelope). Only then is note, if any, written to stderr, as one line whose
+// own failure is ignored: the result was delivered.
+func deliver(env Env, out []byte, code int, note string) int {
 	_, err := env.Stdout.Write(out)
 	if c, ok := env.Stdout.(io.Closer); ok && err == nil {
 		err = c.Close()
@@ -276,6 +323,9 @@ func deliver(env Env, out []byte, code int) int {
 	if err != nil {
 		fmt.Fprintf(env.Stderr, "ftask: result not delivered: %v\n", err)
 		return ExitNotDelivered
+	}
+	if note != "" {
+		_, _ = io.WriteString(env.Stderr, note+"\n")
 	}
 	return code
 }

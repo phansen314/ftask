@@ -168,17 +168,17 @@ func TestCreateCases(t *testing.T) {
 		{"missing folder before a corrupt blocker", func(f *fixture) { f.write("tasks/1.json", "{") }, `{"title": "x", "folder": "/a", "blocked_by": [1]}`,
 			`not-found {"folders":["/a"],"ids":[],"paths":[]}`, nil},
 		{"corrupt blocker", func(f *fixture) { f.write("tasks/1.json", "{") }, `{"title": "x", "blocked_by": [1]}`,
-			`corrupt {"path":"~/tasks/1.json","reason":"not-json"}`, nil},
+			`corrupt {"path":"~/tasks/1.json","reason":"not-json","detail":"not valid JSON: unexpected end of input"}`, nil},
 		{"unsupported blocker", func(f *fixture) { f.write("tasks/1.json", `{"schema": 2}`) }, `{"title": "x", "blocked_by": [1]}`,
 			`unsupported-format {"path":"~/tasks/1.json","found":2,"supported":[1]}`, nil},
 		{"unreadable blocker", func(f *fixture) { f.task("", 1, false); f.fail(fsys.OpReadFile, "1.json", syscall.EACCES) }, `{"title": "x", "blocked_by": [1]}`,
 			`io {"path":"~/tasks/1.json","code":"EACCES"}`, nil},
 		{"first unusable blocker in tree order", func(f *fixture) { f.write("tasks/p/1.json", "{"); f.write("tasks/2.json", "{") }, `{"title": "x", "blocked_by": [1, 2]}`,
-			`corrupt {"path":"~/tasks/2.json","reason":"not-json"}`, nil},
+			`corrupt {"path":"~/tasks/2.json","reason":"not-json","detail":"not valid JSON: unexpected end of input"}`, nil},
 		{"duplicated blocker", func(f *fixture) { f.task("", 1, false); f.task("p", 1, true) }, `{"title": "x", "blocked_by": [1]}`,
 			`/ 101; duplicate-id [1] [~/tasks/1.json ~/tasks/p/1.json]`, nil},
 		{"duplicated blocker with a corrupt copy", func(f *fixture) { f.task("", 1, false); f.write("tasks/p/1.json", "{") }, `{"title": "x", "blocked_by": [1]}`,
-			`corrupt {"path":"~/tasks/p/1.json","reason":"not-json"}`, nil},
+			`corrupt {"path":"~/tasks/p/1.json","reason":"not-json","detail":"not valid JSON: unexpected end of input"}`, nil},
 		{"blocker vanished", func(f *fixture) { f.task("", 1, false); f.fail(fsys.OpReadFile, "1.json", syscall.ENOENT) }, `{"title": "x", "blocked_by": [1]}`,
 			`not-found {"folders":[],"ids":[1],"paths":[]}`, nil},
 		{"one copy vanished", func(f *fixture) {
@@ -213,7 +213,7 @@ func TestCreateCases(t *testing.T) {
 
 		// Root states come first.
 		{"corrupt ftask.json", func(f *fixture) { f.write("tasks/ftask.json", "{") }, `{"title": "x", "folder": "/a"}`,
-			`corrupt {"path":"~/tasks/ftask.json","reason":"not-json"}`, nil},
+			`corrupt {"path":"~/tasks/ftask.json","reason":"not-json","detail":"not valid JSON: unexpected end of input"}`, nil},
 		{"no config", func(f *fixture) { f.remove("cfg") }, `{"title": "x"}`,
 			`not-initialized {"missing":"config"}`, nil},
 

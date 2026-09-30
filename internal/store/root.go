@@ -19,11 +19,13 @@ type config struct {
 }
 
 // configState is the outcome of reading the config: its state as info
-// reports it, and the OS error of an unreadable one.
+// reports it, the OS error of an unreadable one, and what is wrong with a
+// corrupt one.
 type configState struct {
 	state ConfigState
 	cfg   config
 	err   error
+	why   string // ConfigCorrupt: what is wrong
 }
 
 func readConfig(env Env) configState {
@@ -40,13 +42,12 @@ func readConfig(env Env) configState {
 		}
 		return cs
 	}
-	raw, ok := parseConfig(data)
-	if !ok {
-		cs.state = ConfigCorrupt
-		return cs
+	raw, err := parseConfig(data)
+	if err == nil {
+		cs.cfg.raw, err = ParseRootPath(raw)
 	}
-	if cs.cfg.raw, ok = ParseRootPath(raw); !ok {
-		cs.state = ConfigCorrupt
+	if err != nil {
+		cs.state, cs.why = ConfigCorrupt, err.Error()
 		return cs
 	}
 	cs.state = ConfigOK
@@ -66,7 +67,7 @@ func locateRoot(env Env) (string, *errs.Error) {
 	case ConfigUnreadable:
 		return "", errs.FromOS(cs.cfg.path, cs.err)
 	case ConfigCorrupt:
-		return "", errs.Corrupt(cs.cfg.path, errs.CorruptInvalid)
+		return "", errs.CorruptBy(cs.cfg.path, errs.CorruptCause{Reason: errs.CorruptInvalid, Detail: cs.why})
 	}
 	root, ok := cs.cfg.raw.Expand(env.Home)
 	if !ok {
@@ -89,11 +90,11 @@ func openRoot(env Env, root string) (fsys.Root, *errs.Error) {
 // metaState is the outcome of reading ftask.json: its state as info reports
 // it, with what each state carries.
 type metaState struct {
-	state  MetaState
-	err    error              // MetaUnreadable: the OS error
-	reason errs.CorruptReason // MetaCorrupt
-	file   model.FileResult   // after a parse: the File validity result
-	meta   model.RootFile     // MetaOK
+	state MetaState
+	err   error             // MetaUnreadable: the OS error
+	cause errs.CorruptCause // MetaCorrupt
+	file  model.FileResult  // after a parse: the File validity result
+	meta  model.RootFile    // MetaOK
 }
 
 // readMeta reads ftask.json through r. It must be a regular file: a symlink,
@@ -104,7 +105,7 @@ func readMeta(r fsys.Root) metaState {
 		return metaReadError(err)
 	}
 	if !fi.Mode().IsRegular() {
-		return metaState{state: MetaCorrupt, reason: errs.CorruptUnexpectedFile}
+		return metaState{state: MetaCorrupt, cause: unexpectedFile}
 	}
 	data, err := r.ReadFile(MetaName)
 	if err != nil {
@@ -112,7 +113,7 @@ func readMeta(r fsys.Root) metaState {
 	}
 	obj, repeated, err := jsonio.ParseObject(data)
 	if err != nil {
-		return metaState{state: MetaCorrupt, reason: errs.CorruptNotJSON}
+		return metaState{state: MetaCorrupt, cause: notJSON(err)}
 	}
 	meta, res := model.DecodeRootFile(obj, repeated)
 	ms := metaState{file: res, meta: meta}
@@ -122,17 +123,20 @@ func readMeta(r fsys.Root) metaState {
 	case model.FileUnsupported:
 		ms.state = MetaUnsupported
 	default:
-		ms.state, ms.reason = MetaCorrupt, errs.CorruptInvalid
+		ms.state, ms.cause = MetaCorrupt, invalid(res)
 	}
 	return ms
 }
+
+// unexpectedFile is the cause of an ftask.json that is not a regular file.
+var unexpectedFile = errs.CorruptCause{Reason: errs.CorruptUnexpectedFile}
 
 func metaReadError(err error) metaState {
 	switch {
 	case isErrno(err, syscall.ENOENT):
 		return metaState{state: MetaMissing}
 	case isErrno(err, syscall.ELOOP), isErrno(err, syscall.EISDIR):
-		return metaState{state: MetaCorrupt, reason: errs.CorruptUnexpectedFile}
+		return metaState{state: MetaCorrupt, cause: unexpectedFile}
 	}
 	return metaState{state: MetaUnreadable, err: err}
 }
@@ -150,7 +154,7 @@ func metaError(ms metaState, root string) *errs.Error {
 	case MetaUnsupported:
 		return errs.UnsupportedFormat(p, ms.file.Found, []int64{model.RootSchema})
 	}
-	return errs.Corrupt(p, ms.reason)
+	return errs.CorruptBy(p, ms.cause)
 }
 
 func isErrno(err error, want syscall.Errno) bool {
