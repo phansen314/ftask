@@ -290,6 +290,8 @@ Every versioned file (`ftask.json`, a task file) is checked in three steps, stop
 
 A file that can't be opened or read at all is **unreadable**. A file is **unusable** when it is unreadable, `corrupt`, or `unsupported-format`.
 
+A `corrupt` error says what is wrong: why the file failed step 1 if it isn't JSON, or else each rule it breaks, by where in the file (see [Error kinds](operations.md#error-kinds)). The `unusable-file` warning does not.
+
 ### File format
 
 Every JSON file ftask writes is written the same way, so that a tree kept in git shows only real changes in its diffs:

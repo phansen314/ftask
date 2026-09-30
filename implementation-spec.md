@@ -277,7 +277,8 @@ Implements the CLI spec's [Output](cli-spec.md#output) and [Exit codes](cli-spec
 - The envelope and its newline are built in memory and written with one `os.Stdout.Write`, which retries short writes itself: the line is either written whole or the write returns an error.
 - `os.Stdout.Close()` is then checked, since some errors surface only at close (e.g. stdout redirected to a network filesystem).
 - Only when both succeed does ftask exit `0`, `1`, or `2`. If either fails, it writes a notice to stderr ("ftask: result not delivered: …"; human text, not part of the contract) and exits `3`.
-- `--help` text is written the same way.
+- Once both succeed, and only then, `deliver` writes the CLI spec's one [stderr](cli-spec.md#output) line for a failure or for warnings, from the envelope it just wrote: one `Write` of one line, with each control character in the message (U+0000–U+001F, U+007F–U+009F, U+2028, U+2029) written as a Go escape (`\n`, `\x1b`, ` `), so none — a newline in a root path, or in a repeated key's pointer — can split the line or drive the terminal. Quotes, backslashes, and other text are left as they are. Its write error is ignored: the result was already delivered, and with SIGPIPE caught a closed stderr is just an `EPIPE`.
+- `--help` text is written the same way, with nothing on stderr.
 
 ### SIGPIPE
 
@@ -301,6 +302,7 @@ An unrecovered panic or a fatal runtime error (out of memory, a detected data ra
 - Signal: SIGTERM during a write held open by a test hook → exit 143, no envelope.
 - Crash: a forced panic in a test build → exit 134, not 2.
 - Delivery: every exit `0`, `1`, or `2` anywhere in the test suite comes with exactly one complete envelope line on stdout.
+- stderr: exit `1` or `2` → exactly one line, also when the envelope has warnings; exit `0` with warnings → one summary line; exit `0` without warnings, and `--help` → nothing; exit `3` → only the notice; a path with a newline in it → still one line.
 
 ## Package layout
 
@@ -373,7 +375,7 @@ The [config](design-spec.md#config-file) has exactly one key, so ftask reads it 
 - Anything else — no `root`, a repeated `root`, another key, a table, a literal (single-quoted) or multi-line string — is `corrupt` (`invalid`).
 - The file must be UTF-8 without a byte-order mark.
 
-Every failure above is `corrupt` with `reason` `invalid`; `not-json` does not apply, since the config is not JSON.
+Every failure above is `corrupt` with `reason` `invalid`; `not-json` does not apply, since the config is not JSON. The parser reports which rule failed, and the error's `detail` says so, starting `line N: ` when one line is at fault (e.g. `line 3: expected root = "…"`); a root in an illegal [form](design-spec.md#root-path) is reported as such.
 
 `init` writes the config as `root = "<path>"` plus a newline, escaping as TOML basic strings require.
 

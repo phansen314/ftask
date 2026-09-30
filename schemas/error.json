@@ -86,9 +86,32 @@
       "required": ["path", "reason"],
       "properties": {
         "path": { "type": "string" },
-        "reason": { "type": "string", "enum": ["not-json", "invalid", "unexpected-file"] }
+        "reason": { "type": "string", "enum": ["not-json", "invalid", "unexpected-file"] },
+        "problems": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "required": ["field", "reason"],
+            "properties": {
+              "field": { "type": "string", "description": "JSON Pointer into the file." },
+              "reason": { "type": "string", "description": "Human-readable." }
+            },
+            "additionalProperties": false
+          },
+          "description": "For invalid, in a JSON file: what is wrong, sorted as invalid-input's problems; the first 20."
+        },
+        "problems_truncated": { "const": true, "description": "Present only when problems omits some of those found." },
+        "detail": { "type": "string", "minLength": 1, "description": "For not-json, and for invalid in the config: what is wrong. Human-readable." }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "dependentRequired": { "problems_truncated": ["problems"] },
+      "allOf": [
+        { "if": { "properties": { "reason": { "const": "not-json" } } }, "then": { "required": ["detail"], "not": { "required": ["problems"] } } },
+        { "if": { "properties": { "reason": { "const": "invalid" } } }, "then": { "oneOf": [{ "required": ["problems"] }, { "required": ["detail"] }] } },
+        { "if": { "properties": { "reason": { "const": "unexpected-file" } } }, "then": { "not": { "anyOf": [{ "required": ["problems"] }, { "required": ["detail"] }] } } }
+      ]
     },
     "io": {
       "type": "object",

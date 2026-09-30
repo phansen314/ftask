@@ -99,7 +99,7 @@ An error means the operation failed. `kind` and `details` are the contract; `mes
 | `not-found` | A task or folder named by the input, or a filesystem directory it requires, does not exist. | `folders`: tree folder paths; `ids`: task IDs; `paths`: filesystem paths (e.g. `init`'s missing parent directory). All three always present, empty when not applicable. |
 | `conflict` | The operation was refused because it would violate an invariant, overwrite state it must not, or act on a task the tree cannot identify uniquely. | `rule`: the rule that refused it — currently `acyclic`, `id-exhausted` (no ID left under the [ID ceiling](design-spec.md#task-ids)), `config-exists`, `root-not-empty`, `duplicate-id` (a write names an ID that more than one task file has), `id-above-last-id` (a task to remove has an ID above `last_id`), `not-empty` (a folder to delete holds tasks or folders), `destination-exists` (something is already where a folder would move). `ids`: the tasks involved, always present, possibly empty. For `acyclic`, also `cycles`: `cycles[i]` is one cycle through `ids[i]`, chosen deterministically (see [`block`](#block)). |
 | `busy` | Another write holds the write lock. Safe to retry. | none (`{}`). |
-| `corrupt` | A needed file — or an entry on an input path — is present and readable but its content or type is wrong (see [File validity](design-spec.md#file-validity)); or ftask found a file where, under its own invariants, none can exist (e.g. creating a task file that already exists). | `path`; `reason`: `not-json` (not parseable, or not an object), `invalid` (fails a file-level rule, including a missing `schema` or one not written as an integer literal within ±(2^53 − 1)), or `unexpected-file` (wrong entry type, e.g. `ftask.json` is a symlink or directory; or a file exists that must not). |
+| `corrupt` | A needed file — or an entry on an input path — is present and readable but its content or type is wrong (see [File validity](design-spec.md#file-validity)); or ftask found a file where, under its own invariants, none can exist (e.g. creating a task file that already exists). | `path`; `reason`: `not-json` (not parseable, or not an object), `invalid` (fails a file-level rule, including a missing `schema` or one not written as an integer literal within ±(2^53 − 1)), or `unexpected-file` (wrong entry type, e.g. `ftask.json` is a symlink or directory; or a file exists that must not). What is wrong, for `not-json` and `invalid`: `problems`, for a JSON file that is `invalid` — a list of `{field, reason}` as in `invalid-input`, but with `field` a JSON Pointer into the file (e.g. `/updated_at`), sorted the same way, and at most the first 20, with `problems_truncated: true` when more were found; or `detail`, a human-readable string — why the file is `not-json`, or why the config, which is not JSON, is `invalid`. `unexpected-file` has neither. |
 | `io` | The environment refused an operation: an unreadable file, permission denied, disk full, read-only filesystem, and similar. An OS error with no symbolic name is `internal`, not `io`. | `path`: built from the root as stored (see [Root path](design-spec.md#root-path)), or the config's own path for an error on the config; `code`: the symbolic OS error, e.g. `ENOSPC`, never a number. |
 | `unsupported-format` | A needed file's `schema` is not the version this binary supports (see [Format versions](design-spec.md#format-versions)). | `path`; `found`: the file's version; `supported`: the versions this binary supports. |
 | `internal` | A bug ftask detects. Every failure ftask reports has a kind: anything not covered above is `internal`. A crash reports nothing at all (see the CLI's [exit codes](cli-spec.md#exit-codes)). | none (`{}`). |
@@ -220,9 +220,32 @@ A kind that lists every instance lists them across the whole step: e.g. [`create
       "required": ["path", "reason"],
       "properties": {
         "path": { "type": "string" },
-        "reason": { "type": "string", "enum": ["not-json", "invalid", "unexpected-file"] }
+        "reason": { "type": "string", "enum": ["not-json", "invalid", "unexpected-file"] },
+        "problems": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "required": ["field", "reason"],
+            "properties": {
+              "field": { "type": "string", "description": "JSON Pointer into the file." },
+              "reason": { "type": "string", "description": "Human-readable." }
+            },
+            "additionalProperties": false
+          },
+          "description": "For invalid, in a JSON file: what is wrong, sorted as invalid-input's problems; the first 20."
+        },
+        "problems_truncated": { "const": true, "description": "Present only when problems omits some of those found." },
+        "detail": { "type": "string", "minLength": 1, "description": "For not-json, and for invalid in the config: what is wrong. Human-readable." }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "dependentRequired": { "problems_truncated": ["problems"] },
+      "allOf": [
+        { "if": { "properties": { "reason": { "const": "not-json" } } }, "then": { "required": ["detail"], "not": { "required": ["problems"] } } },
+        { "if": { "properties": { "reason": { "const": "invalid" } } }, "then": { "oneOf": [{ "required": ["problems"] }, { "required": ["detail"] }] } },
+        { "if": { "properties": { "reason": { "const": "unexpected-file" } } }, "then": { "not": { "anyOf": [{ "required": ["problems"] }, { "required": ["detail"] }] } } }
+      ]
     },
     "io": {
       "type": "object",
@@ -263,6 +286,8 @@ A warning reports a problem, relevant to the operation's result, that did not st
 | `dangling-reference` | A task's `blocked_by` names an ID with no task (see [Dependencies](design-spec.md#dependencies)). Not reported while a folder the walk had to list was unreadable, since the blocker may be in it; the `unreadable-folder` warning explains why the task counts as blocked. | the referring task file | `[referring, missing]`, in that order | — |
 | `unreadable-folder` | A folder the walk had to list could not be listed; its tasks are missing from the result (see [Walking the tree](design-spec.md#walking-the-tree)). | the folder's filesystem path | none | `code` |
 | `notes-missing` | A task was written but its `.md` could not be. The task is valid; its notes are empty, or stale if a stray `.md` could not be replaced. | the `.md` | the task | `code` |
+
+An `unusable-file` warning says which file and, in `reason`, one word for why — never what is wrong inside it: no `problems` or `detail` as a [`corrupt`](#error-kinds) error has. The file was one the operation did not need, a damaged tree can produce dozens, and they recur on every call that walks past them. For the diagnosis, [`show`](#show) the task: its file is needed there, so it fails with the full `corrupt` error.
 
 ### Warning schema
 

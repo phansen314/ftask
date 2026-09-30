@@ -13,7 +13,13 @@ The intended user is a power user working through Claude, with `jq` for anything
 - **Compact.** The envelope is written on a single line, followed by a newline. The format is the same whether or not stdout is a terminal. A complete envelope always ends in that newline.
 - **Encoding.** Output is UTF-8, with the string escaping of the design spec's [File format](design-spec.md#file-format): only `"`, `\`, U+0000–U+001F, U+2028, and U+2029 are escaped; everything else is raw UTF-8.
 - **Delivered before exit.** Exit `0`, `1`, or `2` is reported only once the whole envelope has been written. On any other exit status, stdout may hold nothing or an incomplete line (see [Exit codes](#exit-codes)).
-- **stderr** is unused, except for the notice on exit `3` and a crash's diagnostics (on any other exit status). Both are human-readable and not part of the contract, like an error's `message`.
+- **stderr** gets at most one line from ftask, written after the envelope has been delivered, so a failure stays visible when stdout goes into a pipeline (e.g. `ftask create … | jq -r .result.id`):
+  - exit `1` or `2`: `ftask: <kind>: <message>` — even when the envelope also has warnings;
+  - exit `0` with warnings: `ftask: N warnings (see .warnings in the output)` (`1 warning` for one); the warnings themselves are never listed;
+  - exit `0` without warnings, and `--help`: nothing;
+  - exit `3`: only its notice (see [Exit codes](#exit-codes)); a crash (any other exit status) may add its own diagnostics.
+
+  The line is the same whether or not stderr is a terminal, and kept to one line: control characters in it (e.g. a newline in a path) are escaped. It is human-readable and not part of the contract, like an error's `message`; callers read the envelope. A failure to write it is ignored and never changes the exit status.
 - **Exception:** `--help` writes plain-text usage to stdout. It is not an operation.
 
 ### Input
