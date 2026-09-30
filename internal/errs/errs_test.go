@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -64,6 +65,24 @@ func TestDetailsShapes(t *testing.T) {
 	}
 }
 
+func TestInvalidInputCap(t *testing.T) {
+	many := make([]Problem, 25)
+	for i := range many {
+		many[len(many)-1-i] = Problem{Field: fmt.Sprintf("/k%02d", i), Reason: "unknown field"}
+	}
+	e := InvalidInput(many)
+	d := e.Details.(InvalidInputDetails)
+	if len(d.Problems) != MaxProblems || !d.ProblemsTruncated || d.Problems[0].Field != "/k00" || d.Problems[19].Field != "/k19" {
+		t.Errorf("25 problems: got %d, truncated %v, %v", len(d.Problems), d.ProblemsTruncated, d.Problems)
+	}
+	if e.Message != "25 invalid inputs" {
+		t.Errorf("message %q", e.Message)
+	}
+	if got := details(t, InvalidInput(many[:20])); strings.Contains(got, "truncated") {
+		t.Errorf("20 problems: %s", got)
+	}
+}
+
 func TestCorruptBy(t *testing.T) {
 	many := make([]Problem, 25)
 	for i := range many {
@@ -99,7 +118,7 @@ func TestCorruptBy(t *testing.T) {
 
 	e := CorruptBy("/r/1.json", CorruptCause{Reason: CorruptInvalid, Problems: many})
 	d := e.Details.(CorruptDetails)
-	if len(d.Problems) != MaxCorruptProblems || !d.ProblemsTruncated || d.Problems[0].Field != "/k00" || d.Problems[19].Field != "/k19" {
+	if len(d.Problems) != MaxProblems || !d.ProblemsTruncated || d.Problems[0].Field != "/k00" || d.Problems[19].Field != "/k19" {
 		t.Errorf("25 problems: got %d, truncated %v, %v", len(d.Problems), d.ProblemsTruncated, d.Problems)
 	}
 	if want := `/r/1.json: corrupt: at "/k00": unknown field (and 24 more)`; e.Message != want {

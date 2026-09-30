@@ -32,6 +32,7 @@ func TestErrorsMatchSchema(t *testing.T) {
 		e    *errs.Error
 	}{
 		{"invalid-input", errs.InvalidInput([]errs.Problem{{Field: "/title", Reason: "required"}, {Field: "", Reason: "x"}})},
+		{"invalid-input truncated", errs.InvalidInput(manyProblems(25))},
 		{"environment", errs.Environment("HOME")},
 		{"not-initialized", errs.NotInitialized(errs.MissingMetadata)},
 		{"not-found", errs.NotFound([]string{"/a"}, []int64{3}, nil)},
@@ -91,10 +92,15 @@ func TestCorruptSchemaRejects(t *testing.T) {
 			t.Errorf("error accepts %s", details)
 		}
 	}
-	ps := encode(t, manyProblems(21))
-	data := []byte(`{"kind":"corrupt","message":"m","details":{"path":"/p","reason":"invalid","problems":` + string(bytes.TrimSpace(ps)) + `}}`)
-	if ok, _ := schematest.Check(t, "error", data); ok {
-		t.Errorf("error accepts 21 problems")
+	ps := string(bytes.TrimSpace(encode(t, manyProblems(21))))
+	for _, data := range []string{
+		`{"kind":"corrupt","message":"m","details":{"path":"/p","reason":"invalid","problems":` + ps + `}}`,
+		`{"kind":"invalid-input","message":"m","details":{"problems":` + ps + `}}`,
+		`{"kind":"invalid-input","message":"m","details":{"problems":[{"field":"/x","reason":"r"}],"problems_truncated":false}}`,
+	} {
+		if ok, _ := schematest.Check(t, "error", []byte(data)); ok {
+			t.Errorf("error accepts %s", data)
+		}
 	}
 }
 

@@ -93,7 +93,7 @@ An error means the operation failed. `kind` and `details` are the contract; `mes
 
 | Kind | Meaning | `details` |
 |---|---|---|
-| `invalid-input` | Input failed validation. Always raised before the write lock is sought, and before any needed file is read (a check on an input path itself, like `init`'s, may inspect that path). Reports **every** invalid input, not just the first. | `problems`: list of `{field, reason}`; `field` is a JSON Pointer into the input (e.g. `/tags/2`), `reason` a human-readable string. Sorted by `field`, then by `reason` (both compared as strings, byte by byte), so the same input always yields the same list. |
+| `invalid-input` | Input failed validation. Always raised before the write lock is sought, and before any needed file is read (a check on an input path itself, like `init`'s, may inspect that path). Reports **every** invalid input, not just the first. | `problems`: list of `{field, reason}`; `field` is a JSON Pointer into the input (e.g. `/tags/2`), `reason` a human-readable string. Sorted by `field`, then by `reason` (both compared as strings, byte by byte), so the same input always yields the same list; at most the first 20 are listed, with `problems_truncated: true` when more were found. |
 | `not-initialized` | The root is *not initialized* (see [Root states](#root-states)). A file that exists but is unusable is never `not-initialized`. | `missing`: `config`, `root`, or `metadata` (meaning `ftask.json`) — the first absent piece. |
 | `environment` | The process's environment lacks what ftask needs to locate its files: the home directory, from which the config location is derived (see [Config file](design-spec.md#config-file)). Not a root state — no config was looked for. | `variable`: the environment variable that is unset or unusable; currently always `HOME`. |
 | `not-found` | A task or folder named by the input, or a filesystem directory it requires, does not exist. | `folders`: tree folder paths; `ids`: task IDs; `paths`: filesystem paths (e.g. `init`'s missing parent directory). All three always present, empty when not applicable. |
@@ -170,8 +170,10 @@ A kind that lists every instance lists them across the whole step: e.g. [`create
               "reason": { "type": "string", "description": "Human-readable." }
             },
             "additionalProperties": false
-          }
-        }
+          },
+          "maxItems": 20
+        },
+        "problems_truncated": { "const": true, "description": "Present only when problems omits some of those found." }
       },
       "additionalProperties": false
     },

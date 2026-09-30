@@ -180,7 +180,7 @@ func TestCorruptCause(t *testing.T) {
 	}
 	const syntax = "not valid JSON: invalid character '}' looking for beginning of object key string (at byte 13)"
 	var truncated []errs.Problem
-	for i := 1; i <= errs.MaxCorruptProblems; i++ {
+	for i := 1; i <= errs.MaxProblems; i++ {
 		truncated = append(truncated, errs.Problem{Field: fmt.Sprintf("/k%02d", i), Reason: "unknown field"})
 	}
 

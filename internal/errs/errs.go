@@ -61,11 +61,17 @@ type Problem struct {
 }
 
 type InvalidInputDetails struct {
-	Problems []Problem `json:"problems"`
+	Problems          []Problem `json:"problems"`
+	ProblemsTruncated bool      `json:"problems_truncated,omitempty"`
 }
 
+// MaxProblems is how many problems an error lists at most, so that bad input
+// or a garbage file cannot produce a huge error.
+const MaxProblems = 20
+
 // InvalidInput reports every problem found, sorted by field, then by reason,
-// both compared byte by byte, so the same input always yields the same list.
+// both compared byte by byte, so the same input always yields the same list;
+// then cut to the first MaxProblems, though the message counts them all.
 // An empty problems is a bug, reported as internal.
 func InvalidInput(problems []Problem) *Error {
 	if len(problems) == 0 {
@@ -76,7 +82,9 @@ func InvalidInput(problems []Problem) *Error {
 	if len(ps) == 1 {
 		msg = fmt.Sprintf("invalid input at %q: %s", ps[0].Field, ps[0].Reason)
 	}
-	return &Error{Kind: KindInvalidInput, Message: msg, Details: InvalidInputDetails{Problems: ps}}
+	d := InvalidInputDetails{}
+	d.Problems, d.ProblemsTruncated = capProblems(ps)
+	return &Error{Kind: KindInvalidInput, Message: msg, Details: d}
 }
 
 // sortProblems returns a sorted copy of problems: by field, then by reason,
@@ -87,6 +95,14 @@ func sortProblems(problems []Problem) []Problem {
 		return cmp.Or(strings.Compare(a.Field, b.Field), strings.Compare(a.Reason, b.Reason))
 	})
 	return ps
+}
+
+// capProblems returns the first MaxProblems of ps, and whether any were cut.
+func capProblems(ps []Problem) ([]Problem, bool) {
+	if len(ps) > MaxProblems {
+		return ps[:MaxProblems], true
+	}
+	return ps, false
 }
 
 type EnvironmentDetails struct {
@@ -259,10 +275,6 @@ type CorruptDetails struct {
 	Detail            string        `json:"detail,omitempty"`
 }
 
-// MaxCorruptProblems is how many problems a corrupt error lists at most, so
-// a garbage file cannot produce a huge error.
-const MaxCorruptProblems = 20
-
 // Corrupt reports a file corrupt for a reason that carries nothing more:
 // unexpected-file.
 func Corrupt(path string, reason CorruptReason) *Error {
@@ -270,7 +282,7 @@ func Corrupt(path string, reason CorruptReason) *Error {
 }
 
 // CorruptBy reports a file corrupt for cause c. Problems are sorted as
-// InvalidInput sorts them, then cut to the first MaxCorruptProblems; the
+// InvalidInput sorts them, then cut to the first MaxProblems; the
 // message names the first, or the detail. A not-json or invalid cause with
 // nothing to say what is wrong is a bug, reported as internal.
 func CorruptBy(path string, c CorruptCause) *Error {
@@ -283,10 +295,7 @@ func CorruptBy(path string, c CorruptCause) *Error {
 		if len(ps) > 1 {
 			msg += fmt.Sprintf(" (and %d more)", len(ps)-1)
 		}
-		if len(ps) > MaxCorruptProblems {
-			ps, d.ProblemsTruncated = ps[:MaxCorruptProblems], true
-		}
-		d.Problems = ps
+		d.Problems, d.ProblemsTruncated = capProblems(ps)
 	case c.Detail != "":
 		msg = fmt.Sprintf("%s: corrupt: %s", path, c.Detail)
 	case c.Reason == CorruptUnexpectedFile:

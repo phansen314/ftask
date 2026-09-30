@@ -36,8 +36,10 @@
               "reason": { "type": "string", "description": "Human-readable." }
             },
             "additionalProperties": false
-          }
-        }
+          },
+          "maxItems": 20
+        },
+        "problems_truncated": { "const": true, "description": "Present only when problems omits some of those found." }
       },
       "additionalProperties": false
     },
