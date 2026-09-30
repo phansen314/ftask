@@ -352,7 +352,7 @@ An operation is a function over a transaction: `func(tx *store.Tx, in Input) (Re
 ### Where each kind of test runs
 
 - **In-process**, for speed: everything that does not depend on the process itself — operations, validation, the parser, the tree walk, the cycle check.
-- **`e2e/`, against the built binary**, for what only a real process shows: exit codes, SIGPIPE, `/dev/full`, signals, crashes, and the lock between processes. Each test gets its own temp directory and `XDG_CONFIG_HOME`.
+- **`e2e/`, against the built binary**, for what only a real process shows: exit codes, SIGPIPE, `/dev/full`, signals, crashes, and the lock between processes. Each test gets its own temp directory as `HOME`, with `XDG_CONFIG_HOME` inside it; ftask keeps its config there on Linux and in `~/Library/Application Support/ftask` on macOS ([Config file](design-spec.md#config-file)).
 
 ## Writing files
 
@@ -467,9 +467,27 @@ For each operation, a set of faults, each of which alone triggers one error kind
 
 - **Fuzzing** (Go's native fuzzer) of the JSON reader and the CLI: any command line yields a defined envelope and never a panic, since a panic is a crash (exit 134).
 - **Determinism.** Every read runs twice over the same tree; the bytes must match, warnings and `problems` order included.
-- **The CLI spec's examples.** Every `sh` block in the [CLI spec](cli-spec.md) runs against a fixture tree in CI and must exit as its context implies, producing JSON that `jq` accepts. Examples needing outside tools (`gh`, `$EDITOR`) are marked and skipped.
+- **The CLI spec's examples.** Every `sh` block in the [CLI spec](cli-spec.md) is to run against a fixture tree and exit as its context implies, producing JSON that `jq` accepts; examples needing outside tools (`gh`, `$EDITOR`) are marked and skipped. No test does this yet, so CI does not check the examples.
 - **Race detector.** Every in-process test runs under `go test -race`.
 
 ### CI matrix
 
-A CI matrix of Linux amd64 and macOS arm64, with the Go version pinned in `go.mod`. Every test runs on both, except `/dev/full`, which is Linux-only.
+`.github/workflows/ci.yml` runs on every push to `main` and every pull request. A new commit on a pull request cancels that pull request's running check; every commit on `main` gets its own.
+
+**Go version.** The `toolchain` line in `go.mod`, which `actions/setup-go` installs; each job prints `go version`. The `go` line stays the minimum needed to build ftask. No other file names a Go version.
+
+**Test matrix.** Linux amd64 (`ubuntu-latest`) and macOS arm64 (`macos-latest`), neither cancelled by the other's failure. Each runs, as separate steps:
+
+1. `gofmt -l .`, which must print nothing;
+2. `go vet ./...`, then `go vet -tags e2e_hooks ./...` for the [test hooks](#test-hooks);
+3. `go build ./...`;
+4. `go test ./...`, never with `-short`: the [lock](#lock) stress tests (5 and 6) skip under it, and their macOS run is the check [Mechanism](#mechanism) relies on;
+5. `scripts/smoke.sh`, installing `jq` first if the runner lacks it.
+
+Every test runs on both, except the two `/dev/full` tests ([Exit and signals](#exit-and-signals)), which skip elsewhere: macOS has no `/dev/full`.
+
+**Race detector.** A separate Linux job runs `go test -race` over every package except `e2e/`, whose binaries are built without `-race`, so the detector would see only the test harness.
+
+**Vulnerabilities.** A separate Linux job runs `govulncheck ./...`, pinned to a version, and fails on any vulnerability ftask's code can reach, in a dependency or in the standard library of the Go version in use. Vulnerabilities only in required modules, which ftask never calls, are reported by `-show verbose` and do not fail it.
+
+**Actions** are pinned to a full commit SHA, with the version in a comment.

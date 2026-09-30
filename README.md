@@ -1,5 +1,7 @@
 # ftask
 
+[![CI](https://github.com/phansen314/ftask/actions/workflows/ci.yml/badge.svg)](https://github.com/phansen314/ftask/actions/workflows/ci.yml)
+
 Task management on one machine, with the filesystem as the database: tasks are JSON files in nested folders, with dependencies between them, and a Markdown notes file each. No daemon, no index, no server. Every command prints one line of JSON, so it is built to be driven by Claude Code, with `jq` for anything a person reads.
 
 Linux and macOS only.
