@@ -58,6 +58,9 @@ type Root interface {
 	Link(oldname, newname string) error
 	// Rename publishes a file over an existing one.
 	Rename(oldname, newname string) error
+	// SyncDir flushes a directory's entries to disk (fsync), so a file just
+	// published in it survives a system crash.
+	SyncDir(name string) error
 	// RenameNoReplace moves a file or folder to a name that must be free: it
 	// fails with EEXIST rather than replace anything there — even an empty
 	// folder, which rename(2) would silently replace. The check and the move
@@ -77,6 +80,8 @@ type Root interface {
 // File is a temp file being written.
 type File interface {
 	io.Writer
+	// Sync flushes what was written to disk (fsync).
+	Sync() error
 	Close() error
 }
 

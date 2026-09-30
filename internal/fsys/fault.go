@@ -20,10 +20,12 @@ const (
 	OpReadDir    = "readdir"
 	OpCreateTemp = "createtemp"
 	OpWrite      = "write"
+	OpSyncFile   = "syncfile"
 	OpCloseFile  = "closefile"
 	OpLink       = "link"
 	OpRename     = "rename"
 	OpRenameNR   = "rename-noreplace"
+	OpSyncDir    = "syncdir"
 	OpRemove     = "remove"
 	OpRemoveAll  = "removeall"
 	OpLock       = "lock"
@@ -185,6 +187,13 @@ func (r *faultRoot) Rename(oldname, newname string) error {
 	return r.r.Rename(oldname, newname)
 }
 
+func (r *faultRoot) SyncDir(name string) error {
+	if err := r.before(Op{Name: OpSyncDir, Path: name}); err != nil {
+		return err
+	}
+	return r.r.SyncDir(name)
+}
+
 func (r *faultRoot) RenameNoReplace(oldname, newname string) error {
 	if err := r.before(Op{Name: OpRenameNR, Path: oldname, NewPath: newname, Mutating: true}); err != nil {
 		return err
@@ -238,6 +247,13 @@ func (f *faultFile) Write(p []byte) (int, error) {
 		return 0, err
 	}
 	return f.f.Write(p)
+}
+
+func (f *faultFile) Sync() error {
+	if err := f.r.before(Op{Name: OpSyncFile, Path: f.name}); err != nil {
+		return err
+	}
+	return f.f.Sync()
 }
 
 // Close closes the real file even when a fault is injected, so a test never

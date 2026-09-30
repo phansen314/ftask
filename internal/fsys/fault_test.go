@@ -22,8 +22,10 @@ func TestFaultPassesThrough(t *testing.T) {
 	must(t, err)
 	_, err = f.Write([]byte("x"))
 	must(t, err)
+	must(t, f.Sync())
 	must(t, f.Close())
 	must(t, r.Link(name, "1.json"))
+	must(t, r.SyncDir("."))
 	must(t, r.Remove(name))
 	got, err := r.ReadFile("1.json")
 	must(t, err)
@@ -35,8 +37,10 @@ func TestFaultPassesThrough(t *testing.T) {
 		{Name: OpOpenRoot, Path: dir},
 		{Root: dir, Name: OpCreateTemp, Path: ".", Mutating: true},
 		{Root: dir, Name: OpWrite, Path: name, Mutating: true},
+		{Root: dir, Name: OpSyncFile, Path: name},
 		{Root: dir, Name: OpCloseFile, Path: name},
 		{Root: dir, Name: OpLink, Path: name, NewPath: "1.json", Mutating: true},
+		{Root: dir, Name: OpSyncDir, Path: "."},
 		{Root: dir, Name: OpRemove, Path: name, Mutating: true},
 		{Root: dir, Name: OpReadFile, Path: "1.json"},
 	}

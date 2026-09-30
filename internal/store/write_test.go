@@ -62,6 +62,7 @@ func TestReplace(t *testing.T) {
 }
 
 // A failure at any step leaves no temp file behind and the target untouched.
+// (A failed directory flush is not a failure: see TestPublishSyncDirFails.)
 func TestPublishFailures(t *testing.T) {
 	for _, tc := range []struct {
 		op   string
@@ -69,6 +70,7 @@ func TestPublishFailures(t *testing.T) {
 	}{
 		{fsys.OpCreateTemp, "EACCES"},
 		{fsys.OpWrite, "ENOSPC"},
+		{fsys.OpSyncFile, "EIO"},
 		{fsys.OpCloseFile, "EIO"},
 		{fsys.OpRename, "EXDEV"},
 		{fsys.OpLink, "EMLINK"},
@@ -112,8 +114,11 @@ func TestPublishSteps(t *testing.T) {
 	})
 	var names []string
 	for _, op := range ops {
-		if op.Mutating {
+		if op.Mutating || op.Name == fsys.OpSyncFile || op.Name == fsys.OpSyncDir {
 			names = append(names, op.Name)
+		}
+		if op.Name == fsys.OpSyncDir && op.Path != "proj" {
+			t.Errorf("synced %q", op.Path)
 		}
 		if op.Name == fsys.OpCreateTemp && op.Path != "proj" {
 			t.Errorf("temp file created in %q", op.Path)
@@ -122,10 +127,24 @@ func TestPublishSteps(t *testing.T) {
 			t.Errorf("%s from %q", op.Name, op.Path)
 		}
 	}
-	want := "createtemp write link remove createtemp write rename"
+	want := "createtemp write syncfile link syncdir remove createtemp write syncfile rename syncdir"
 	if got := strings.Join(names, " "); got != want {
 		t.Errorf("steps %q, want %q", got, want)
 	}
+}
+
+// A directory that can't be flushed doesn't fail the write: the file is
+// already published, so reporting an error would say it wasn't.
+func TestPublishSyncDirFails(t *testing.T) {
+	f := newFixture(t)
+	env := f.withFault(fsys.ErrnoAt(fsys.OpSyncDir, "", 1, syscall.EIO))
+	writeTx(t, env, nil, func(tx *Tx) {
+		wantNoErr(t, tx.Create("2.json", []byte("new")))
+	})
+	if got := f.read("tasks/2.json"); got != "new" {
+		t.Errorf("2.json is %q", got)
+	}
+	f.noTemps("tasks")
 }
 
 func TestWritesNeedWrite(t *testing.T) {

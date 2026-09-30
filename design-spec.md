@@ -175,7 +175,7 @@ Folders are addressed by their path from the root, written with `/` separators a
 - Positive integer, no leading zeros, at most 15 digits. The **ID ceiling**, 999,999,999,999,999, is below 2^53, so every ID is exact in JSON readers that store numbers as doubles (JavaScript, `jq`). Issuing an ID past it fails with [`conflict`](operations.md#error-kinds) (`rule`: `id-exhausted`).
 - Unique across the whole tree, not per folder, since `blocked_by` references tasks by ID alone (see [Invariants](#invariants)).
 - Assigned from a monotonically increasing sequence, recorded as `last_id` in [`ftask.json`](#root-metadata) so it travels with the tree. The sequence may have gaps: an ID can be consumed without a task being created (e.g. by a process crash mid-create).
-- **Never reused**, even after its task is deleted — short of a system crash or an outside change (e.g. a merge of `ftask.json` that keeps a lower `last_id`), either of which can cause reuse. [`doctor`](#doctor) detects it.
+- **Never reused**, even after its task is deleted — short of an outside change (e.g. a merge of `ftask.json` that keeps a lower `last_id`) or a system crash on a disk that ignores flushes, either of which can cause reuse (see `create` › Crash behavior in [`create`](operations.md#create)). [`doctor`](#doctor) detects it.
 
 #### Task filenames
 
@@ -315,6 +315,8 @@ Two kinds of interruption are distinguished throughout:
 - A **process crash** — the ftask process crashing or being killed — leaves every completed file step in place, in order.
 - A **system crash** — power loss or an operating-system crash — may not: the filesystem can lose recent steps, or keep a later step while losing an earlier one.
 
+ftask narrows that: every file it writes is flushed to disk before it is published, and its folder after, so a written file survives a system crash whole, and before any later step. The other steps — creating folders, and renaming or removing files and folders — are not flushed, so a system crash can still lose them or reorder them. All of this relies on the disk honoring flushes, which some consumer drives and virtual machines don't.
+
 A bare "crash" means either.
 
 ### Guarantees
@@ -326,11 +328,11 @@ These apply to write operations (see [Operation kinds](operations.md#operation-k
 - **Fail fast.** A write that cannot start because another write holds the lock fails immediately with a distinct error, so the caller can tell contention from other failures and retry.
 - **Writes decide on current state.** Everything a write's correctness depends on — the task it modifies, the graph it checks for cycles, the references it removes, the next ID — is read after the write lock is acquired, never before.
 - **No lost updates.** Following from the above, two writes to the same task, one after the other, both take effect.
-- **Atomic files.** Each file ftask writes is replaced all-or-nothing. A reader never sees a partially written file from ftask. After a system crash, a file ftask wrote may come back empty, garbled, or stale. A read reports an empty or garbled task file as unusable (see [Reads](#reads)); a stale one is indistinguishable from a valid file.
+- **Atomic files.** Each file ftask writes is replaced all-or-nothing. A reader never sees a partially written file from ftask. Because each is flushed before it is published (see [Crashes](#crashes)), a file ftask wrote comes back from a system crash whole: the version written, or, if the crash came before it was published, the one before. A read reports an empty or garbled task file as unusable (see [Reads](#reads)); only an outside change, or a disk that ignores flushes, can leave one.
 - **Writes introduce no violations.** A completed write introduces no new invariant violation, provided the tree already satisfied the invariants the write checks. A tree damaged by a system crash or an outside change stays damaged until [`doctor`](#doctor) repairs it; see `create` › Crash behavior in [`create`](operations.md#create) for the one way a write can then compound the damage.
 - **Partial work is ordered and reported.** A write that touches several files orders its steps so each intermediate state is as benign as possible. If it fails partway, it reports what it had already done rather than pretending nothing happened.
 - **Crashes do not wedge ftask.** A write interrupted by a process or system crash never prevents later writes from starting, and needs no manual cleanup to unblock them.
-- **Crashes may leave inconsistency.** A write interrupted partway through a multi-file change may leave the tree violating an invariant. After a system crash this holds even for writes whose steps are ordered to be safe, and even for a single-file write. Repairing that is the job of `doctor`, not of normal operation.
+- **Crashes may leave inconsistency.** A write interrupted partway through a multi-file change may leave the tree violating an invariant. After a system crash this holds even for writes whose steps are ordered to be safe, when the steps a crash loses are ones ftask does not flush (see [Crashes](#crashes)). Repairing that is the job of `doctor`, not of normal operation.
 
 ### Walking the tree
 

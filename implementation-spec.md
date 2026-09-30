@@ -357,7 +357,9 @@ An operation is a function over a transaction: `func(tx *store.Tx, in Input) (Re
 Every file ftask writes — task files, `.md` notes, `ftask.json`, the config — is published through a temp file, per [Mechanism](#mechanism)'s atomic file writes:
 
 - **Name.** `.ftask-tmp-<random>`, in the directory of the file it will become: hidden (so reads ignore it), recognizably ftask's (so [`doctor`](design-spec.md#doctor) can find leftovers), and random (so two writes never collide).
-- **Created exclusively** (`O_CREATE|O_EXCL`), written in full, then published: `link` to create a new file, so an existing one is never clobbered (`EEXIST` is `corrupt`, `unexpected-file`); `rename` to replace one. The temp file is then removed.
+- **Created exclusively** (`O_CREATE|O_EXCL`), written in full, flushed (`fsync`), then published: `link` to create a new file, so an existing one is never clobbered (`EEXIST` is `corrupt`, `unexpected-file`); `rename` to replace one. The folder is then flushed, and the temp file removed.
+- **Why flush.** Without it, a system crash can leave a published file empty — a new file published by `link` gets no help from ext4's `auto_da_alloc` — or keep a later step while losing it, e.g. a task file without the `last_id` increment before it, which reissues the ID. Flushing the temp file makes the published file whole; flushing the folder makes the publish itself durable before the next step starts.
+- **Flush failures.** A failed file flush fails the write, with nothing published. A failed folder flush does not: the file is already published, so an error would report a change as not made. It is ignored, like a temp file that can't be removed.
 - **Mode** `0644` for files, `0755` for folders, before the umask.
 
 ## Config file
@@ -453,7 +455,7 @@ Each write operation's **Crash behavior** lists what each step can leave behind;
 
 **Errors midway.** The same steps with an injected errno instead of a kill: the envelope's `partial` matches the operation's partial schema and what took effect.
 
-System crashes — steps lost or reordered by power loss — are not simulated: ftask makes no durability ordering promise, and the design spec leaves their consequences to `doctor`.
+System crashes — steps lost or reordered by power loss — are not simulated. Each published file is flushed, with its folder, before the next step ([Writing files](#writing-files)), so publishes keep their order; the steps that aren't flushed — creating folders, renames, removals — make no durability promise, and the design spec leaves their consequences to `doctor`.
 
 ### Precedence tests
 

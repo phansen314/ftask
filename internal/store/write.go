@@ -14,16 +14,22 @@ const FolderMode = 0o755
 
 // Publish writes data to rel, a path within r, through a temp file in rel's
 // directory (implementation-spec.md, Writing files): created exclusively,
-// written in full, then published — by rename when replace is set, else by
-// link, which never clobbers an existing file. The temp file is then
-// removed; failing to remove it is not an error (doctor finds leftovers).
-// Any failure returns the OS error; atLink reports that it came from link.
+// written in full and flushed to disk, then published — by rename when
+// replace is set, else by link, which never clobbers an existing file — and
+// the directory flushed, so the file survives a system crash whole and before
+// any later step. The temp file is then removed. Failing to flush the
+// directory or to remove the temp file is not an error: the file is already
+// published (doctor finds leftovers). Any other failure returns the OS error,
+// with nothing published; atLink reports that it came from link.
 func Publish(r fsys.Root, rel string, data []byte, replace bool) (atLink bool, err error) {
 	f, tmp, err := r.CreateTemp(path.Dir(rel))
 	if err != nil {
 		return false, err
 	}
 	_, err = f.Write(data)
+	if err == nil {
+		err = f.Sync()
+	}
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
@@ -36,11 +42,16 @@ func Publish(r fsys.Root, rel string, data []byte, replace bool) (atLink bool, e
 			r.Remove(tmp)
 			return false, err
 		}
+		r.SyncDir(path.Dir(rel))
 		return false, nil
 	}
-	err = r.Link(tmp, rel)
+	if err := r.Link(tmp, rel); err != nil {
+		r.Remove(tmp)
+		return true, err
+	}
+	r.SyncDir(path.Dir(rel))
 	r.Remove(tmp)
-	return err != nil, err
+	return false, nil
 }
 
 // Create publishes a new file at rel. A file already there is corrupt

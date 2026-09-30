@@ -948,7 +948,7 @@ Present only when an error (e.g. `io`) comes after at least one dependent was re
 2. `folder` is renamed to a hidden temp name in the root — one atomic step, however large the folder. From here the folder is gone from the tree, and the operation has succeeded.
 3. The temp folder is removed. A process crash, or an error, here leaves a hidden leftover, which reads ignore and `doctor` reports; the operation still succeeds.
 
-After a [system crash](design-spec.md#crashes) the ordering may not survive: the rename can persist while a dependent's rewrite is lost, leaving a dangling reference for `doctor`.
+A [system crash](design-spec.md#crashes) keeps this order too: each dependent is flushed before the rename. The rename and the removal are not flushed, so a system crash can undo them, bringing the folder back — a valid tree — or leaving the hidden leftover.
 
 **Retry safety:** after `busy`, an error with `partial`, or a crash before step 2, safe: rerunning removes what is left. After success, rerunning fails with `not-found`.
 
@@ -1142,7 +1142,7 @@ Present only when the failure came after `last_id` was incremented. Once the tas
 2. The task file is created. A process crash here leaves a valid task whose `.md` is missing, which reads as empty notes.
 3. The `.md` is created.
 
-After a [system crash](design-spec.md#crashes), the ordering may not survive: the task file can persist while the `last_id` increment is lost. (An outside change, such as a merge of `ftask.json`, can produce the same state.) The task then has an ID above `last_id`, and the next `create` issues that ID again:
+A [system crash](design-spec.md#crashes) keeps this order too: `ftask.json` is flushed before the task file is created. Only an outside change, such as a merge of `ftask.json`, or a system crash on a disk that ignores flushes, can leave the task file without the `last_id` increment. The task then has an ID above `last_id`, and the next `create` issues that ID again:
 
 - **In a different folder**, it succeeds, producing two tasks with one ID. Reads report them as `duplicate-id`.
 - **In the same folder**, the existing task file blocks it: `create` fails with `corrupt` (`reason`: `unexpected-file`) and a `partial` for the consumed ID. A retry uses the next ID and succeeds.
@@ -1845,7 +1845,7 @@ Present only when an error (e.g. `io`) comes after at least one dependent was re
 2. The task file is removed. This is the moment the task is gone. Removing it before the `.md` means a failure never leaves a surviving task without its notes.
 3. The `.md` is removed. A crash before this leaves an orphaned `.md`, which reads ignore and `doctor` reports.
 
-After a system crash the ordering may not survive: the removal can persist while a dependent's rewrite is lost, leaving a dangling reference for `doctor`.
+A [system crash](design-spec.md#crashes) keeps this order too: each dependent is flushed before the task file is removed. The removals are not flushed, so a system crash can undo them, bringing the task back — a valid tree — or leaving the orphaned `.md`.
 
 **Retry safety:** after `busy`, an error with `partial`, or a crash before step 2, safe: rerunning removes what is left, and reports only the dependents it rewrote itself. After step 2, rerunning fails with `not-found`; an orphaned `.md` is left for `doctor`.
 

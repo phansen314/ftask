@@ -120,6 +120,18 @@ func (r *osRoot) ReadFile(name string) ([]byte, error) {
 	return io.ReadAll(f)
 }
 
+func (r *osRoot) SyncDir(name string) error {
+	d, err := r.r.Open(name)
+	if err != nil {
+		return err
+	}
+	err = d.Sync()
+	if cerr := d.Close(); err == nil {
+		err = cerr
+	}
+	return err
+}
+
 func (r *osRoot) ReadDir(name string) ([]fs.DirEntry, error) {
 	f, _, err := r.openNoFollow(name)
 	if err != nil {
