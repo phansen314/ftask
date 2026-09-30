@@ -14,7 +14,7 @@ The intended user is a power user working through Claude, with `jq` for anything
 - **Encoding.** Output is UTF-8, with the string escaping of the design spec's [File format](design-spec.md#file-format): only `"`, `\`, U+0000–U+001F, U+2028, and U+2029 are escaped; everything else is raw UTF-8.
 - **Delivered before exit.** Exit `0`, `1`, or `2` is reported only once the whole envelope has been written. On any other exit status, stdout may hold nothing or an incomplete line (see [Exit codes](#exit-codes)).
 - **stderr** gets at most one line from ftask, written after the envelope has been delivered, so a failure stays visible when stdout goes into a pipeline (e.g. `ftask create … | jq -r .result.id`):
-  - exit `1` or `2`: `ftask: <kind>: <message>` — even when the envelope also has warnings;
+  - exit `1` or `2`: `ftask: <kind>: <message>` — even when the envelope also has warnings; a usage error's message drops its own leading `usage: `, so the line reads `ftask: usage: unknown command`;
   - exit `0` with warnings: `ftask: N warnings (see .warnings in the output)` (`1 warning` for one); the warnings themselves are never listed;
   - exit `0` without warnings, and `--help`: nothing;
   - exit `3`: only its notice (see [Exit codes](#exit-codes)); a crash (any other exit status) may add its own diagnostics.

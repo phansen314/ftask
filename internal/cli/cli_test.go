@@ -96,7 +96,11 @@ func wantNote(t *testing.T, r result, stderr string) {
 	switch n := len(r.envelope["warnings"].([]any)); {
 	case r.envelope["ok"] != true:
 		e := r.envelope["error"].(map[string]any)
-		want = oneLine(fmt.Sprintf("ftask: %s: %s", e["kind"], e["message"])) + "\n"
+		msg := e["message"].(string)
+		if e["kind"] == "usage" {
+			msg = strings.TrimPrefix(msg, "usage: ")
+		}
+		want = oneLine(fmt.Sprintf("ftask: %s: %s", e["kind"], msg)) + "\n"
 	case n == 1:
 		want = "ftask: 1 warning (see .warnings in the output)\n"
 	case n > 1:

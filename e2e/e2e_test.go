@@ -428,7 +428,7 @@ func TestStderr(t *testing.T) {
 		stderr string
 	}{
 		{"failure", tr.cmd("complete", "999"), 1, "ftask: not-found: not found: task 999\n"},
-		{"usage", tr.cmd("nosuch"), 2, "ftask: usage: usage: unknown command\n"},
+		{"usage", tr.cmd("nosuch"), 2, "ftask: usage: unknown command\n"},
 		{"warnings", tr.cmd("list"), 0, "ftask: 3 warnings (see .warnings in the output)\n"},
 		{"clean", tr.cmd("version"), 0, ""},
 		{"corrupt", tr.cmd("show", "2"), 1, "ftask: corrupt: " + filepath.Join(tr.root(), "2.json") + ": corrupt: empty\n"},

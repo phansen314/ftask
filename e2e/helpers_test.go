@@ -113,6 +113,8 @@ func note(t *testing.T, stdout string) string {
 		t.Fatal(err)
 	}
 	switch n := len(env.Warnings); {
+	case env.Error.Kind == "usage":
+		return "ftask: usage: " + strings.TrimPrefix(env.Error.Message, "usage: ") + "\n"
 	case !env.OK:
 		return "ftask: " + env.Error.Kind + ": " + env.Error.Message + "\n"
 	case n == 1:

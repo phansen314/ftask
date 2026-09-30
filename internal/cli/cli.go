@@ -271,9 +271,14 @@ func envelopeLine(env ops.Envelope) ([]byte, int, string) {
 }
 
 // errorNote is the stderr line for a failure (cli-spec.md, Output), so it
-// stays visible when stdout goes into a pipeline.
+// stays visible when stdout goes into a pipeline. A usage message's own
+// "usage: " is dropped, since the kind already says it.
 func errorNote(e *errs.Error) string {
-	return oneLine("ftask: " + string(e.Kind) + ": " + e.Message)
+	msg := e.Message
+	if e.Kind == errs.KindUsage {
+		msg = strings.TrimPrefix(msg, "usage: ")
+	}
+	return oneLine("ftask: " + string(e.Kind) + ": " + msg)
 }
 
 // warningsNote is the stderr line for a success with n warnings; they are
