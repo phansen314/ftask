@@ -75,3 +75,7 @@ Restore only the removed paths, never the whole tree: `ftask.json` holds the las
 go test ./...        # unit and e2e tests
 scripts/smoke.sh     # the built binary from a shell, in a throwaway home
 ```
+
+## License
+
+[MIT](LICENSE)

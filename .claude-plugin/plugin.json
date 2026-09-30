@@ -6,6 +6,7 @@
   },
   "homepage": "https://github.com/phansen314/ftask",
   "repository": "https://github.com/phansen314/ftask",
+  "license": "MIT",
   "skills": [
     "./claude/skills/"
   ]
