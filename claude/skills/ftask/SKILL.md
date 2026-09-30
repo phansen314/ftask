@@ -69,7 +69,9 @@ ftask complete 42                                                  # done
 
 `frontier` lists open, unblocked tasks in the order to work on them: highest priority first, unprioritized after, ties oldest (lowest ID) first. Scope it with `--folder /proj` and `--recursive=false`, or by tag with `--tags-any`.
 
-`show` returns `result.tasks`, always an array: one task, or every copy if the ID is duplicated (with a `duplicate-id` warning — report it). Each has `readiness` (`ready`/`blocked`/`complete`), `blocking` (the blocker IDs still holding it up), and `notes_path`. **Notes are a plain Markdown file:** read it with the Read tool, and edit it with Edit/Write directly — there is no ftask command for notes after creation.
+Other agents (another Claude Code or OpenCode session, say) may be working from the same tree, and nothing stops two of them picking the same task from `frontier`. So before starting a task you picked yourself, rather than one the user named, tell the user which one you're taking.
+
+`show` returns `result.tasks`, always an array: one task, or every copy if the ID is duplicated (with a `duplicate-id` warning — report it). Each has `readiness` (`ready`/`blocked`/`complete`), `blocking` (the blocker IDs still holding it up), and `notes_path`. **Notes are a plain Markdown file:** read and edit it directly with your file tools — there is no ftask command for notes after creation.
 
 Overview of everything:
 
