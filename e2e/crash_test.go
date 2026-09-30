@@ -86,7 +86,7 @@ var crashCases = []crashCase{
 	{
 		name: "init", init: true,
 		args:  []string{"init", "~/tasks"},
-		order: [][]string{{"tasks"}, {"tasks/ftask.json"}, {".config", ".config/ftask"}, {".config/ftask/config.toml"}},
+		order: [][]string{{"tasks"}, {"tasks/ftask.json"}, configDirs, {configDir + "/config.toml"}},
 		// Once the config is written, init has succeeded, and a rerun is a
 		// rerun after success.
 		rerun: func(stage int) (int, string, bool) {
@@ -289,7 +289,7 @@ func TestCrashInjection(t *testing.T) {
 				last, seen[stage] = stage, true
 				t.Logf("k=%d: stage %d, temps %v", k, stage, crashed.temps)
 
-				if _, err := os.Stat(filepath.Join(tr.home, ".config/ftask/config.toml")); err == nil {
+				if _, err := os.Stat(filepath.Join(tr.home, configDir, "config.toml")); err == nil {
 					steps(t, []step{{tr.cmd("list", "--readiness", "ready,blocked,complete", "--include-folders"), 0, `"warnings":[]`}})
 				}
 				code, want, same := c.rerun(stage)
@@ -300,7 +300,7 @@ func TestCrashInjection(t *testing.T) {
 				}
 				// doctor never sees the config directory: init clears it.
 				for _, tmp := range s.temps {
-					if strings.HasPrefix(tmp, ".config/") {
+					if strings.HasPrefix(tmp, configDirs[0]+"/") {
 						t.Errorf("k=%d: rerun left %s", k, tmp)
 					}
 				}

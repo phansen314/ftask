@@ -89,22 +89,18 @@ func TestClosedPipe(t *testing.T) {
 func TestInfo(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		unset bool   // no HOME and no XDG_CONFIG_HOME
-		path  string // want config.path, relative to XDG_CONFIG_HOME
+		unset bool // no HOME and no XDG_CONFIG_HOME
 	}{
-		{"fresh home", false, "ftask/config.toml"},
-		{"no home", true, ""},
+		{"fresh home", false},
+		{"no home", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := ftask(t, "info")
 			var want any // config.path: null when it can't be located
-			for _, kv := range cmd.Env {
-				if x, ok := strings.CutPrefix(kv, "XDG_CONFIG_HOME="); ok && !tc.unset {
-					want = filepath.Join(x, tc.path)
-				}
-			}
 			if tc.unset {
 				cmd.Env = []string{"PATH=" + os.Getenv("PATH")}
+			} else {
+				want = filepath.Join(envHome(cmd), configDir, "config.toml")
 			}
 			r := run(t, cmd)
 			if r.code != 0 {
@@ -138,17 +134,12 @@ func TestShow(t *testing.T) {
 	}
 
 	cmd = ftask(t, "show", "1")
-	var xdg string
-	for _, kv := range cmd.Env {
-		if x, ok := strings.CutPrefix(kv, "XDG_CONFIG_HOME="); ok {
-			xdg = x
-		}
-	}
-	root := filepath.Join(filepath.Dir(xdg), "tasks")
+	home := envHome(cmd)
+	root := filepath.Join(home, "tasks")
 	for p, content := range map[string]string{
-		filepath.Join(xdg, "ftask", "config.toml"): `root = "` + root + "\"\n",
-		filepath.Join(root, "ftask.json"):          `{"schema": 1, "last_id": 1}`,
-		filepath.Join(root, "proj", "1.json"):      `{"schema": 1, "id": 1, "title": "t", "priority": null, "created_at": "2026-09-27T00:00:00Z", "completed_at": null,"updated_at": "2026-09-27T00:00:00Z", "blocked_by": [2], "tags": [], "extra": {}}`,
+		filepath.Join(home, configDir, "config.toml"): `root = "` + root + "\"\n",
+		filepath.Join(root, "ftask.json"):             `{"schema": 1, "last_id": 1}`,
+		filepath.Join(root, "proj", "1.json"):         `{"schema": 1, "id": 1, "title": "t", "priority": null, "created_at": "2026-09-27T00:00:00Z", "completed_at": null,"updated_at": "2026-09-27T00:00:00Z", "blocked_by": [2], "tags": [], "extra": {}}`,
 	} {
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 			t.Fatal(err)

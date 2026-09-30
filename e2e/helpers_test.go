@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -49,6 +50,18 @@ func ftask(t *testing.T, args ...string) *exec.Cmd {
 	cmd.Env = []string{"HOME=" + home, "XDG_CONFIG_HOME=" + filepath.Join(home, ".config"), "PATH=" + os.Getenv("PATH")}
 	return cmd
 }
+
+// configDirs is the config directory, relative to the home ftask gives a
+// command, after each parent init creates for it (design-spec.md, Config
+// file); configDir is the last of them.
+var configDirs = func() []string {
+	if runtime.GOOS == "darwin" {
+		return []string{"Library", "Library/Application Support", "Library/Application Support/ftask"}
+	}
+	return []string{".config", ".config/ftask"}
+}()
+
+var configDir = configDirs[len(configDirs)-1]
 
 // envHome is the home directory ftask gives cmd.
 func envHome(cmd *exec.Cmd) string {

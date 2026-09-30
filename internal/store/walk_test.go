@@ -78,8 +78,8 @@ func TestIndex(t *testing.T) {
 	}
 	f.mkdir("tasks/.git/objects")
 	f.write("tasks/.git/12.json", "")
-	f.mkdir("tasks/Proj")
-	f.write("tasks/Proj/13.json", "")
+	f.mkdir("tasks/Misc") // not "Proj": on a case-insensitive disk that is proj
+	f.write("tasks/Misc/13.json", "")
 	f.mkdir("tasks/-x")
 	f.mkdir("tasks/14.json") // a task filename that is a directory
 	f.write("tasks/notafolder", "")
