@@ -13,7 +13,7 @@ description: Track and work through the user's tasks with the ftask CLI — a lo
 ftask info
 ```
 
-Ready when `.result.usable` is true; if not, the rest of `.result` says why. When no root is set up, tell the user and suggest `ftask init ~/tasks` (or a path they choose). **Never run `init` unasked** — it changes this machine's setup.
+Ready when `.result.usable` is true; if not, the rest of `.result` says why. When no root is set up, tell the user and suggest `ftask init ~/tasks` (or a path they choose). **Never run `init` unasked** — it changes this machine's setup. If `init` fails with `conflict` and `rule: "config-exists"`, report it; never pass `--replace-config` unless the user asks for it.
 
 ## Reading output
 
