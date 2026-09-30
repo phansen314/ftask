@@ -89,6 +89,34 @@ func TestFromBuild(t *testing.T) {
 	}
 }
 
+// A build with no -ldflags version takes a release tag's version, and only a
+// release tag's.
+func TestFromBuildTagVersion(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		bi   *debug.BuildInfo
+		want string
+	}{
+		{"no build info", nil, DevVersion},
+		{"go install, tagged version", installed("v0.1.0"), "0.1.0"},
+		{"prerelease tag", installed("v0.2.0-rc.1"), "0.2.0-rc.1"},
+		{"pseudo-version", installed("v0.1.1-0.20260929021723-4df90bd5d3e3"), DevVersion},
+		{"checkout at a tag, modified", installed("v0.1.0+dirty"), DevVersion},
+		{"devel", installed("(devel)"), DevVersion},
+		{"no version", installed(""), DevVersion},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := fromBuild(tc.bi, DevVersion, "go-running", "linux/amd64").Version; got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+	// A version set at build time wins over the tag.
+	if got := fromBuild(installed("v0.1.0"), "1.4.0", "go-running", "linux/amd64").Version; got != "1.4.0" {
+		t.Errorf("-ldflags version: got %q", got)
+	}
+}
+
 func TestRead(t *testing.T) {
 	info := Read()
 	if info.Version != Version || info.Go == "" || !regexp.MustCompile(`^[a-z0-9]+/[a-z0-9]+$`).MatchString(info.Platform) {

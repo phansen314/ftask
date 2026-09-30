@@ -3,17 +3,23 @@ package buildinfo
 import (
 	"runtime"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"golang.org/x/mod/module"
+	"golang.org/x/mod/semver"
 )
 
 // Version is the release version, set at release build time:
 //
 //	go build -ldflags "-X github.com/phansen314/ftask/internal/buildinfo.Version=1.4.0"
 //
-// A development build keeps the default, which is still semver.
-var Version = "0.0.0-dev"
+// A build without it takes the version of the tag it was built from, if any
+// (see fromBuild); otherwise it keeps the default, which is still semver.
+var Version = DevVersion
+
+// DevVersion is Version's default, for a build from no release tag.
+const DevVersion = "0.0.0-dev"
 
 // Development-build values for a binary built without VCS information
 // (implementation-spec.md, Toolchain).
@@ -43,8 +49,13 @@ func Read() Info {
 
 // fromBuild builds Info from Go's embedded build information, nil when there
 // is none. goVersion and platform are the running toolchain's, used when bi
-// lacks them.
+// lacks them. A version left at DevVersion is replaced by the main module's
+// version when that is a release tag: go install pkg@v0.1.0 sets no -ldflags,
+// and Go stamps a build from a clean checkout at a tag with the tag too.
 func fromBuild(bi *debug.BuildInfo, version, goVersion, platform string) Info {
+	if bi != nil && version == DevVersion && isRelease(bi.Main.Version) {
+		version = strings.TrimPrefix(bi.Main.Version, "v")
+	}
 	info := Info{
 		Version:    version,
 		Commit:     UnknownCommit,
@@ -87,4 +98,11 @@ func fromBuild(bi *debug.BuildInfo, version, goVersion, platform string) Info {
 		}
 	}
 	return info
+}
+
+// isRelease reports whether v, a main module version, names a release tag: a
+// valid semantic version that is neither a pseudo-version nor marked with
+// build metadata (Go appends +dirty for uncommitted changes).
+func isRelease(v string) bool {
+	return semver.IsValid(v) && !module.IsPseudoVersion(v) && semver.Build(v) == ""
 }

@@ -4,6 +4,8 @@ Task management on one machine, with the filesystem as the database: tasks are J
 
 Linux and macOS only.
 
+**Pre-1.0:** until 1.0, the task file format, `ftask.json`, and the JSON output may change in place, with no `schema` bump or migration, so a new version can report an existing tree's files as `corrupt`. Each such change bumps the minor version (0.1 → 0.2), and its release notes say how to fix existing trees. See [Format versions](design-spec.md#format-versions).
+
 ## Install
 
 Needs Go 1.25 or later.

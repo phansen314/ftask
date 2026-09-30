@@ -270,6 +270,7 @@ Data formats are versioned by the `schema` field in each task file and in `ftask
 
 - **Exact match.** A binary supports exactly one format version for task files and one for `ftask.json`, as reported by [`version`](operations.md#version). A file whose `schema` differs is `unsupported-format` — whether older or newer.
 - **Writes preserve format.** A write never changes a file's `schema`. Formats change only through an explicit migration (see [`migrate`](operations.md#migrate)).
+- **Before 1.0, format 1 may change in place.** Until ftask 1.0, the task file format, `ftask.json`, and the CLI's JSON output (`schemas/`) may change without a `schema` bump or a migration, so a new binary can read an existing tree's files as `corrupt`. Adding the required `updated_at` field was such a change. Each one bumps ftask's minor version, and its release says how to fix existing trees. From 1.0, the rules above hold without exception.
 - **Whole tree.** A root is usable only when its `ftask.json` has the supported version. A task file with a different version is skipped by reads with an [`unusable-file`](operations.md#warning-kinds) warning, and is an `unsupported-format` error for any write that needs it.
 
 ### File validity

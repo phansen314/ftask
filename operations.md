@@ -487,6 +487,8 @@ A [folder path](design-spec.md#folder-paths).
 
 ftask releases follow [semantic versioning](https://semver.org/). The operation input, output, partial, error, and warning schemas are ftask's public contract: a breaking change to any of them requires a new major version. There is no separate API version.
 
+**Before 1.0**, the contract is not yet stable: a breaking change bumps the **minor** version instead (0.1 → 0.2), and its release says what changed. The same holds for the data formats; see [Format versions](design-spec.md#format-versions).
+
 Adding a new error kind, warning kind, or `conflict` rule is a **minor** change. Callers must therefore treat an unknown error kind as a generic failure and ignore unknown warning kinds. For the same reason the published schemas type `kind` (and `rule`) as a plain string, not a closed enum; the known values are listed in this document.
 
 Data formats are versioned separately; see the design spec's [Format versions](design-spec.md#format-versions). A release reports its format versions via [`version`](#version).
