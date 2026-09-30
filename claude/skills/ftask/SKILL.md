@@ -41,7 +41,7 @@ Error kinds worth handling:
 - `conflict` with `rule: "not-empty"` — `delete-folder` without `-r` on a folder that holds tasks or folders. Don't add `-r` on your own: ask the user.
 - `conflict` with `rule: "destination-exists"` — `move-folder` would land on a folder that already exists; folders are never merged.
 - `conflict` with `rule: "duplicate-id"` or `"id-above-last-id"` — the tree is damaged; report it, don't work around it.
-- `corrupt`, `unsupported-format`, `io`, `internal` — stop and report to the user; don't try to fix files by hand.
+- `corrupt`, `unsupported-format`, `io`, `internal` — stop and report to the user, quoting `.error.message` (for `corrupt` it names what is wrong); don't try to fix files by hand.
 
 ## Keep output small
 
