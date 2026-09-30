@@ -13,10 +13,10 @@
 # OpenCode: rules in ${XDG_CONFIG_HOME:-~/.config}/opencode/opencode.json, and
 # the skill as a link, opencode/skills/ftask, to this clone's copy.
 #
-# Safe to rerun. A settings file is backed up (to .bak) before it changes, and
-# only ftask's rules are added or removed; an opencode.jsonc, or an
-# opencode.json jq can't parse, is never touched: the rules are printed to add
-# by hand. Runs under macOS's /bin/bash 3.2. Needs jq.
+# Safe to rerun. A settings file is backed up (to .bak.<timestamp>, a new one
+# each time) before it changes, and only ftask's rules are added or removed;
+# an opencode.jsonc, or an opencode.json jq can't parse, is never touched: the
+# rules are printed to add by hand. Runs under macOS's /bin/bash 3.2. Needs jq.
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/.." && pwd -P)
@@ -141,11 +141,21 @@ if [[ -n $want_claude && -e $claude_settings ]] && ! jq empty "$claude_settings"
 fi
 
 # write_json LABEL FILE JSON: backs FILE up if it exists, then replaces it.
+# Each backup gets its own timestamp, so an install then an uninstall doesn't
+# overwrite the original with the installed version.
 write_json() {
+	local bak n
 	mkdir -p "$(dirname "$2")"
 	if [[ -e $2 ]]; then
-		cp -p "$2" "$2.bak"
-		echo "$1: backed up to $2.bak"
+		bak=$2.bak.$(date +%Y%m%d-%H%M%S)
+		# Two runs in the same second: don't overwrite the first's.
+		if [[ -e $bak ]]; then
+			n=2
+			while [[ -e $bak.$n ]]; do n=$((n + 1)); done
+			bak=$bak.$n
+		fi
+		cp -p "$2" "$bak"
+		echo "$1: backed up to $bak"
 	fi
 	printf '%s\n' "$3" >"$2.tmp"
 	mv "$2.tmp" "$2"

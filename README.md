@@ -34,7 +34,7 @@ scripts/install.sh --opencode    # or name them: --claude, --opencode
 scripts/install.sh --uninstall   # take it all out again
 ```
 
-It needs `jq`, backs a settings file up (to `.bak`) before changing it, touches only ftask's rules, and is safe to rerun. For OpenCode it also links the skill into `~/.config/opencode/skills/ftask`, so OpenCode's skill comes from this clone: `git pull` updates it. Claude Code's comes from the plugin, and tracks `main`: `claude plugin update ftask@ftask` picks up changes, or turn on auto-update for the `ftask` marketplace in `/plugin`. To try an edited skill in Claude Code before pushing, run `claude --plugin-dir .` in a clone.
+It needs `jq`, backs a settings file up (to `.bak.<timestamp>`, a new one each time) before changing it, touches only ftask's rules, and is safe to rerun. For OpenCode it also links the skill into `~/.config/opencode/skills/ftask`, so OpenCode's skill comes from this clone: `git pull` updates it. Claude Code's comes from the plugin, and tracks `main`: `claude plugin update ftask@ftask` picks up changes, or turn on auto-update for the `ftask` marketplace in `/plugin`. To try an edited skill in Claude Code before pushing, run `claude --plugin-dir .` in a clone.
 
 Then ask your agent things like "what should I work on next?" or "add a task to review the migration PR, blocked by 12".
 
