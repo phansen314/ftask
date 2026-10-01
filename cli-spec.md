@@ -266,7 +266,7 @@ Report everything wrong with the tree, and what `repair` would do about each pro
 
 | Option | Field | Default |
 |---|---|---|
-| `--kinds <kinds>` | `/kinds` | None: every kind, at most 20 items each. Comma list of [finding kinds](operations.md#finding-kinds), each reported in full. |
+| `--kinds <kinds>` | `/kinds` | None: every kind but the informational ones, at most 20 items each. Comma list of [finding kinds](operations.md#finding-kinds), each reported in full. |
 
 **Input:** none beyond the Options mapping.
 
@@ -279,6 +279,7 @@ Report everything wrong with the tree, and what `repair` would do about each pro
 ```sh
 ftask doctor                                   # healthy when .result.healthy is true; else .result.findings says why
 ftask doctor --kinds cycle,duplicate-id        # just these, in full
+ftask doctor --kinds stray-entry               # files ftask ignores: listed only when asked for
 ftask doctor | jq '.result.findings[] | select(.class != "manual") | .kind'   # what repair would fix
 ```
 

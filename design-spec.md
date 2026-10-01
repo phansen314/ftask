@@ -9,7 +9,7 @@ Operations on this data model are specified in [operations.md](operations.md).
 ## Assumptions
 
 - **ftask is the only writer under the root.** Every file and folder under the root is created, changed, and removed by ftask. The [invariants](#invariants) in this spec are guaranteed only for trees ftask alone has written. Any change made another way is an **outside change**, and is outside the contract.
-- **Notes are the exception.** A task's `.md` may be edited directly with any editor. Notes carry no invariants, so an outside change to them cannot violate any. It can leave stray entries, though: editor side files (e.g. `42.md~`), and an orphaned `.md` if a task is moved or removed while its notes are open in an editor. Both are handled as [Walking the tree](#walking-the-tree) describes. If an editor save and an ftask write to the same `.md` overlap, one of them may be lost.
+- **Notes are the exception.** A task's `.md` may be edited directly with any editor. Notes carry no invariants, so an outside change to them cannot violate any. It can leave stray entries, though: editor side files (e.g. `42.md~`), which ftask ignores, and an orphaned `.md` if a task is moved or removed while its notes are open in an editor. Both are handled as [Walking the tree](#walking-the-tree) describes. If an editor save and an ftask write to the same `.md` overlap, one of them may be lost.
 - **One user.** ftask serves a single OS user. That user's config names exactly one root. Every process running as the user and reaching the root — shells, agents, editors — shares one [write lock](#write-lock). A process whose environment points to a different config location (`HOME`, `XDG_CONFIG_HOME`) sees that config, or none, and gets [`not-initialized`](operations.md#error-kinds); one that gives no config location at all gets [`environment`](operations.md#error-kinds) (see [Config file](#config-file)). Sharing one root between OS users is not supported.
 - **The root is on a local filesystem.** Network mounts (SMB, NFS, and the like) are not supported: their locking cannot be relied on, so the [write lock](#write-lock) may not exclude other writers. A synced folder is fine — its files are local, and a separate process syncs them.
 - **Syncing and committing are allowed.** The root may be a git repository or a synced folder, since those tools carry files ftask wrote. Git is also the only undo for a delete (see [Undo](operations.md#undo)). Anything they leave inconsistent — a merge that introduces a cycle, a missing blocker, a conflicting file — is an outside change; finding it is the job of [`doctor`](operations.md#doctor), and repairing it, where that is safe, of [`repair`](operations.md#repair) — not of normal operation (see [Diagnosis and repair](#diagnosis-and-repair)).
@@ -343,9 +343,10 @@ These rules apply to every operation that walks the tree — reads and writes al
 
 **Which entries count.**
 
-- An entry that matches neither the folder-name nor the task-filename rules (e.g. an editor's backup file, a `.md` without a task file) is skipped silently; [`doctor`](operations.md#doctor) reports it. The root's own `ftask.json` is exempt: it is the [root metadata](#root-metadata), not a stray entry.
+- An entry that matches neither the folder-name nor the task-filename rules (e.g. an editor's backup file, a `README.md`) is skipped silently. It is allowed: ftask never needed it, so it is not damage, and [`doctor`](operations.md#doctor) lists it only when asked. A `.md` named like a task's notes but with no task file beside it is an orphan, which `doctor` reports. The root's own `ftask.json` is exempt: it is the [root metadata](#root-metadata), not a stray entry.
 - So is an entry whose name matches but whose type doesn't: a folder name must be a directory, a task filename a regular file.
-- Symbolic links under the root are never followed. A symlink is treated as a non-matching entry, whatever it points to.
+- Symbolic links under the root are never followed. A symlink is skipped, whatever it points to, so a folder of tasks linked into the tree is not part of it.
+- Unlike a non-matching name, those two are likely mistakes, and hide what they hold: `doctor` reports them.
 - **Exception:** an entry the input names, or that its path passes through, is not skipped. It is checked by the [path walk](operations.md#path-walk), which reports a wrong type or a symlink as an error.
 
 **Which problems are reported.** An operation reports only problems that bear on its own result (see [Precedence](operations.md#precedence)):
@@ -403,15 +404,18 @@ A system crash or an outside change can leave a tree that breaks an [invariant](
 - **Safe repairs only.** `repair` changes only what can't lose information or change meaning, given the tree is at rest: a temp file holds nothing anyone wrote; raising `last_id` only moves it up, as it always moves; a dangling reference names a task that isn't there; an empty `.md`, or a second name for notes that are also at their task, holds nothing that isn't kept elsewhere. Duplicate IDs, cycles, and unusable files all need someone to decide which version is right, so `doctor` explains them and suggests what to run, and `repair` leaves them to a person.
 - **Repairs are ordinary writes.** Each file `repair` changes is written atomically, as every write's is, and running it again is always safe.
 
-Every finding kind is in one of three classes:
+Every finding kind is in one of four classes:
 
 | Class | What `repair` does | Kinds |
 |---|---|---|
 | ***auto*** | Repairs it whenever it runs, unless the caller names other kinds. | `temp-leftover`, `id-above-last-id`, `dangling-reference`, `orphan-notes` (only the items that are safe; see [Finding kinds](operations.md#finding-kinds)) |
 | ***on-request*** | Repairs it only when the caller names the kind. | `metadata-missing` |
-| ***manual*** | Never repairs it. `doctor` reports it, with a suggestion. | `duplicate-id`, `cycle`, `unusable-file`, `metadata-unusable`, `nested-tree`, `stray-entry`, `unreadable-folder` |
+| ***manual*** | Never repairs it. `doctor` reports it, with a suggestion. | `duplicate-id`, `cycle`, `unusable-file`, `metadata-unusable`, `nested-tree`, `skipped-entry`, `unreadable-folder` |
+| ***informational*** | Never repairs it. `doctor` reports it only when the caller names the kind, and it never makes a tree unhealthy: it is not damage. | `stray-entry` |
 
 Rebuilding a missing `ftask.json` is on-request because the `last_id` it writes is the highest ID found. A task with a higher ID that was deleted before `ftask.json` was lost would have its ID issued again, breaking *Never reused* (see [Task IDs](#task-ids)). Only the user knows, e.g. from git history, whether that happened.
+
+`stray-entry` is informational so that a user's own files, and whatever their editor leaves, never make a tree look damaged. ftask ignores those entries safely, and listing them in every report would only bury the findings that matter.
 
 ## Configuration
 

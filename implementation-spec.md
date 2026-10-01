@@ -424,9 +424,9 @@ How the [diagnostic](operations.md#operation-kinds) operations, [`doctor`](opera
 The [index](#the-index) walk takes an optional recorder, the **survey**. Normal operations pass none and pay nothing for it. A diagnostic transaction passes one, so the survey comes from the same single walk as the index, in the same tree order. The survey records:
 
 - each entry whose name starts with `fsys.TempPrefix`, file or folder; a temp folder is not descended into;
-- each entry the index skips that is not hidden — a non-matching name, a matching name of the wrong type, a symlink — with its `stray-entry` reason;
+- each entry the index skips that is not hidden: a symlink or a matching name of the wrong type, as a `skipped-entry` with its reason; a non-matching name, as a `stray-entry`;
 - each `.md` named like a task's notes that is a regular file, with its folder;
-- each `ftask.json` below the root, which is not also recorded as a stray entry.
+- each `ftask.json` below the root, which is not also recorded as a `stray-entry`.
 
 Every other hidden entry is skipped, and not descended into, as by every walk. Folders that can't be listed are already in the index. `Tx.Survey()` is built and cached with `Tx.Index()`, and `NextStep` drops both.
 
@@ -450,7 +450,7 @@ Each finding kind is one check: a function from the index, the survey, `MetaStat
 ### `doctor` and `repair` tests
 
 - **Cycle groups.** On thousands of small random graphs, `CycleGroups` must match the groups from a transitive closure (two IDs share a group exactly when each reaches the other), and `ExampleCycle` must match enumerating every simple cycle through L and picking the shortest, then lexicographically smallest.
-- **One fixture per finding kind**, in-process: a tree built by hand, the exact item `doctor` reports for it, and what `repair` leaves. This covers the outside changes the crash matrix can't make: a `last_id` merged backwards, a duplicate ID, a cycle, a nested tree, a stray entry, an unreadable folder, a missing or unusable `ftask.json`.
+- **One fixture per finding kind**, in-process: a tree built by hand, the exact item `doctor` reports for it, and what `repair` leaves. This covers the outside changes the crash matrix can't make: a `last_id` merged backwards, a duplicate ID, a cycle, a nested tree, a skipped entry, a stray entry (absent unless asked for, and healthy either way), an unreadable folder, a missing or unusable `ftask.json`.
 - **System-crash states**, as fixtures too, since crash injection kills processes, not machines: a task file above `last_id`, an empty task file, a removal undone.
 - **Every `orphan-notes` reason**, including a `linked` `.md` that is changed, or given a different inode, between the check and the removal: it is left, and reported.
 - **Caps.** 25 temp leftovers: 20 items, `count` 25, `truncated`; with `kinds` naming the kind, all 25.

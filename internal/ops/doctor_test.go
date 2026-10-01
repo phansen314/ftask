@@ -160,11 +160,10 @@ func TestDoctorKinds(t *testing.T) {
 			files: "10.json 11.json p/ p/12.json p/13.json q/ q/20.json q/21.json",
 		},
 		{
-			name: "nested-tree and stray-entry",
+			name: "nested-tree and skipped-entry",
 			setup: func(f *fixture) {
 				f.write("tasks/p/ftask.json", `{"schema": 1, "last_id": 3}`)
-				f.write("tasks/notes.txt", "")
-				f.write("tasks/42.md~", "")
+				f.write("tasks/notes.txt", "") // stray-entry: not reported unless asked for
 				if err := os.MkdirAll(filepath.Join(f.root, "18.json"), 0o755); err != nil {
 					t.Fatal(err)
 				}
@@ -174,12 +173,10 @@ func TestDoctorKinds(t *testing.T) {
 			},
 			doctor: `{"healthy":false,"findings":[{"kind":"nested-tree","class":"manual","count":1,"truncated":false,"items":[` +
 				`{"paths":["~/tasks/p/ftask.json"],"ids":[],"action":null,"suggest":"move the tree it belongs to out of this one, or remove this ftask.json if the folder is part of this tree"}]},` +
-				`{"kind":"stray-entry","class":"manual","count":4,"truncated":false,"items":[` +
-				`{"paths":["~/tasks/18.json"],"ids":[],"action":null,"suggest":"move or remove it; ftask ignores it","reason":"type"},` +
-				`{"paths":["~/tasks/42.md~"],"ids":[],"action":null,"suggest":"move or remove it; ftask ignores it","reason":"name"},` +
-				`{"paths":["~/tasks/lnk"],"ids":[],"action":null,"suggest":"move or remove it; ftask ignores it","reason":"symlink"},` +
-				`{"paths":["~/tasks/notes.txt"],"ids":[],"action":null,"suggest":"move or remove it; ftask ignores it","reason":"name"}]}]}`,
-			files: "18.json/ 42.md~ lnk notes.txt p/ p/ftask.json",
+				`{"kind":"skipped-entry","class":"manual","count":2,"truncated":false,"items":[` +
+				`{"paths":["~/tasks/18.json"],"ids":[],"action":null,"suggest":"rename or remove it: it has a folder's or task file's name, but the wrong type, so ftask skips it","reason":"type"},` +
+				`{"paths":["~/tasks/lnk"],"ids":[],"action":null,"suggest":"ftask never follows a symlink, so what it leads to is not part of the tree: move the real folder or file in instead, or remove the link","reason":"symlink"}]}]}`,
+			files: "18.json/ lnk notes.txt p/ p/ftask.json",
 		},
 		{
 			name: "metadata-missing",
@@ -218,6 +215,32 @@ func TestDoctorKinds(t *testing.T) {
 				t.Errorf("after repair: %s\nwant %s\nrepair: %s", got, tc.files, out)
 			}
 		})
+	}
+}
+
+// A user's own files and an editor's backups are stray entries: listed only
+// when asked for, and never making the tree unhealthy; repair refuses them.
+func TestDoctorStrayEntry(t *testing.T) {
+	f := newFixture(t)
+	f.task("", 1, false)
+	f.write("tasks/README.md", "my tasks")
+	f.write("tasks/1.md~", "")
+	f.write("tasks/#1.md#", "")
+	if got, want := f.op("doctor", `{}`), `{"healthy":true,"findings":[]}`; got != want {
+		t.Errorf("doctor: got  %s\nwant %s", got, want)
+	}
+	want := `{"healthy":true,"findings":[{"kind":"stray-entry","class":"informational","count":3,"truncated":false,"items":[` +
+		`{"paths":["~/tasks/#1.md#"],"ids":[],"action":null,"suggest":"nothing to do: ftask ignores it"},` +
+		`{"paths":["~/tasks/1.md~"],"ids":[],"action":null,"suggest":"nothing to do: ftask ignores it"},` +
+		`{"paths":["~/tasks/README.md"],"ids":[],"action":null,"suggest":"nothing to do: ftask ignores it"}]}]}`
+	if got := f.op("doctor", `{"kinds": ["stray-entry"]}`); got != want {
+		t.Errorf("doctor, asked for:\ngot  %s\nwant %s", got, want)
+	}
+	if got, want := f.op("repair", `{}`), `{"repaired":[],"healthy":true,"findings":[]}`; got != want {
+		t.Errorf("repair: got  %s\nwant %s", got, want)
+	}
+	if got := f.op("repair", `{"kinds": ["stray-entry"]}`); !strings.Contains(got, `"reason":"stray-entry is informational: repair never changes it; see ftask doctor --kinds stray-entry"`) {
+		t.Errorf("repair, asked for: %s", got)
 	}
 }
 

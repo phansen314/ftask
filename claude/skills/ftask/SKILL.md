@@ -50,6 +50,7 @@ After a `duplicate-id`, `id-above-last-id`, or `corrupt` error, or a `dangling-r
 - Findings with a non-null `action` are what `ftask repair` would fix. **Never run `repair` unasked**: offer it, saying what it would change. It asks for permission anyway.
 - **Never run `repair --kinds metadata-missing` unless the user explicitly agrees**: rebuilding `ftask.json` can reissue the ID of a task that was deleted.
 - Findings with `action: null` (duplicate IDs, cycles, unusable files, orphaned notes with text) are the user's to resolve. Pass on `suggest`; don't edit files to fix them yourself.
+- Files ftask ignores — the user's own, an editor's backups — are `stray-entry`, listed only by `ftask doctor --kinds stray-entry`. They are not damage: ask for them only when the user wants to tidy up.
 
 ## Keep output small
 

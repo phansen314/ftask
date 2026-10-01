@@ -29,6 +29,7 @@ const (
 	kindCycle             = "cycle"
 	kindUnusableFile      = "unusable-file"
 	kindNestedTree        = "nested-tree"
+	kindSkippedEntry      = "skipped-entry"
 	kindStrayEntry        = "stray-entry"
 	kindUnreadableFolder  = "unreadable-folder"
 )
@@ -38,6 +39,9 @@ const (
 	classAuto      = "auto"
 	classOnRequest = "on-request"
 	classManual    = "manual"
+	// classInformational kinds are not damage: reported only when named,
+	// and never making a tree unhealthy.
+	classInformational = "informational"
 )
 
 // findingClass is each finding kind's repair class.
@@ -52,7 +56,8 @@ var findingClass = map[string]string{
 	kindCycle:             classManual,
 	kindUnusableFile:      classManual,
 	kindNestedTree:        classManual,
-	kindStrayEntry:        classManual,
+	kindSkippedEntry:      classManual,
+	kindStrayEntry:        classInformational,
 	kindUnreadableFolder:  classManual,
 }
 
@@ -162,10 +167,11 @@ func (fs findings) add(kind string, it Item) {
 	fs[kind] = append(fs[kind], it)
 }
 
-// healthy reports whether there are no findings of any kind.
+// healthy reports whether there are no findings of any kind but
+// informational ones.
 func (fs findings) healthy() bool {
-	for _, items := range fs {
-		if len(items) > 0 {
+	for kind, items := range fs {
+		if len(items) > 0 && findingClass[kind] != classInformational {
 			return false
 		}
 	}
@@ -173,13 +179,19 @@ func (fs findings) healthy() bool {
 }
 
 // report groups fs as findings are reported (operations.md, Findings): only
-// the kinds in only (every kind when nil), sorted by kind, each kind's items
-// sorted and capped at findingCap unless full names it.
+// the kinds in only (when nil, every kind but the informational ones), sorted
+// by kind, each kind's items sorted and capped at findingCap unless full
+// names it.
 func (fs findings) report(only, full []string) []Finding {
 	out := []Finding{}
 	for _, kind := range slices.Sorted(maps.Keys(fs)) {
 		items := fs[kind]
-		if len(items) == 0 || only != nil && !slices.Contains(only, kind) {
+		switch {
+		case len(items) == 0:
+			continue
+		case only != nil && !slices.Contains(only, kind):
+			continue
+		case only == nil && findingClass[kind] == classInformational:
 			continue
 		}
 		items = slices.Clone(items)
@@ -275,7 +287,15 @@ func diagnose(tx *store.Tx) (findings, *errs.Error) {
 		fs.add(kindNestedTree, Item{Paths: []string{tx.Path(rel)}, Suggest: ptr("move the tree it belongs to out of this one, or remove this ftask.json if the folder is part of this tree")})
 	}
 	for _, s := range sv.Strays {
-		fs.add(kindStrayEntry, Item{Paths: []string{tx.Path(s.Rel)}, Reason: s.Reason, Suggest: ptr("move or remove it; ftask ignores it")})
+		p := []string{tx.Path(s.Rel)}
+		switch s.Reason {
+		case store.StraySymlink:
+			fs.add(kindSkippedEntry, Item{Paths: p, Reason: s.Reason, Suggest: ptr("ftask never follows a symlink, so what it leads to is not part of the tree: move the real folder or file in instead, or remove the link")})
+		case store.StrayType:
+			fs.add(kindSkippedEntry, Item{Paths: p, Reason: s.Reason, Suggest: ptr("rename or remove it: it has a folder's or task file's name, but the wrong type, so ftask skips it")})
+		default:
+			fs.add(kindStrayEntry, Item{Paths: p, Suggest: ptr("nothing to do: ftask ignores it")})
+		}
 	}
 	for _, u := range x.Unreadable {
 		rel := store.FolderRel(u.Folder)

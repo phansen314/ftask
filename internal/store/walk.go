@@ -90,7 +90,7 @@ type Index struct {
 type Survey struct {
 	// Temps are ftask's temp files and folders, not descended into.
 	Temps []string
-	// Strays are the entries that are not hidden and match no rule.
+	// Strays are the entries that are not hidden and the index skips.
 	Strays []Stray
 	// Notes are the .md files named like a task's notes that are regular
 	// files, by the location of the task they are named for.
@@ -99,14 +99,15 @@ type Survey struct {
 	Nested []string
 }
 
-// Stray is an entry that matches no rule, and why: its name, its type, or
-// being a symlink.
+// Stray is an entry the index skips, and why: its name matches no rule
+// (doctor's stray-entry), or it is a symlink or of the wrong type
+// (skipped-entry).
 type Stray struct {
 	Rel    string
 	Reason string
 }
 
-// Stray reasons, as stray-entry findings report them.
+// Stray reasons; skipped-entry findings report the last two.
 const (
 	StrayName    = "name"
 	StrayType    = "type"

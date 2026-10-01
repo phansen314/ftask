@@ -14,8 +14,8 @@ import (
 func decodeRepair(f *model.Fields, p *model.Problems) any {
 	kinds := optionalKinds(f, p)
 	for i, k := range kinds {
-		if findingClass[k] == classManual {
-			p.AddAdditional(jsonio.Pointer(f.Ptr("kinds"), strconv.Itoa(i)), k+" is manual: repair never changes it; see ftask doctor --kinds "+k)
+		if c := findingClass[k]; c == classManual || c == classInformational {
+			p.AddAdditional(jsonio.Pointer(f.Ptr("kinds"), strconv.Itoa(i)), k+" is "+c+": repair never changes it; see ftask doctor --kinds "+k)
 		}
 	}
 	return KindsInput{Kinds: kinds}

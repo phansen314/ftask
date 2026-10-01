@@ -322,7 +322,8 @@ An `unusable-file` warning says which file and, in `reason`, one word for why �
 
 A finding is a problem with the tree that [`doctor`](#doctor) reports and [`repair`](#repair) may fix: the damage a system crash or an outside change leaves, which other operations report as warnings, absorb, or skip silently (see the design spec's [Diagnosis and repair](design-spec.md#diagnosis-and-repair)). Findings are not warnings: they describe the whole tree, not one operation's result, and they are the result of `doctor` itself.
 
-- **Grouped by kind.** Findings come as one group per kind present, each with its kind's repair class, its item `count`, and its `items`. A tree with no findings is **healthy**.
+- **Grouped by kind.** Findings come as one group per kind present, each with its kind's repair class, its item `count`, and its `items`. A tree with no findings, other than *informational* ones, is **healthy**.
+- **Informational kinds only when asked.** A kind of the *informational* class (see [Diagnosis and repair](design-spec.md#diagnosis-and-repair)) is reported only when the input names it in `kinds`. So, by default, a tree is healthy exactly when `findings` is empty.
 - **Short by default.** A group lists at most its first 20 items, with `truncated: true` when it has more; `count` is always the total. A kind the input names in `kinds` is listed in full.
 - **Deterministic order.** Groups are sorted by `kind`; the items of a group by the first entry of `paths`, then by `ids` (compared element by element, as numbers), as warnings are. The same tree always yields the same findings in the same order.
 - **What `repair` would do.** Each item's `action` names what `repair` does to it, or is `null` when `repair` leaves it to a person. `suggest` says what a person could do: a command to run, or a step to take. It is for humans, like `message`, and not part of the contract.
@@ -341,7 +342,8 @@ A finding is a problem with the tree that [`doctor`](#doctor) reports and [`repa
 | `cycle` | manual | group of tasks that block each other: a strongly connected component of the [dependency graph](design-spec.md#dependencies). | none | one cycle in the group: the shortest through its lowest ID, from that ID back to it, e.g. `[12, 15, 12]` (12 is blocked by 15, which is blocked by 12) | `group`: every ID in the group, ascending | `null` |
 | `unusable-file` | manual | task file that is [unusable](design-spec.md#file-validity). | the task file | its ID, from the filename | `error`: the error a write that needed the file would fail with — `corrupt` (with its full `problems` or `detail`), `unsupported-format`, or `io` | `null` |
 | `nested-tree` | manual | `ftask.json` in a folder other than the root: another tree's metadata, inside this one. | the file | none | — | `null` |
-| `stray-entry` | manual | entry that is not hidden and is not a folder, a task file, a `.md` named like a task's notes, or the root's `ftask.json` (see [Walking the tree](design-spec.md#walking-the-tree)). | the entry | none | `reason`, below | `null` |
+| `skipped-entry` | manual | entry that is not hidden, and that the walk skips although it may hold part of the tree: a symlink, or an entry with a folder's or task file's name but the wrong type (see [Walking the tree](design-spec.md#walking-the-tree)). | the entry | none | `reason`, below | `null` |
+| `stray-entry` | informational | entry that is not hidden and whose name matches neither the folder-name nor the task-filename rule (e.g. `notes.txt`, `42.md~`), other than the root's `ftask.json` and a nested tree's. | the entry | none | — | `null` |
 | `unreadable-folder` | manual | folder that can't be listed. Its entries are not looked at. | the folder | none | `code`: the symbolic OS error | `null` |
 
 Kind by kind:
@@ -353,7 +355,8 @@ Kind by kind:
   - `no-task`: no task has this ID — e.g. a [`delete`](#delete) was interrupted, or the task was removed by hand. The text may be the user's only copy, so it is left to them.
 - **`cycle`** — the graph is built as for the [cycle check](#block): from usable task files only, with an ID's edges the union of every copy's. A cycle is reported once per group, not once per cycle, since a group can hold more cycles than tasks. Removing any one blocker on the example cycle breaks that cycle; `suggest` gives one [`unblock`](#unblock) that does.
 - **`nested-tree`** — reported as the cause. The nested tree's tasks and folders are still walked as part of this tree, so its symptoms (duplicate IDs, IDs above `last_id`) are reported under their own kinds. The nested `ftask.json` itself is not also a `stray-entry`.
-- **`stray-entry`** — `reason` is `name` when the name matches neither the folder-name nor the task-filename rule (e.g. `notes.txt`, `42.md~`); `type` when the name matches but the entry's type doesn't (e.g. a directory named `42.json`, a `.md` that is a folder); `symlink` for a symbolic link, whatever its name. A root `ftask.json` that is not a regular file is `metadata-unusable` instead.
+- **`skipped-entry`** — `reason` is `symlink` for a symbolic link, whatever its name and whatever it leads to: ftask never follows one, so a folder linked into the tree is not part of it. It is `type` when the name is a folder's or a task file's (or its notes') but the entry's type is wrong, e.g. a directory named `42.json`, or a `.md` that is a folder. A root `ftask.json` that is not a regular file is `metadata-unusable` instead.
+- **`stray-entry`** — a file or folder ftask has no use for: a user's own file, or an editor's backup. ftask ignores it, safely, so it is reported only when asked for.
 - **`unusable-file`** — the full diagnosis that the [`unusable-file`](#warning-kinds) warning leaves out. A task file whose filename ID differs from its `id` field is reported here, as `corrupt`.
 - **`id-above-last-id`** and **`metadata-missing`** — every task file counts, usable or not, by the ID in its filename: that is the ID it occupies (see [Tasks](design-spec.md#tasks)).
 
@@ -367,7 +370,7 @@ Kind by kind:
   "required": ["kind", "class", "count", "truncated", "items"],
   "properties": {
     "kind": { "type": "string", "description": "One of the Finding kinds; callers ignore unknown values." },
-    "class": { "type": "string", "enum": ["auto", "on-request", "manual"], "description": "The kind's repair class (see Diagnosis and repair)." },
+    "class": { "type": "string", "enum": ["auto", "on-request", "manual", "informational"], "description": "The kind's repair class (see Diagnosis and repair)." },
     "count": { "type": "integer", "minimum": 1, "description": "How many items the kind has, including any not listed." },
     "truncated": { "type": "boolean", "description": "True when items lists fewer than count." },
     "items": { "type": "array", "minItems": 1, "items": { "$ref": "finding-item" } }
@@ -376,7 +379,7 @@ Kind by kind:
   "allOf": [
     { "if": { "properties": { "kind": { "enum": ["metadata-unusable", "unusable-file"] } } }, "then": { "properties": { "items": { "items": { "required": ["error"] } } } } },
     { "if": { "properties": { "kind": { "enum": ["metadata-missing", "id-above-last-id"] } } }, "then": { "properties": { "items": { "items": { "required": ["last_id"] } } } } },
-    { "if": { "properties": { "kind": { "enum": ["orphan-notes", "stray-entry"] } } }, "then": { "properties": { "items": { "items": { "required": ["reason"] } } } } },
+    { "if": { "properties": { "kind": { "enum": ["orphan-notes", "skipped-entry"] } } }, "then": { "properties": { "items": { "items": { "required": ["reason"] } } } } },
     { "if": { "properties": { "kind": { "const": "duplicate-id" } } }, "then": { "properties": { "items": { "items": { "required": ["identical"] } } } } },
     { "if": { "properties": { "kind": { "const": "cycle" } } }, "then": { "properties": { "items": { "items": { "required": ["group"] } } } } },
     { "if": { "properties": { "kind": { "const": "unreadable-folder" } } }, "then": { "properties": { "items": { "items": { "required": ["code"] } } } } }
@@ -395,7 +398,7 @@ Kind by kind:
     "ids": { "type": "array", "items": { "type": "integer" }, "description": "Task IDs involved; order and meaning per kind (see Finding kinds)." },
     "action": { "type": ["string", "null"], "description": "What repair does to this item: remove, raise-last-id, remove-reference, or create-metadata; null when repair leaves it to a person. In repair's repaired list, what it did." },
     "suggest": { "type": ["string", "null"], "description": "What a person could do, for humans. Not part of the contract." },
-    "reason": { "type": "string", "description": "For orphan-notes: empty, linked, task-elsewhere, or no-task. For stray-entry: name, type, or symlink." },
+    "reason": { "type": "string", "description": "For orphan-notes: empty, linked, task-elsewhere, or no-task. For skipped-entry: symlink or type." },
     "code": { "type": "string", "description": "For unreadable-folder: the symbolic OS error (e.g. EACCES)." },
     "identical": { "type": "boolean", "description": "For duplicate-id: whether every copy is the same, byte for byte." },
     "group": { "type": "array", "items": { "type": "integer" }, "description": "For cycle: every ID in the group, ascending." },
@@ -902,8 +905,8 @@ Report everything wrong with the tree, as [findings](#findings): what each is, a
   "type": "object",
   "required": ["healthy", "findings"],
   "properties": {
-    "healthy": { "type": "boolean", "description": "True when the tree has no findings of any kind, whether or not kinds named them." },
-    "findings": { "type": "array", "items": { "$ref": "finding" }, "description": "One group per kind found, or only the kinds named in kinds." }
+    "healthy": { "type": "boolean", "description": "True when the tree has no findings of any kind but informational ones, whether or not kinds named them." },
+    "findings": { "type": "array", "items": { "$ref": "finding" }, "description": "One group per kind found, but informational kinds; or only the kinds named in kinds." }
   },
   "additionalProperties": false
 }
@@ -951,7 +954,7 @@ Apply the safe repairs: for each kind it repairs, every item whose `action` is n
 }
 ```
 
-**Additional validation:** each of `kinds` is one of the [finding kinds](#finding-kinds), and not a *manual* one: those are never repaired, and the problem's reason says to see `doctor`.
+**Additional validation:** each of `kinds` is one of the [finding kinds](#finding-kinds), and not a *manual* or *informational* one: those are never repaired, and the problem's reason says to see `doctor`.
 
 **Preconditions:**
 
@@ -987,7 +990,7 @@ Afterwards, the findings that remain are reported, for every kind, as `doctor` w
   "required": ["repaired", "healthy", "findings"],
   "properties": {
     "repaired": { "type": "array", "items": { "$ref": "finding" }, "description": "What repair changed, grouped as findings; each item's action is what was done. Empty when there was nothing to repair." },
-    "healthy": { "type": "boolean", "description": "True when the tree has no findings left, of any kind." },
+    "healthy": { "type": "boolean", "description": "True when the tree has no findings left of any kind but informational ones." },
     "findings": { "type": "array", "items": { "$ref": "finding" }, "description": "The findings left after the repairs, as doctor reports them." }
   },
   "additionalProperties": false
@@ -1000,7 +1003,7 @@ Afterwards, the findings that remain are reported, for every kind, as `doctor` w
 
 | Kind | When |
 |---|---|
-| `invalid-input` | `kinds` is empty, repeats a kind, or names a kind that is not a finding kind, or a *manual* one. |
+| `invalid-input` | `kinds` is empty, repeats a kind, or names a kind that is not a finding kind, or a *manual* or *informational* one. |
 | `environment` | The config can't be located. |
 | `not-initialized` | `missing`: `config` or `root`; or `metadata`, when `ftask.json` is missing and `kinds` doesn't name `metadata-missing`. |
 | `corrupt` | The config, or `ftask.json`, is corrupt. |
