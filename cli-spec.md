@@ -2,7 +2,7 @@
 
 The `ftask` command-line interface: how each command maps to the [operations](operations.md), how input gets in, and what comes out. The CLI adds no behavior of its own beyond parsing arguments — including any input resolution a command's Input part lists, such as `init`'s path resolution or `create`'s `--notes-file` — and composing operations; everything about the data is specified by the operations and the [design spec](design-spec.md).
 
-The intended user is a power user working through Claude, with `jq` for anything a person reads directly.
+The intended user is a power user working through Claude, with `jq` for anything a person reads directly. The one exception is the planned [`pick`](#pick), an interactive picker for people, specified in [pick-spec.md](pick-spec.md).
 
 ## Global behavior
 
@@ -21,6 +21,7 @@ The intended user is a power user working through Claude, with `jq` for anything
 
   The line is the same whether or not stderr is a terminal, and kept to one line: control characters in it (e.g. a newline in a path) are escaped. It is human-readable and not part of the contract, like an error's `message`; callers read the envelope. A failure to write it is ignored and never changes the exit status.
 - **Exception:** `--help` writes plain-text usage to stdout. It is not an operation.
+- **Exception:** [`pick`](#pick) draws an interactive picker on the terminal (`/dev/tty`). Its stdout still gets exactly one envelope.
 
 ### Input
 
@@ -83,7 +84,7 @@ A usage error is a problem with the command line itself: an unknown command or o
 
 **Shape, not values.** `usage` is about the shape of the command line: an unknown, missing, extra, or conflicting token. A token in the right place whose value is unacceptable — one that cannot be converted to its field's type (e.g. `ftask show abc`, where the ID is an integer) or that fails the operation's validation — is `invalid-input`, with `field` the JSON Pointer of the input field it sets, per the command's Arguments and Options tables. A bad value is therefore the same error whether it arrives as an argument or through `--input`.
 
-`usage` is a CLI-only error kind: no operation raises it, and it is not listed in the operations' [error kinds](operations.md#error-kinds). As with any kind, callers treat an unknown one as a generic failure.
+`usage` is a CLI-only error kind: no operation raises it, and it is not listed in the operations' [error kinds](operations.md#error-kinds). So are [`pick`](#pick)'s `cancelled` and `unavailable`. As with any kind, callers treat an unknown one as a generic failure.
 
 `details` reports the **first** problem the parser finds, as a one-item list; the list leaves room to report more in a later release. Its `reason` is human-readable and may change between releases.
 
@@ -817,6 +818,16 @@ ftask list --readiness ready,blocked,complete --tags-all db,backend --fields id,
 ftask list --include-folders --limit 0                                      # every folder: .result.folders
 ftask list --fields folder | jq -c 'if .ok then .result |= (.tasks |= (group_by(.folder) | map({folder: .[0].folder, ids: map(.id)}))) else . end'
 ```
+
+## Planned commands
+
+Commands specified but not yet implemented.
+
+### pick
+
+Fuzzy-pick tasks, or folders, in an interactive [fzf](https://github.com/junegunn/fzf) picker, act on them in place, and write the ones chosen as one envelope. For people at a terminal, not agents. It is specified in its own document, [pick-spec.md](pick-spec.md), which says where it departs from this spec's global rules.
+
+**Synopsis:** `ftask pick [options]`, or `ftask pick -i <file>`. See [pick-spec.md](pick-spec.md#command).
 
 ## Not included
 

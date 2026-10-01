@@ -416,6 +416,14 @@ Where `pick` differs from the [CLI spec](cli-spec.md)'s global rules, and why:
 - **Minimum version.** The end-to-end test runs against fzf 0.63.0, the minimum, as well as the current release. Only actions that 0.63.0 has are used: marks are cleared with `deselect-all`, not `clear-multi`, which is 0.64.0's name for it.
 - **Pipelines.** `--from` with each accepted envelope shape, and the rejections; stdin and stdout redirected while the terminal is the pty.
 
+## Shipping
+
+Done with the implementation, not before, since they describe a command that exists:
+
+- **The skill** gets a hard rule: never run `ftask pick`. It needs the user's terminal; when the user wants to choose for themselves, suggest they run it. An envelope from `pick` that the user hands over is read like any other, `result.actions` included: it says what they changed.
+- **The README** gets a section on picking tasks yourself, with the keymap's essentials and the pipeline examples.
+- **cli-spec.md** moves `pick` from Planned commands to Commands.
+
 ## Future work
 
 ### Fields at creation

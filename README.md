@@ -113,6 +113,7 @@ Restore only the removed paths, never the whole tree: `ftask.json` holds the las
 - [operations.md](operations.md): every operation's input, output, errors, and retry safety.
 - [cli-spec.md](cli-spec.md): how commands and options map to operations.
 - [implementation-spec.md](implementation-spec.md): how it is built and tested.
+- [pick-spec.md](pick-spec.md): `ftask pick`, an interactive fzf picker for people. Planned, not yet implemented.
 
 ## Development
 
