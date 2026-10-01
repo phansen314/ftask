@@ -29,6 +29,28 @@ var commands = []Command{
 		Resolve: resolveRoot,
 	},
 	{
+		Name:    "doctor",
+		Op:      "doctor",
+		Summary: "Report everything wrong with the tree, and what repair would do about it",
+		Options: []Option{
+			{Name: "kinds", Field: "/kinds", Type: StringList, Help: "report only these finding `kinds`, each in full"},
+		},
+		Example: `  ftask doctor                                   # healthy when .result.healthy is true; else .result.findings says why
+  ftask doctor --kinds cycle,duplicate-id        # just these, in full
+  ftask doctor | jq '.result.findings[] | select(.class != "manual") | .kind'   # what repair would fix`,
+	},
+	{
+		Name:    "repair",
+		Op:      "repair",
+		Summary: "Apply the repairs that are safe, then report what is left",
+		Options: []Option{
+			{Name: "kinds", Field: "/kinds", Type: StringList, Help: "repair only these finding `kinds`; metadata-missing only when named"},
+		},
+		Example: `  ftask repair                                   # every auto repair
+  ftask repair --kinds temp-leftover             # only the leftover temp files
+  ftask repair --kinds metadata-missing          # rebuild a lost ftask.json; never done by default`,
+	},
+	{
 		Name:    "create-folder",
 		Op:      "create-folder",
 		Summary: "Create a folder, and optionally any missing parent folders",

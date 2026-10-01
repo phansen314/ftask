@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/phansen314/ftask/internal/errs"
+	"github.com/phansen314/ftask/internal/fsys"
 	"github.com/phansen314/ftask/internal/model"
 )
 
@@ -77,8 +78,40 @@ type Index struct {
 	// Unreadable lists, in tree order, the folders that could not be listed;
 	// their tasks and subfolders are missing from the index.
 	Unreadable []UnreadableFolder
-	byID       map[model.ID][]Location
+	// Survey is what the walk skipped, recorded in a diagnostic transaction
+	// only; nil otherwise.
+	Survey *Survey
+	byID   map[model.ID][]Location
 }
+
+// Survey is what the walk of a diagnostic transaction found besides folders
+// and task files (implementation-spec.md, The survey). Paths are relative to
+// the root.
+type Survey struct {
+	// Temps are ftask's temp files and folders, not descended into.
+	Temps []string
+	// Strays are the entries that are not hidden and match no rule.
+	Strays []Stray
+	// Notes are the .md files named like a task's notes that are regular
+	// files, by the location of the task they are named for.
+	Notes []Location
+	// Nested are the ftask.json files below the root.
+	Nested []string
+}
+
+// Stray is an entry that matches no rule, and why: its name, its type, or
+// being a symlink.
+type Stray struct {
+	Rel    string
+	Reason string
+}
+
+// Stray reasons, as stray-entry findings report them.
+const (
+	StrayName    = "name"
+	StrayType    = "type"
+	StraySymlink = "symlink"
+)
 
 // UnreadableFolder is a folder the walk could not list, with the OS error.
 type UnreadableFolder struct {
@@ -122,6 +155,9 @@ func (x *Index) InScope(f model.FolderPath, recursive bool) ([]model.FolderPath,
 var (
 	folderName   = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$`)
 	taskFileName = regexp.MustCompile(`^[1-9][0-9]{0,14}\.json$`)
+	// notesFileName is the task-filename rule's other extension: a task's
+	// notes (design-spec.md, Task filenames).
+	notesFileName = regexp.MustCompile(`^[1-9][0-9]{0,14}\.md$`)
 )
 
 // Index walks the whole tree once, on first use, and returns the same index
@@ -131,6 +167,9 @@ var (
 func (tx *Tx) Index() *Index {
 	if tx.index == nil {
 		x := &Index{byID: map[model.ID][]Location{}}
+		if tx.survey {
+			x.Survey = &Survey{}
+		}
 		tx.walk(x, model.RootFolder)
 		tx.index = x
 	}
@@ -160,11 +199,16 @@ func (tx *Tx) walk(x *Index, f model.FolderPath) {
 		name := e.Name()
 		switch {
 		case strings.HasPrefix(name, "."):
+			if x.Survey != nil && strings.HasPrefix(name, fsys.TempPrefix) {
+				x.Survey.Temps = append(x.Survey.Temps, joinPath(FolderRel(f), name))
+			}
 		case folderName.MatchString(name) && e.Type().IsDir():
 			subs = append(subs, name)
 		case taskFileName.MatchString(name) && e.Type().IsRegular():
 			id, _ := strconv.ParseInt(strings.TrimSuffix(name, ".json"), 10, 64)
 			ids = append(ids, model.ID(id))
+		case x.Survey != nil:
+			x.Survey.record(f, e)
 		}
 	}
 	slices.Sort(ids)
@@ -177,6 +221,26 @@ func (tx *Tx) walk(x *Index, f model.FolderPath) {
 	}
 	for _, s := range subs {
 		tx.walk(x, childFolder(f, s))
+	}
+}
+
+// record files an entry the index skipped: a task's notes, a nested tree's
+// metadata, or a stray. The root's own ftask.json is neither.
+func (s *Survey) record(f model.FolderPath, e fs.DirEntry) {
+	name, rel := e.Name(), joinPath(FolderRel(f), e.Name())
+	switch {
+	case name == MetaName && f == model.RootFolder:
+	case e.Type()&fs.ModeSymlink != 0:
+		s.Strays = append(s.Strays, Stray{rel, StraySymlink})
+	case name == MetaName && e.Type().IsRegular():
+		s.Nested = append(s.Nested, rel)
+	case notesFileName.MatchString(name) && e.Type().IsRegular():
+		id, _ := strconv.ParseInt(strings.TrimSuffix(name, ".md"), 10, 64)
+		s.Notes = append(s.Notes, Location{Folder: f, ID: model.ID(id)})
+	case folderName.MatchString(name) || taskFileName.MatchString(name) || notesFileName.MatchString(name):
+		s.Strays = append(s.Strays, Stray{rel, StrayType})
+	default:
+		s.Strays = append(s.Strays, Stray{rel, StrayName})
 	}
 }
 

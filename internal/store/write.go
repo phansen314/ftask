@@ -123,5 +123,6 @@ func (tx *Tx) SetLastID(lastID int64) *errs.Error {
 		return e
 	}
 	tx.meta = m
+	tx.metaSt.meta = m
 	return nil
 }

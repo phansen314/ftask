@@ -12,6 +12,10 @@ import (
 // Lstat reports the entry at rel without following a final symlink.
 func (tx *Tx) Lstat(rel string) (fs.FileInfo, error) { return tx.root.Lstat(rel) }
 
+// ReadFile reads the file at rel as it is, without checking it: doctor's
+// comparison of duplicate copies.
+func (tx *Tx) ReadFile(rel string) ([]byte, error) { return tx.root.ReadFile(rel) }
+
 // Remove removes the file at rel, returning the OS error: whether one is an
 // error is the caller's call.
 func (tx *Tx) Remove(rel string) error {

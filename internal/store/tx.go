@@ -23,6 +23,8 @@ type Tx struct {
 	rootPath string // the root as reported: as stored, cleaned, "~/" expanded
 	meta     model.RootFile
 	write    bool
+	survey   bool      // a diagnostic transaction: the walk records a Survey
+	metaSt   metaState // as read under the lock, in a diagnostic transaction
 	warn     *errs.Collector
 	index    *Index
 	cache    map[Location]*Loaded
@@ -62,6 +64,68 @@ func Write(env Env, w *errs.Collector, fn func(*Tx) *errs.Error) *errs.Error {
 	}
 	tx.meta, tx.write = ms.meta, true
 	return fn(tx)
+}
+
+// Diagnose runs fn holding the write lock, for doctor and repair
+// (implementation-spec.md, doctor and repair): after locating the config and
+// opening the root, it takes the lock (busy if it is held) and reads
+// ftask.json without failing on it — MetaState says what it found. The
+// transaction allows writes, and its walk records a Survey.
+func Diagnose(env Env, w *errs.Collector, fn func(*Tx) *errs.Error) *errs.Error {
+	if w == nil {
+		w = &errs.Collector{}
+	}
+	rootPath, e := locateRoot(env)
+	if e != nil {
+		return e
+	}
+	r, e := openRoot(env, rootPath)
+	if e != nil {
+		return e
+	}
+	defer r.Close()
+	lock, err := r.Lock()
+	if err != nil {
+		if isErrno(err, syscall.EAGAIN) {
+			return errs.Busy()
+		}
+		return errs.FromOS(rootPath, err)
+	}
+	defer lock.Unlock()
+	ms := readMeta(r)
+	tx := &Tx{root: r, rootPath: rootPath, meta: ms.meta, write: true, survey: true, metaSt: ms, warn: w, cache: map[Location]*Loaded{}}
+	return fn(tx)
+}
+
+// MetaState is ftask.json's state as a diagnostic transaction read it, and
+// the error an operation requiring a usable root would fail with, nil when
+// it is ok. The error of a missing one is not-initialized (metadata).
+func (tx *Tx) MetaState() (MetaState, *errs.Error) {
+	return tx.metaSt.state, metaError(tx.metaSt, tx.rootPath)
+}
+
+// CreateMeta creates ftask.json, which must not exist, with this binary's
+// schema and lastID: repair's rebuild of a lost one.
+func (tx *Tx) CreateMeta(lastID int64) *errs.Error {
+	m := model.RootFile{Schema: model.RootSchema, LastID: lastID}
+	data, err := m.Encode()
+	if err != nil {
+		return errs.Internal("encode " + MetaName + ": " + err.Error())
+	}
+	if e := tx.Create(MetaName, data); e != nil {
+		return e
+	}
+	tx.meta, tx.metaSt = m, metaState{state: MetaOK, meta: m}
+	return nil
+}
+
+// RemoveAll removes the file or folder at rel and everything under it,
+// returning the OS error.
+func (tx *Tx) RemoveAll(rel string) error {
+	if e := tx.mustWrite("remove " + rel); e != nil {
+		return e
+	}
+	return tx.root.RemoveAll(rel)
 }
 
 func begin(env Env, w *errs.Collector) (*Tx, *errs.Error) {
@@ -108,6 +172,10 @@ func (tx *Tx) Warn(w errs.Warning) { tx.warn.Add(w) }
 func (tx *Tx) OSError(rel string, err error) *errs.Error {
 	return errs.FromOS(tx.Path(rel), err)
 }
+
+// Code is err's symbolic OS error name, an OS error on rel, for a warning or
+// a finding; an error with no name is internal.
+func (tx *Tx) Code(rel string, err error) (string, *errs.Error) { return tx.code(rel, err) }
 
 // code is err's symbolic OS error name, for a warning; an error with no name
 // is internal.

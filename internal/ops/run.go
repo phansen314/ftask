@@ -33,6 +33,8 @@ type runner func(env Env, in any, w *errs.Collector) (any, *errs.Error)
 var runners = map[string]runner{
 	"version":       typed(runVersion),
 	"info":          typed(runInfo),
+	"doctor":        typed(runDoctor),
+	"repair":        typed(runRepair),
 	"show":          typed(runShow),
 	"init":          typed(runInit),
 	"create":        typed(runCreate),

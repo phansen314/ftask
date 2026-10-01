@@ -33,22 +33,10 @@ func runUnblock(env Env, in BlockersInput, w *errs.Collector) (any, *errs.Error)
 		if e != nil {
 			return e
 		}
-		removed := []model.ID{}
-		var kept []model.ID
-		for _, b := range ld.Task.BlockedBy {
-			if slices.Contains(in.Blockers, b) {
-				removed = append(removed, b)
-			} else {
-				kept = append(kept, b)
-			}
+		removed, e := removeBlockers(tx, ld, in.Blockers, model.TimestampOf(env.Clock()))
+		if e != nil {
+			return e
 		}
-		if len(removed) > 0 {
-			ld.Task.BlockedBy = kept
-			if e := replaceTask(tx, ld.Loc.Rel(), &ld.Task, model.TimestampOf(env.Clock())); e != nil {
-				return e
-			}
-		}
-		slices.Sort(removed)
 		out.Task, out.Removed = tx.Task(ld), removed
 		return nil
 	})
@@ -56,4 +44,28 @@ func runUnblock(env Env, in BlockersInput, w *errs.Collector) (any, *errs.Error)
 		return nil, e
 	}
 	return out, nil
+}
+
+// removeBlockers takes ids out of the blocked_by of the usable task file ld
+// and, if any was there, rewrites it with updated_at set to now: unblock's
+// change, which repair makes for a dangling reference too. It returns the IDs
+// removed, ascending.
+func removeBlockers(tx *store.Tx, ld *store.Loaded, ids []model.ID, now model.Timestamp) ([]model.ID, *errs.Error) {
+	removed := []model.ID{}
+	var kept []model.ID
+	for _, b := range ld.Task.BlockedBy {
+		if slices.Contains(ids, b) {
+			removed = append(removed, b)
+		} else {
+			kept = append(kept, b)
+		}
+	}
+	if len(removed) > 0 {
+		ld.Task.BlockedBy = kept
+		if e := replaceTask(tx, ld.Loc.Rel(), &ld.Task, now); e != nil {
+			return nil, e
+		}
+	}
+	slices.Sort(removed)
+	return removed, nil
 }

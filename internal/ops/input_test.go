@@ -15,6 +15,8 @@ import (
 var bases = map[string][]string{
 	"version":       {`{}`},
 	"info":          {`{}`},
+	"doctor":        {`{"kinds": ["cycle", "temp-leftover"]}`, `{}`},
+	"repair":        {`{"kinds": ["temp-leftover", "metadata-missing"]}`, `{}`},
 	"init":          {`{"root": "/home/u/tasks", "replace_config": true}`},
 	"create-folder": {`{"folder": "/proj/travel", "parents": true}`},
 	"create": {

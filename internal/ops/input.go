@@ -18,6 +18,8 @@ type decoder func(f *model.Fields, p *model.Problems) any
 var decoders = map[string]decoder{
 	"version":       decodeVersion,
 	"info":          decodeInfo,
+	"doctor":        decodeDoctor,
+	"repair":        decodeRepair,
 	"init":          decodeInit,
 	"create-folder": decodeCreateFolder,
 	"create":        decodeCreate,
