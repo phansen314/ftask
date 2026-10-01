@@ -15,7 +15,7 @@
 
 ## Non-goals
 
-- **Agents.** `pick` is for a person at a terminal. Without one, it fails whenever it would show the picker (see [Errors](#errors)). The [ftask skill](claude/skills/ftask/SKILL.md) tells agents never to run it.
+- **Agents.** `pick` is for a person at a terminal. Without one, it fails whenever it would show the picker (see [Errors](#errors)). The [ftask skill](claude/skills/ftask/SKILL.md) will tell agents never to run it, once `pick` ships (see [Shipping](#shipping)).
 - **Deleting.** No key deletes a task or a folder. Deletes stay with `ftask delete` and `ftask delete-folder`, which agents' permission rules make ask first.
 - **A configurable keymap.** The keymap is fixed and documented here. fzf's own options restyle the picker (see [fzf options](#fzf-options)).
 - **A tree view.** Folders are a column and a narrowing step, not a nested display. That is the design spec's [Tree view](design-spec.md#tree-view).
@@ -24,7 +24,7 @@
 ## Requirements
 
 - **A terminal.** `/dev/tty` must open for reading and writing, whenever the picker is shown. stdin and stdout may be anything. A run that [selects at once](#selecting-at-once) shows nothing and needs no terminal.
-- **fzf**, always, found on `PATH`, version 0.63.0 or later: the first release with the footer that holds the [status line](#status-line), the newest fzf feature `pick` uses. Its version is checked with `fzf --version` before fzf is started. The minimum is raised only deliberately, in a release that says so.
+- **fzf**, always, found on `PATH`, version 0.63.0 or later: the first release with the footer that holds the [status line](#status-line), the newest fzf feature `pick` uses. Its version is checked with `fzf --version` before fzf is started: the first whitespace-separated word of the output (e.g. `0.74.4` in `0.74.4 (Fedora)`), without any suffix from the first `-` (`0.75.0-dev` is `0.75.0`), compared as three numbers. Output that doesn't parse that way is `fzf-too-old`, with `found` the first line as printed. The minimum is raised only deliberately, in a release that says so.
 - **Optional:** `glow` or `bat` on `PATH` renders notes in the preview (see [Preview](#preview)).
 
 ## Command
@@ -42,7 +42,7 @@ Fuzzy-pick tasks, or with `--folders` folders, and write the selection as one en
 | Option | Field | Default |
 |---|---|---|
 | `--folder <path>` | `/folder` | `/`. An exact [folder path](cli-spec.md#command-line). The initial scope folder. The [`f` action](#actions) changes it during the session. |
-| `--recursive` | `/recursive` | `true`. `--recursive=false` leaves out tasks, or folders, below `folder`. |
+| `--recursive` | `/recursive` | `true`. `--recursive=false` leaves out tasks in `folder`'s subfolders. In the [folder picker](#folder-picker), it lists `folder` and its immediate subfolders only, as `list`'s `include_folders` does without recursion. |
 | `--scope <scope>` | `/scope` | `open`, or `all` with `--ids`, `--from` or `--source` (see [Candidates](#candidates)). Which tasks show at first: `ready`, `open` (ready and blocked), or `all` (complete too). The [`s` action](#actions) cycles it. |
 | `--tags-any <tags>` | `/tags_any` | None. Comma list. As for [`list`](cli-spec.md#list). |
 | `--tags-all <tags>` | `/tags_all` | None. Comma list. As for `list`. |
@@ -55,7 +55,7 @@ Fuzzy-pick tasks, or with `--folders` folders, and write the selection as one en
 | `--fields <names>` | `/fields` | None: whole task views. Comma list of task view field names, `id` always included. Shapes only the emitted `tasks`, as for `list`. |
 | `--folders` | `/folders` | `false`. Pick folders instead of tasks: the [folder picker](#folder-picker). |
 
-`--ids`, `--from` and `--source` are mutually exclusive. With `--folders`, only `--folder`, `--recursive`, `--query`, `--select-one` and `--exit-zero` apply. Any other field is `invalid-input`.
+`--ids` and `--from` both set `/ids`, so giving both is a [usage error](cli-spec.md#usage-errors). `--source` with either can be built, and is refused by the input schema as `invalid-input`, the same as through `-i` (see the CLI spec's *The CLI rejects only what it cannot build*). With `--folders`, only `--folder`, `--recursive`, `--query`, `--select-one` and `--exit-zero` apply. Any other field is `invalid-input`.
 
 **Input:** pick's input schema, for `-i` and as the target of the options above:
 
@@ -93,6 +93,12 @@ Fuzzy-pick tasks, or with `--folders` folders, and write the selection as one en
 **Output:** one envelope, written after fzf has exited. See [Output](#output).
 
 **Errors:** see [Errors](#errors).
+
+**Composition:** each action's operation is its own call, with its own lock, so the session is never all-or-nothing:
+
+- **A failure** of one action leaves the others, before and after it, in effect. Each is in `actions` with its own envelope.
+- **A crash** of `pick` (a signal other than those it catches, or `kill -9`) leaves every action already run in effect, with no envelope to report them. The session directory may be left behind with its action log, but it is not a recovery interface: what changed is found as after any crash, by reading the tree.
+- **Retry safety:** rerunning `pick` is safe. Until a person acts, it only reads. An action interrupted by a crash follows its operation's Retry safety, e.g. a `create` that may have happened is checked for before being repeated.
 
 **Examples:**
 
@@ -142,7 +148,7 @@ Which tasks the picker lists, its **candidates**, comes from one of three places
 
 `--select-one` and `--exit-zero` let `pick` finish without showing the picker, as fzf's `--select-1` and `--exit-0` do:
 
-- **Matched first, headlessly.** After the first load, `pick` matches `query` against the candidate lines with `fzf --filter`, with the same matching options the picker uses (so only title and tags are matched). The selection is recorded by Enter's callback (see [fzf contract](#fzf-contract)), and fzf's own `--select-1` skips it, so `pick` makes the decision itself.
+- **Matched first, headlessly.** After the first load, `pick` matches `query` against the candidate lines with `fzf --filter`, with the options the picker gets, in the same order: `FZF_DEFAULT_OPTS`, `pick`'s own (so only title and tags are matched), then `FTASK_PICK_OPTS`. So `--exact` or `--ignore-case` in the person's options applies to both. `fzf --filter` exits `0` with matches and `1` with none, which is the `--exit-zero` case, not a failure. Any other status is `unavailable` (`fzf-failed`). The selection is recorded by Enter's callback (see [fzf contract](#fzf-contract)), and fzf's own `--select-1` skips it, so `pick` makes the decision itself.
 - **One match** with `--select-one`: emit that candidate, exactly as if it were picked with Enter.
 - **No match** with `--exit-zero`: emit an empty selection, as a quit does.
 - **Otherwise** the picker opens as usual, with `query` already typed.
@@ -161,22 +167,25 @@ One line per candidate task, in this order:
 
 With an empty query, fzf shows this order. As the person types, fzf ranks by match, and ties keep this order (`--tiebreak=index`).
 
-Each line has these columns:
+Each line has these columns, the title last:
 
 ```text
-●  42  Book flights          #travel     /trips/japan  p2
-◐  43  Book hotel            #travel     /trips/japan  →42
-✓  12  Renew passport                    /trips
+●  42  p2   /trips/japan  #travel   Book flights
+◐  43  →42  /trips/japan  #travel   Book hotel
+✓  12       /trips                  Renew passport
 ```
 
 | Column | Content |
 |---|---|
 | State | `●` ready, `◐` blocked, `✓` complete. |
 | ID | The task's ID. |
-| Title | The title, whole. Titles hold no control characters, so a line is always one line. |
-| Tags | Each tag as `#tag`, space-separated. |
-| Folder | The folder path. |
 | Detail | For a blocked task, `→` and its `blocking` IDs. Otherwise `p` and the priority, or nothing. |
+| Folder | The folder path. |
+| Tags | Each tag as `#tag`, space-separated. |
+| Title | The title, whole. Titles hold no control characters, so a line is always one line. |
+
+- **The title goes last** so that a long one never pushes the other columns off-screen. Only its end can be cut off, by the terminal's width.
+- **Alignment.** Every column but the title is padded to the widest value in the current list, measured in terminal cells, not bytes or code points (wide characters take two). The detail and folder columns are capped at 24 cells, and a longer value is cut with `…`. Neither is matched, so cutting them never changes what the query finds. The tags and the title are never cut: fzf matches only text it displays (`--nth` counts the fields `--with-nth` shows), so a cut tag would stop matching.
 
 - **Only the title and tags are matched.** The query never matches the ID, the folder or the state. Narrowing by folder is the [`f` action](#actions). (fzf's `--nth`.)
 - **Color.** Blocked and complete lines are dimmed, and tags and folder are muted. With `NO_COLOR` set to a non-empty value, lines carry no color.
@@ -187,7 +196,10 @@ Each line has these columns:
 - **Prompt** names the scope: `open> `. In a [prompt](#modes), it names the value being asked for (e.g. `priority 42> `).
 - **Command mode hides the input line** (fzf's `hide-input`). That is the only way fzf drops typed keys: a key with no binding is otherwise typed into the query. The query is kept and still filters the list, and it reappears with insert mode.
 - **Header** shows the [mode](#modes) when it isn't insert (e.g. `[cmd] query: renew`, since command mode hides the query), the scope folder, the filters in effect, and a one-line key hint for the current mode.
-- <a id="status-line"></a>**Status line** (fzf's footer) shows the result of the last action, until the next one: `✓ completed 42, 43`, `✓ created 51`, or `✗ block 43 ← 7: conflict (acyclic): 7 → 43 → 7`. A failure shows its error kind and its `message`. If the last load reported warnings, it says `N warnings`.
+- <a id="status-line"></a>**Status line** (fzf's footer) is one line, showing the result of the last action until the next one, then, after ` · `, `N warnings` if the last load reported any:
+  - one target: `✓ completed 42`, `✓ created 51`, or `✗ block 43 ← 7: conflict (acyclic): 7 → 43 → 7`. A failure shows its error kind and its `message`.
+  - several: outcomes grouped, successes first, with at most five IDs per group, then `+N`: `✓ completed 38: 41, 42, 44, 45, 47 +33 · ✗ 2 failed: 43 busy, 46 conflict (duplicate-id)`.
+  - Too long for the terminal, it is cut with `…`. Every outcome is in `actions` in the output, whatever the status line shows.
 
 ### Preview
 
@@ -224,6 +236,7 @@ The picker always has one of four modes. Typing reaches the query only in insert
 - **Command mode is sticky.** Each action returns to it, so several actions in a row need no prefix.
 - **Prompts borrow the query line.** On entering prompt mode, the helper saves the search query in the session and disables search. On leaving, by apply or cancel, it restores the query (`transform-query`, see [No data in action text](#fzf-contract)) and enables search again. The one exception is a successful `n`, which clears it (see [Actions](#actions)).
 - **ctrl-c** in any mode [cancels](#output): exits at once, with error kind `cancelled`. So do fzf's other abort keys (ctrl-g, ctrl-q).
+- **ctrl-d** only deletes the character under the cursor. fzf's default, `delete-char/eof`, also aborts on an empty query, which in a prompt would cancel the whole session, so `pick` binds it to `delete-char` in every mode.
 - **Marks.** Tab (and, in command mode, space) marks or unmarks the line under the cursor, in insert, command and choose modes. Marks are cleared after every action, on every switch between the task list and a choose list, and on every reload. Each of these clears explicitly, even where fzf's reload would: fzf keeps marks across a reload when the person's options include `--track --id-nth`.
 
 ## Actions
@@ -252,7 +265,8 @@ Command mode's keys:
 | `q` | Quit, as Esc. | — | — |
 | `i`, `/` | Insert mode. | — | — |
 
-- **One call per target.** An action on several targets runs its operation once per target, in the targets' list order. Each call stands alone: one that fails doesn't stop the rest, and the status line reports every outcome. A `busy` is reported like any other failure, never retried silently.
+- **One call per target.** An action on several targets runs its operation once per target, in `pick`'s [line order](#lines) from the last load, not in the order fzf reports marks (the order they were marked), nor a query's rank order. Each call stands alone: one that fails doesn't stop the rest, and the status line reports every outcome. A `busy` is reported like any other failure, never retried silently.
+- **Wrong number of targets.** `u` and `x` take one target. With several marked, they run nothing and say so in the status line (`✗ x takes one task: 3 marked`). The `m` and `f` choose lists take one folder: Tab and space are unbound in them, and Enter takes the folder under the cursor. `b`'s and `u`'s choose lists allow several.
 - **Reload after every action** that runs an operation, so the list, the readiness and the preview reflect it. A task that falls out of scope (e.g. completed while the scope is `open`) leaves the list. The status line still names it.
 - **Blocker candidates.** `b`'s choose list holds every open task in the tree, regardless of the scope, except the targets and every task from which a target can be reached by following `blocked_by`, in the [load](#session)'s graph: keyed by ID, with every copy's edges, complete tasks included, since `block`'s cycle check follows them too. Those would close a cycle. `block` still checks: a cycle created concurrently is refused with `conflict` (`acyclic`).
 - **Tags syntax.** The value is a list of tags, separated by spaces or commas. If every item is bare (`travel urgent`), they replace all tags (`update`'s `tags.replace_all`). If every item is prefixed (`+urgent -later`), `+` adds and `-` removes. A mix is refused in the status line. A lone `-` clears all tags (`tags.replace_all: []`).
@@ -279,7 +293,7 @@ Command mode's keys:
 
 ## Folder picker
 
-`ftask pick --folders` lists the folders in scope, in [tree order](operations.md#tree-order), and emits the ones chosen in `result.folders`. It has insert and command modes, with movement, marking, `?`, Enter, Esc, `q` and ctrl-c as above, and no actions. The `f` and `m` choose lists use the same display.
+`ftask pick --folders` lists the folders in scope, in [tree order](operations.md#tree-order), and emits the ones chosen in `result.folders`. As for tasks, the selection is checked against a final read: a chosen folder that no longer exists, e.g. moved or deleted by another process meanwhile, is put in `result.missing` instead. It has insert and command modes, with movement, marking, `?`, Enter, Esc, `q` and ctrl-c as above, and no actions. The `f` and `m` choose lists use the same display.
 
 ## Output
 
@@ -323,9 +337,10 @@ In every case, the envelope reports the actions taken.
     },
     {
       "type": "object",
-      "required": ["folders", "actions"],
+      "required": ["folders", "missing", "actions"],
       "properties": {
-        "folders": { "type": "array", "items": { "$ref": "folder-path" }, "description": "The selected folders, in tree order. May be empty." },
+        "folders": { "type": "array", "items": { "$ref": "folder-path" }, "description": "The selected folders that the final read found, in tree order. May be empty." },
+        "missing": { "type": "array", "items": { "$ref": "folder-path" }, "description": "Selected folders the final read did not find. Usually empty." },
         "actions": { "$ref": "#/$defs/actions", "description": "Always empty: the folder picker has no actions." }
       },
       "additionalProperties": false
@@ -426,6 +441,7 @@ How `pick` drives fzf. This section is normative for behavior. The option spelli
 - **Callbacks.** Every key that does more than move or mark is bound to `transform(…)` calling back into the ftask binary (its own absolute path, from `os.Executable`) through an internal helper (see [Session](#session)). The helper does the work and prints the fzf actions to take next, e.g. `reload-sync(…)+transform-footer(…)+rebind(…)`.
 - **What runs concurrently.** fzf runs `transform` synchronously, so transforms never overlap one another. The commands they start may overlap them: the preview runs on every cursor move, and a reload's command runs while the next key is handled. So reloads are `reload-sync`, which changes the list, marks and cursor only once the new list is complete; every session file is written atomically, to a temp file in the session renamed over the old one; and the preview treats a missing or unreadable session file as `loading…`, never as an error.
 - **No data in action text.** What the helper prints names actions only, with fixed arguments: key names, mode names, and the helper's own command lines, whose only variables are fzf placeholders such as `{+1}`. fzf parses everything a transform prints as actions, and is lenient about parentheses, so a message such as `)+execute-silent(…)+(` would run a command. Text that comes from data — a status message, an error's `message`, the query, a prompt's value, a source's stderr — is written to the session, and fzf fetches it through an action whose command output fzf shows literally: `transform-footer(ftask __pick text footer)`, `transform-query(…)`, `transform-prompt(…)`, `transform-header(…)`. The `text` verb writes one line, with control characters, U+2028 and U+2029 escaped as in the CLI's [stderr line](cli-spec.md#output).
+- **Editors run through `execute`,** never inside a callback. A transform's stdout is fzf's action channel, and fzf still owns the terminal while it runs. So `e` and `x` return `execute(ftask __pick edit …)+transform(ftask __pick after-edit)`: fzf suspends itself and gives the editor the terminal, and the second callback, once the editor exits, compares hashes, applies an `x`, and returns the reload and status line.
 - **The selection** is recorded by the helper: Enter's callback writes the selected lines' keys to the session, then returns `accept`, and quit's writes an empty selection, then returns `accept`.
 - **The outcome** is decided from the session first, then from fzf's exit status. A recorded selection is Enter or quit, whatever the status: fzf's `accept` exits `1` when no line matches, e.g. on an empty list or a query that matches nothing. With no selection recorded, `130` is cancel, and any other status, `0` included, is `unavailable` (`fzf-failed`).
 - **A shell of known syntax.** fzf runs callbacks with `--with-shell 'sh -c'`, whatever the user's `$SHELL`, and every argument is quoted for `sh`.
@@ -434,7 +450,7 @@ How `pick` drives fzf. This section is normative for behavior. The option spelli
 ### fzf options
 
 - **`FZF_DEFAULT_OPTS`** (and `FZF_DEFAULT_OPTS_FILE`) are honored, as fzf honors them: colors, layout, borders, history.
-- **Options `pick` undoes.** After `FZF_DEFAULT_OPTS` and before `FTASK_PICK_OPTS`, `pick` passes `--no-select-1 --no-exit-0 --no-expect`. Each of those would end fzf without running a callback, so no selection would be recorded. `--select-1` and `--exit-0` are `pick`'s own `--select-one` and `--exit-zero`, decided by `pick` (see [Selecting at once](#selecting-at-once)).
+- **Options `pick` undoes.** After `FZF_DEFAULT_OPTS` and before `FTASK_PICK_OPTS`, `pick` passes `--no-select-1 --no-exit-0 --no-expect --no-tmux`. The first three would end fzf without running a callback, so no selection would be recorded. `--tmux` (in 0.74 an alias of `--popup`) would run fzf in a tmux or Zellij popup, a separate process that `pick`'s terminal check, environment and signal handling were not designed or tested for. `--select-1` and `--exit-0` are `pick`'s own `--select-one` and `--exit-zero`, decided by `pick` (see [Selecting at once](#selecting-at-once)).
 - **`FTASK_PICK_OPTS`** is appended after `pick`'s own options, so it wins: e.g. `FTASK_PICK_OPTS='--height 60% --layout reverse'`.
 - **Rebinding is at your own risk.** An option that rebinds a key `pick` uses (or `--disabled`, `--no-multi`, `--with-shell`) can break the modes. `pick` does not detect that.
 - **`FZF_DEFAULT_COMMAND`** is never used: `pick` supplies every list.
@@ -449,7 +465,7 @@ It holds:
 - the **mode**, and for prompt and choose modes the action and its targets;
 - the **action log**: one entry per operation. Each entry is written, with `output` `null`, before the operation runs, and completed with its envelope after. An entry still `null` at the end means the helper died between the two: the operation may or may not have taken effect, and the entry is emitted as it is;
 - the **selection**, once recorded;
-- the **load**: the result of one `list` call per load, with `folder` `/`, `recursive`, `readiness` `["ready", "blocked", "complete"]`, `include_folders`, and no filters. `pick` derives from it the candidate lines (applying the scope folder, recursion, readiness scope and tag filters with `list`'s meanings), the preview's `blocks`, `b`'s candidates, and the `f` and `m` folder lists, so all of them agree. The status line's `N warnings` counts this read's warnings;
+- the **load**: the result of one `list` call per load, with `folder` `/`, `recursive`, `readiness` `["ready", "blocked", "complete"]`, `include_folders`, and no filters. `pick` derives from it the candidate lines (applying the scope folder, recursion, readiness scope and tag filters with `list`'s meanings), the preview's `blocks`, `b`'s candidates, and the `f` and `m` folder lists, so all of them agree. The status line's `N warnings` counts this read's warnings, never a `--source` command's. With a live source, a reload therefore reads the tree twice: once in the source's command, and once in this load, which supplies the data. A snapshot or source ID that the load does not find is left out of the list, and the header says how many (`2 given IDs not found`);
 - the **notes hashes** of the targets of an `e`, from before the editor ran, for `notes_edited`.
 
 **The helper** is a hidden command, `ftask __pick <verb> …`, that fzf's callbacks run. It reads the session directory from `FTASK_PICK_SESSION`, which `pick` sets in fzf's environment. It is internal: not listed in help, not part of the contract, and it may change in any release. Run with no valid session, it fails with `usage`.
@@ -464,6 +480,8 @@ Where `pick` differs from the [CLI spec](cli-spec.md)'s global rules, and why:
 - **An outside program.** fzf is a runtime dependency of `pick` alone. No other command needs it.
 - **Three CLI-only error kinds,** `cancelled`, `unavailable` and `incomplete`, besides `usage`. They carry `actions` in `details`, and `incomplete` wraps an operation's error instead of passing it through.
 - **Interrupts.** The CLI spec makes an interrupt a crash. In `pick`, ctrl-c cancels with an envelope, and SIGINT is discarded while fzf runs (see [Errors](#errors)). This also departs from the implementation spec's [Exit and signals](implementation-spec.md#exit-and-signals), which installs no SIGINT handler.
+- **stderr.** The CLI spec allows ftask one stderr line. fzf's own stderr also reaches the terminal (see [Errors](#errors)), since fzf reports its own problems, such as a bad option, there.
+- **stdin.** The CLI spec names the values that read stdin, `--input -` and `create`'s `--notes-file -`. `pick`'s `--from -` is a third, read in full before fzf starts.
 - **Operations without passthrough.** The operations `pick` runs inside the session write nothing to stdout. Their envelopes are reported in `actions` instead.
 
 ## Testing
@@ -474,7 +492,9 @@ Where `pick` differs from the [CLI spec](cli-spec.md)'s global rules, and why:
   - **Hostile text.** A task title, a `--source` stderr line and an error message containing `)+execute-silent(touch X)+(` and a newline are shown literally, and `X` is never created.
   - **Interrupts.** ctrl-c inside the `e` editor, followed by Enter, gives an envelope with the session's actions.
   - **A failed final read** gives `incomplete`, with the read's error and the actions.
-- **Minimum version.** The end-to-end test runs against fzf 0.63.0, the minimum, as well as the current release. Only actions that 0.63.0 has are used: marks are cleared with `clear-selection`, 0.63.0's name for clearing every mark, which later releases keep as an alias of `clear-multi`. `deselect-all` is not used: it leaves marks on lines the query hides.
+  - **ctrl-d** on an empty prompt deletes nothing and keeps the session.
+  - **`FZF_DEFAULT_OPTS='--tmux'`** inside tmux still runs fzf in the terminal.
+- **Minimum version.** The end-to-end test runs against fzf 0.63.0, the minimum, as well as the current release. Only actions and options that 0.63.0 has are used, `--no-tmux` included: marks are cleared with `clear-selection`, 0.63.0's name for clearing every mark, which later releases keep as an alias of `clear-multi`. `deselect-all` is not used: it leaves marks on lines the query hides.
 - **Pipelines.** `--from` with each accepted envelope shape, and the rejections; stdin and stdout redirected while the terminal is the pty.
 
 ## Shipping
