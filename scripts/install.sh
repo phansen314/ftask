@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Sets ftask up for Claude Code, OpenCode, or both: the permission rules that
 # let the agent run ftask and jq without prompting (except `ftask init`, which
-# changes this machine's setup, and the deletes, which have no undo but git),
+# changes this machine's setup, the deletes, which have no undo but git, and
+# `ftask repair`, which changes files to repair the tree),
 # and, for OpenCode, the skill. Claude Code gets the skill from the ftask
 # plugin; see the README.
 #
@@ -25,7 +26,7 @@ skill_src=$repo/claude/skills/ftask
 claude_dir=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
 claude_settings=$claude_dir/settings.json
 claude_allow='["Bash(ftask:*)", "Bash(jq:*)"]'
-claude_ask='["Bash(ftask init:*)", "Bash(ftask delete:*)", "Bash(ftask delete-folder:*)"]'
+claude_ask='["Bash(ftask init:*)", "Bash(ftask delete:*)", "Bash(ftask delete-folder:*)", "Bash(ftask repair:*)"]'
 
 oc_dir=${XDG_CONFIG_HOME:-$HOME/.config}/opencode
 oc_json=$oc_dir/opencode.json
@@ -37,7 +38,8 @@ oc_rules='{
   "jq *": "allow",
   "ftask init*": "ask",
   "ftask delete *": "ask",
-  "ftask delete-folder *": "ask"
+  "ftask delete-folder *": "ask",
+  "ftask repair*": "ask"
 }'
 
 usage() {

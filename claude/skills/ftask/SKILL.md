@@ -40,8 +40,16 @@ Error kinds worth handling:
 - `conflict` with `rule: "acyclic"` — the block would make a cycle; `.error.details.cycles` shows it.
 - `conflict` with `rule: "not-empty"` — `delete-folder` without `-r` on a folder that holds tasks or folders. Don't add `-r` on your own: ask the user.
 - `conflict` with `rule: "destination-exists"` — `move-folder` would land on a folder that already exists; folders are never merged.
-- `conflict` with `rule: "duplicate-id"` or `"id-above-last-id"` — the tree is damaged; report it, don't work around it.
+- `conflict` with `rule: "duplicate-id"` or `"id-above-last-id"` — the tree is damaged; check it (below), don't work around it.
 - `corrupt`, `unsupported-format`, `io`, `internal` — stop and report to the user, quoting `.error.message` (for `corrupt` it names what is wrong); don't try to fix files by hand.
+
+## When the tree is damaged
+
+After a `duplicate-id`, `id-above-last-id`, or `corrupt` error, or a `dangling-reference` warning, run `ftask doctor` — once per session, not after every command — and summarize `.result.findings` for the user: each finding's `kind`, its `items` (`paths`, `ids`), and its `suggest`. `doctor` changes nothing, and takes the write lock briefly, so other writes may get `busy` while it runs.
+
+- Findings with a non-null `action` are what `ftask repair` would fix. **Never run `repair` unasked**: offer it, saying what it would change. It asks for permission anyway.
+- **Never run `repair --kinds metadata-missing` unless the user explicitly agrees**: rebuilding `ftask.json` can reissue the ID of a task that was deleted.
+- Findings with `action: null` (duplicate IDs, cycles, unusable files, orphaned notes with text) are the user's to resolve. Pass on `suggest`; don't edit files to fix them yourself.
 
 ## Keep output small
 

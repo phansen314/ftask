@@ -26,7 +26,7 @@ claude plugin marketplace add phansen314/ftask
 claude plugin install ftask@ftask
 ```
 
-Then, from a clone of this repo, add the permission rules, which let ftask commands run without a prompt while `init`, which changes this machine's setup, and the deletes, which can't be undone but through git, still ask:
+Then, from a clone of this repo, add the permission rules, which let ftask commands run without a prompt while `init`, which changes this machine's setup, the deletes, which can't be undone but through git, and `repair`, which changes files to repair the tree, still ask:
 
 ```sh
 scripts/install.sh               # every agent whose CLI is on PATH
@@ -46,7 +46,7 @@ Claude Code, in `~/.claude/settings.json`:
 {
   "permissions": {
     "allow": ["Bash(ftask:*)", "Bash(jq:*)"],
-    "ask": ["Bash(ftask init:*)", "Bash(ftask delete:*)", "Bash(ftask delete-folder:*)"]
+    "ask": ["Bash(ftask init:*)", "Bash(ftask delete:*)", "Bash(ftask delete-folder:*)", "Bash(ftask repair:*)"]
   }
 }
 ```
@@ -61,7 +61,8 @@ OpenCode, in `~/.config/opencode/opencode.json` (the script leaves an `opencode.
       "jq *": "allow",
       "ftask init*": "ask",
       "ftask delete *": "ask",
-      "ftask delete-folder *": "ask"
+      "ftask delete-folder *": "ask",
+      "ftask repair*": "ask"
     }
   }
 }
@@ -81,6 +82,18 @@ ftask frontier --limit 10 --fields id,title                       # the next rea
 ftask complete 1
 ```
 
+## Checking and repairing the tree
+
+A crash, a git merge, or a hand edit can leave the tree damaged: a leftover temp file, a blocker that no longer exists, two tasks with one ID. Other commands report damage as warnings, or refuse to act on it; `doctor` finds all of it, and `repair` fixes what is safe to fix:
+
+```sh
+ftask doctor                         # .result.healthy, and .result.findings: what is wrong, and what repair would do
+ftask repair                         # remove leftovers and dangling blockers, raise last_id; the rest is left to you
+ftask repair --kinds metadata-missing   # rebuild a lost ftask.json; never done by default
+```
+
+`repair` never decides between versions: duplicate IDs, dependency cycles, and corrupt files are reported, with a suggestion, for you to resolve. See [Diagnosis and repair](design-spec.md#diagnosis-and-repair).
+
 ## Undoing a delete
 
 `ftask delete` and `ftask delete-folder` remove files for good; ftask keeps no trash. Keep the tree in git (`git init` in it, and commit now and then) and a delete can be undone, back to the last commit:
@@ -92,7 +105,7 @@ git restore -- proj/42.json proj/42.md                          # not yet commit
 git restore --source=<commit>^ -- proj/42.json proj/42.md       # committed: from the commit before
 ```
 
-Restore only the removed paths, never the whole tree: `ftask.json` holds the last issued ID, and rolling it back lets IDs be reused. The delete also took the task's ID out of other tasks' blockers; its output lists them as `dependents`, to re-`block` after restoring. See [Undo](operations.md#undo).
+Restore only the removed paths, never the whole tree: `ftask.json` holds the last issued ID, and rolling it back lets IDs be reused. The delete also took the task's ID out of other tasks' blockers; its output lists them as `dependents`, to re-`block` after restoring. Then run `ftask doctor`: a restored task may name blockers deleted since. See [Undo](operations.md#undo).
 
 ## Specs
 
