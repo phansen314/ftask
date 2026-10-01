@@ -3,6 +3,7 @@ package cli
 import (
 	"github.com/phansen314/ftask/internal/errs"
 	"github.com/phansen314/ftask/internal/jsonio"
+	"github.com/phansen314/ftask/internal/ops"
 )
 
 // Type is how an argument's or option's value becomes its input field
@@ -32,6 +33,12 @@ const (
 	// are, become a string. A file that can't be read stops the command
 	// with io; contents that are not UTF-8 are a problem at the field.
 	TextFile
+	// EnvelopeFile names a file, "-" for stdin, holding one envelope from
+	// another ftask command; its tasks' IDs, or its own ID, become an ID
+	// list (pick-spec.md, Accepted envelopes). The file is read in full. One
+	// that can't be read stops the command with io; content that is not such
+	// an envelope is a problem at the field.
+	EnvelopeFile
 )
 
 // Command is one CLI command: the operation it runs and how its arguments
@@ -50,6 +57,9 @@ type Command struct {
 	// Exclusive lists groups of options, by name, of which at most one may
 	// be given.
 	Exclusive [][]string
+	// Run, if set, runs the command in place of operation Op, which then
+	// names only the input adapter: pick, which runs no operation of its own.
+	Run func(in *jsonio.Object, problems []errs.Problem, env Env) ops.Envelope
 }
 
 // Arg is a positional argument. Every argument is required.

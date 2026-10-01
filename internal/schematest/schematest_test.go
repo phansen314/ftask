@@ -76,8 +76,21 @@ func TestNoUntypedValues(t *testing.T) {
 		if err := json.Unmarshal(data, &doc); err != nil {
 			t.Fatal(err)
 		}
-		checkTyped(t, id, "", doc, true)
+		checkTyped(t, id, "", doc, !onlyDefs(doc))
 	}
+}
+
+// onlyDefs reports whether a schema document is a container of $defs alone
+// (pick-error-details), which validates no value itself.
+func onlyDefs(doc any) bool {
+	m, _ := doc.(map[string]any)
+	for k := range m {
+		if k != "$schema" && k != "$id" && k != "$defs" {
+			return false
+		}
+	}
+	_, ok := m["$defs"]
+	return ok
 }
 
 // checkTyped checks s, a schema at path, and the value schemas within it. A

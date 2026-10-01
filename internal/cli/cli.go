@@ -203,6 +203,9 @@ func runCommand(c *Command, cmd *cobra.Command, args []string, env Env) ops.Enve
 		}
 		problems = append(problems, ps...)
 	}
+	if c.Run != nil {
+		return c.Run(in, problems, env)
+	}
 	return runOp(c.Op, in, problems, env.Ops)
 }
 

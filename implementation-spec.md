@@ -86,7 +86,7 @@ For files, the same steps implement [File validity](design-spec.md#file-validity
 
 ### Schemas in tests
 
-- **Extraction.** A generator (`go generate`) extracts every JSON code block with an `$id` from the four specs into `schemas/`; an `$id` anywhere else is an error, so no schema is left out. A test regenerates and fails on any difference, so the docs and the tests' copies cannot drift.
+- **Extraction.** A generator (`go generate`) extracts every JSON code block with an `$id` from the five specs (design, operations, CLI, implementation and [pick](pick-spec.md)) into `schemas/`; an `$id` anywhere else is an error, so no schema is left out. A test regenerates and fails on any difference, so the docs and the tests' copies cannot drift.
 - **Library.** The tests use a JSON Schema library that supports draft 2020-12 (including `$ref` by `$id` and `if`/`then`/`oneOf`), validates `json.Number` without converting it to `float64` (as a `float64`, `9007199254740993` rounds to a value that passes `priority`'s maximum), reports every error with its JSON Pointer, and loads schemas from local files under a fixed base URI. It is `github.com/santhosh-tekuri/jsonschema/v6`, with its regex engine replaced by Go's `regexp` after rewriting each `\uXXXX` escape to `\x{XXXX}`: the one ECMA-262 syntax the specs' patterns use that RE2 lacks. Syntax both accept with different meanings (`.` outside a class, `\s`, `\S`) is refused, so a pattern using it fails to compile. Only a test-helper package imports the library, so it never reaches the binary.
 - **Agreement tests.** For every input schema and file schema, a corpus of cases — hand-picked edge cases plus valid inputs mutated one field at a time — goes through both the adapters and the schema library. Both must accept, or both must reject. On rejection, the adapter's problems must name exactly the fields the library names, with the library's errors about a child that its parent reports (a disallowed additional property, each array item equal to an earlier one, a missing required property) placed at that child, where the adapters report them. Where an `anyOf` or `oneOf` fails (`update`'s `tags` and `extra`, and its requirement of at least one field), the library reports every alternative's failures while the adapter reports only the form the input evidently meant: there the adapter's fields must be exactly one alternative's failures, and a property an alternative requires is placed at the object, since the alternative does not make it required overall. A file rejected for its `schema` at [File validity](design-spec.md#file-validity) step 1, or at step 2, is checked no further, so there the library need only also reject its `schema`. Integer literals and Additional validation are outside what the schemas express and are tested separately: adapters mark each problem from Additional validation (and each file-level rule beyond the file's schema), and the comparison leaves those out.
 - **Output conformance.** Every envelope any test produces is validated against `envelope`, the operation's output or partial schema, `error`, `warning`, and — for usage errors — `usage-details`.
@@ -311,6 +311,7 @@ Module `github.com/phansen314/ftask`. Everything but `main` is under `internal/`
 ```text
 cmd/ftask/                 main: SetTraceback, SIGPIPE, run(), os.Exit — nothing else
 internal/cli/              command tables, cobra commands, conversion, envelope output, exit codes
+internal/pick/             pick: the fzf session and its helper, composing list and the write operations
 internal/ops/              one file per operation: its input adapter and its steps, in precedence order
 internal/model/            domain types: ID, Title, Tag, FolderPath, Priority, Timestamp, Extra (ordered), Task, TaskView
 internal/store/            config, root states, the lock, tree walk and index, task-file cache, file validity, atomic writes
@@ -319,7 +320,7 @@ internal/jsonio/           token-stream reader to ordered tree; encoder configur
 internal/fsys/             thin interface over os.Root and flock; the real implementation; a fault-injecting one
 internal/errs/             error and warning kinds, the warning collector, the errno table
 internal/buildinfo/        version, commit, commit time, uncommitted changes, Go version
-internal/tools/schemagen/  go generate: extracts every $id schema from the four specs into schemas/
+internal/tools/schemagen/  go generate: extracts every $id schema from the five specs into schemas/
 schemas/                   generated; used only by tests
 e2e/                       end-to-end tests against the built binary
 ```
@@ -333,11 +334,12 @@ cmd/ftask → cli → ops → store → fsys
                       ↘ graph      ↘ jsonio
                       ↘ model ←── (store, graph)
 cmd/ftask → buildinfo (and ops → buildinfo, for version)
+cli → pick → ops, for pick, which runs no operation of its own
 cmd/ftask → fsys, in the e2e_hooks build only (Test hooks)
 errs and jsonio may be imported by any package, and import none of ftask's own.
 ```
 
-- **The CLI does not know the data model.** `cli` never imports `model` or `store`: it builds a `jsonio` tree from the command line, calls `ops.Run(name, tree, env)`, and writes the envelope it gets back. A composed command is defined in `ops` as a named composition (see [Operations and transactions](#operations-and-transactions)) and exposed by the CLI like any other name, so `cli` still composes nothing itself. The CLI spec's "no behavior beyond parsing arguments and composing operations" is thereby enforced by the compiler. Command tables hold field pointers and value types, which is CLI-spec knowledge, not model knowledge.
+- **The CLI does not know the data model.** `cli` never imports `model` or `store`: it builds a `jsonio` tree from the command line, calls `ops.Run(name, tree, env)`, and writes the envelope it gets back. `pick`, which runs no operation of its own, is the one command the CLI hands to another package: `internal/pick` validates its tree with `ops.Validate`, through a `pick` input adapter that `ops` holds with the operations' adapters, and runs `list` and the write operations through `ops.Run`, each as its own call. A composed command is defined in `ops` as a named composition (see [Operations and transactions](#operations-and-transactions)) and exposed by the CLI like any other name, so `cli` still composes nothing itself. The CLI spec's "no behavior beyond parsing arguments and composing operations" is thereby enforced by the compiler. Command tables hold field pointers and value types, which is CLI-spec knowledge, not model knowledge.
 - **`graph` is pure.** Readiness and the [cycle check](#cycle-check) take already-loaded nodes; `store` does the loading. The brute-force comparison runs in memory.
 - **`fsys` is the only package that touches the disk.** Its real implementation wraps `os.Root` and `flock`, and refuses symlinks with `Lstat` and a same-file check after each open ([Filesystem access](#filesystem-access)). Its fault implementation wraps the real one and, at a chosen call, returns an injected errno or ends the process — the one seam for the [OS error](#os-errors) tests and for crash injection.
 

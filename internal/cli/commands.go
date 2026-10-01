@@ -1,5 +1,12 @@
 package cli
 
+import (
+	"github.com/phansen314/ftask/internal/errs"
+	"github.com/phansen314/ftask/internal/jsonio"
+	"github.com/phansen314/ftask/internal/ops"
+	"github.com/phansen314/ftask/internal/pick"
+)
+
 // commands are ftask's commands, in help order (cli-spec.md, Commands).
 var commands = []Command{
 	{
@@ -229,4 +236,36 @@ var commands = []Command{
   ftask frontier --tags-any urgent,today --fields id,title
   ftask frontier --limit 0                                     # how many are ready: .result.total`,
 	},
+	{
+		Name:    "pick",
+		Op:      "pick",
+		Summary: "Fuzzy-pick tasks, or folders, in fzf for a person at a terminal; never for agents",
+		Options: []Option{
+			{Name: "folder", Field: "/folder", Type: String, Help: "the scope folder at first, an exact `path` (default /)"},
+			{Name: "recursive", Field: "/recursive", Type: Bool, Help: "also tasks in subfolders (default true; --recursive=false for none)"},
+			{Name: "scope", Field: "/scope", Type: String, Help: "which tasks show at first, a `scope`: ready, open or all (default open; all with --ids, --from or --source)"},
+			{Name: "tags-any", Field: "/tags_any", Type: StringList, Help: "only tasks with at least one of these comma-separated `tags`"},
+			{Name: "tags-all", Field: "/tags_all", Type: StringList, Help: "only tasks with every one of these comma-separated `tags`"},
+			{Name: "ids", Field: "/ids", Type: IDList, Help: "only these comma-separated `ids` are candidates"},
+			{Name: "from", Field: "/ids", Type: EnvelopeFile, Help: "only the tasks in the envelope in `file` (- for stdin) are candidates"},
+			{Name: "source", Field: "/source", Type: String, Help: "a shell `command` whose envelope gives the candidates, run again on every reload"},
+			{Name: "query", Field: "/query", Type: String, Help: "the initial search `text`"},
+			{Name: "select-one", Field: "/select_one", Type: Bool, Help: "if the query matches exactly one candidate, emit it without showing the picker"},
+			{Name: "exit-zero", Field: "/exit_zero", Type: Bool, Help: "if the query matches no candidate, emit an empty selection without showing the picker"},
+			{Name: "fields", Field: "/fields", Type: StringList, Help: "emit only these comma-separated task `fields`, and id"},
+			{Name: "folders", Field: "/folders", Type: Bool, Help: "pick folders instead of tasks"},
+		},
+		Exclusive: [][]string{{"ids", "from"}},
+		Example: `  ftask pick                                                  # open tasks; Enter → .result.tasks
+  ftask pick --folder /work --scope ready                     # what's ready under /work
+  ftask list --readiness blocked --fields id | ftask pick --from -   # choose among the blocked ones
+  ftask pick --source 'ftask frontier --tags-any today'       # kept live
+  ftask pick --folders | jq -r '.result.folders[0]'           # a folder path`,
+		Run: func(in *jsonio.Object, problems []errs.Problem, env Env) ops.Envelope {
+			return runPick(in, problems, env.Ops)
+		},
+	},
 }
+
+// runPick runs pick; tests replace it to see the input built.
+var runPick = pick.Run

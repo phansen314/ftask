@@ -85,7 +85,7 @@ Fuzzy-pick tasks, or with `--folders` folders, and write the selection as one en
 
 `--from` resolves to `ids`, as `create`'s `--notes-file` resolves to `notes`:
 
-- <a id="accepted-envelopes"></a>**Accepted envelopes.** The file holds one envelope with `ok: true` whose `result` has either `tasks`, an array of objects each with an `id` (from `list`, `frontier` or `pick`), or an `id` of its own (from `show`, `create`, `complete` and the other single-task commands). Any `--fields` upstream will do, since `id` is always included. The IDs are taken in order, without duplicates.
+- <a id="accepted-envelopes"></a>**Accepted envelopes.** The file holds one envelope with `ok: true` whose `result` has either `tasks`, an array of objects each with an `id` (from `list`, `frontier`, `show` or `pick`), or an `id` of its own (from `create`, `complete` and the other single-task commands). Any `--fields` upstream will do, since `id` is always included. The IDs are taken in order, without duplicates.
 - **Read in full first.** The whole file is read before fzf starts, so `--from -` never competes with the terminal.
 - **Bad content** is `invalid-input` at `/ids`: not one JSON value, not an envelope, no tasks or ID in it, or an envelope with `ok: false`. The last says which error kind upstream reported. The upstream command has already written its own stderr line.
 - **An empty `tasks` array** is fine. The picker opens with no candidates.

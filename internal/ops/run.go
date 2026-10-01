@@ -85,6 +85,22 @@ func Run(name string, input *jsonio.Object, problems []errs.Problem, env Env) En
 }
 
 func run(name string, input *jsonio.Object, problems []errs.Problem, env Env, w *errs.Collector) (any, *errs.Error) {
+	in, e := Validate(name, input, problems)
+	if e != nil {
+		return nil, e
+	}
+	r, ok := runners[name]
+	if !ok {
+		return nil, errs.Internal("operation " + name + " is not implemented")
+	}
+	return r(env, in, w)
+}
+
+// Validate decodes input for name, as Run does before running it: its typed
+// form, or one invalid-input with the caller's problems and the adapter's
+// (see Run). A command that runs no operation of its own, pick, validates
+// its input with it.
+func Validate(name string, input *jsonio.Object, problems []errs.Problem) (any, *errs.Error) {
 	in, p, e := Decode(name, input)
 	if e != nil {
 		return nil, e
@@ -92,11 +108,7 @@ func run(name string, input *jsonio.Object, problems []errs.Problem, env Env, w 
 	if all := append(slices.Clone(problems), unreported(p.List(), problems)...); len(all) > 0 {
 		return nil, errs.InvalidInput(all)
 	}
-	r, ok := runners[name]
-	if !ok {
-		return nil, errs.Internal("operation " + name + " is not implemented")
-	}
-	return r(env, in, w)
+	return in, nil
 }
 
 // unreported returns the adapter's problems at fields the caller's problems

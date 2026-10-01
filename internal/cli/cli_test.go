@@ -456,8 +456,15 @@ func TestDeliver(t *testing.T) {
 	}
 }
 
+// Every command runs an operation, or, with Run, has an input adapter.
 func TestCommandsRunOperations(t *testing.T) {
 	for _, c := range commands {
+		if c.Run != nil {
+			if _, _, e := ops.Decode(c.Op, &jsonio.Object{}); e != nil {
+				t.Errorf("command %s has no input adapter %s: %v", c.Name, c.Op, e)
+			}
+			continue
+		}
 		if !slices.Contains(ops.Operations(), c.Op) {
 			t.Errorf("command %s runs unknown operation %s", c.Name, c.Op)
 		}
@@ -786,5 +793,138 @@ func TestDeleteMoveInput(t *testing.T) {
 		if _, reason := r.usageProblem(t); r.code != ExitUsage || reason != "missing required option --to" {
 			t.Errorf("%q without --to: exit %d, %q", args, r.code, reason)
 		}
+	}
+}
+
+// pick's input: each option at its field, --from's envelopes resolved to
+// ids, and the clashes (pick-spec.md, Command).
+func TestPickInput(t *testing.T) {
+	dir := t.TempDir()
+	file := func(name, content string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	listed := file("list.json", `{"ok":true,"result":{"tasks":[{"id":42,"title":"a"},{"id":7},{"id":42}],"total":3,"truncated":false},"warnings":[]}`+"\n")
+	saved := runPick
+	t.Cleanup(func() { runPick = saved })
+	var got string
+	var problems []errs.Problem
+	runPick = func(in *jsonio.Object, ps []errs.Problem, _ ops.Env) ops.Envelope {
+		b, _ := json.Marshal(in)
+		got, problems = string(b), ps
+		return ops.Envelope{OK: true, Result: struct{}{}, Warnings: []errs.Warning{}}
+	}
+	for _, tc := range []struct {
+		name  string
+		args  []string
+		stdin string
+		want  string
+		field string // the one problem's field, if any
+	}{
+		{"none", nil, "", `{}`, ""},
+		{"every task option", []string{"--folder", "/work", "--recursive=false", "--scope", "ready", "--tags-any", "a,b", "--tags-all", "c",
+			"--ids", "41,42", "--query", "renew pass", "--select-one", "--exit-zero", "--fields", "id,title"},
+			"", `{"folder":"/work","recursive":false,"scope":"ready","tags_any":["a","b"],"tags_all":["c"],"ids":[41,42],"query":"renew pass","select_one":true,"exit_zero":true,"fields":["id","title"]}`, ""},
+		{"source", []string{"--source", "ftask frontier --tags-any today"}, "", `{"source":"ftask frontier --tags-any today"}`, ""},
+		{"folders", []string{"--folders", "--folder", "/a"}, "", `{"folder":"/a","folders":true}`, ""},
+		{"empty ids", []string{"--ids", ""}, "", `{"ids":[]}`, ""},
+		// --from: the IDs in order, without duplicates.
+		{"from list", []string{"--from", listed}, "", `{"ids":[42,7]}`, ""},
+		{"from stdin", []string{"--from", "-"}, `{"ok":true,"result":{"tasks":[{"id":3}]},"warnings":[]}`, `{"ids":[3]}`, ""},
+		{"from show", []string{"--from", "-"}, `{"ok":true,"result":{"tasks":[{"id":4,"title":"x"}]},"warnings":[]}`, `{"ids":[4]}`, ""},
+		{"from create", []string{"--from", "-"}, `{"ok":true,"result":{"schema":1,"id":51,"title":"x"},"warnings":[]}`, `{"ids":[51]}`, ""},
+		{"from pick", []string{"--from", "-"}, `{"ok":true,"result":{"tasks":[{"id":5},{"id":6}],"missing":[],"actions":[],"notes_edited":[]},"warnings":[]}`, `{"ids":[5,6]}`, ""},
+		{"from empty tasks", []string{"--from", "-"}, `{"ok":true,"result":{"tasks":[],"total":0,"truncated":false},"warnings":[]}`, `{"ids":[]}`, ""},
+		{"from, ids judged by the adapter", []string{"--from", "-"}, `{"ok":true,"result":{"tasks":[{"id":"x"},{"id":2.0}]},"warnings":[]}`, `{"ids":["x",2.0]}`, ""},
+		{"from, with the other options", []string{"--from", "-", "--scope", "open"}, `{"ok":true,"result":{"id":1},"warnings":[]}`, `{"scope":"open","ids":[1]}`, ""},
+		// Content that is no accepted envelope is a problem at /ids.
+		{"from not JSON", []string{"--from", "-"}, `{"ok":`, `{}`, "/ids"},
+		{"from empty", []string{"--from", "-"}, ``, `{}`, "/ids"},
+		{"from two values", []string{"--from", "-"}, `{"ok":true,"result":{"id":1},"warnings":[]}{}`, `{}`, "/ids"},
+		{"from not an object", []string{"--from", "-"}, `[1]`, `{}`, "/ids"},
+		{"from no ok", []string{"--from", "-"}, `{"result":{"id":1}}`, `{}`, "/ids"},
+		{"from repeated key", []string{"--from", "-"}, `{"ok":true,"ok":true,"result":{"id":1}}`, `{}`, "/ids"},
+		{"from no result", []string{"--from", "-"}, `{"ok":true,"warnings":[]}`, `{}`, "/ids"},
+		{"from tasks not an array", []string{"--from", "-"}, `{"ok":true,"result":{"tasks":{}}}`, `{}`, "/ids"},
+		{"from a task with no id", []string{"--from", "-"}, `{"ok":true,"result":{"tasks":[{"id":1},{"title":"x"}]}}`, `{}`, "/ids"},
+		{"from neither tasks nor id", []string{"--from", "-"}, `{"ok":true,"result":{"folders":["/a"],"missing":[],"actions":[]},"warnings":[]}`, `{}`, "/ids"},
+		{"from not UTF-8", []string{"--from", "-"}, "{\"ok\":true,\"result\":{\"id\":1},\"x\":\"\xff\"}", `{}`, "/ids"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, problems = "", nil
+			r := run(t, commands, tc.stdin, append([]string{"pick"}, tc.args...)...)
+			var fields []string
+			for _, p := range problems {
+				fields = append(fields, p.Field)
+			}
+			var want []string
+			if tc.field != "" {
+				want = []string{tc.field}
+			}
+			if r.code != ExitOK || got != tc.want || !slices.Equal(fields, want) {
+				t.Errorf("exit %d, input %s %v\nwant %s %q", r.code, got, problems, tc.want, want)
+			}
+		})
+	}
+
+	// An upstream failure names its kind.
+	got, problems = "", nil
+	run(t, commands, `{"ok":false,"error":{"kind":"not-found","message":"no task 9"},"warnings":[]}`, "pick", "--from", "-")
+	if len(problems) != 1 || problems[0].Reason != "upstream failed with not-found: no task 9" {
+		t.Errorf("upstream failure: %v", problems)
+	}
+
+	// A file that can't be read stops the command with io.
+	got = ""
+	r := run(t, commands, "", "pick", "--from", filepath.Join(dir, "nope"))
+	if r.code != ExitError || r.kind() != "io" || got != "" {
+		t.Errorf("unreadable --from: exit %d: %s (pick ran: %v)", r.code, r.raw, got != "")
+	}
+
+	// --ids and --from both set /ids: a usage error, as is --from with --input.
+	for _, args := range [][]string{
+		{"pick", "--ids", "1", "--from", listed},
+		{"pick", "-i", "-", "--from", listed},
+		{"pick", "-i", "-", "--folders"},
+		{"pick", "extra"},
+	} {
+		if r := run(t, commands, "{}", args...); r.code != ExitUsage {
+			t.Errorf("%q: exit %d: %s", args, r.code, r.raw)
+		}
+	}
+}
+
+// What pick's input schema and adapter refuse reaches the envelope as
+// invalid-input, through the command line or --input alike.
+func TestPickInvalidInput(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		args   []string
+		stdin  string
+		fields []string
+	}{
+		{"ids and source", []string{"--ids", "1", "--source", "ftask list"}, "", []string{""}},
+		{"from and source", []string{"--from", "-", "--source", "ftask list"}, `{"ok":true,"result":{"id":1},"warnings":[]}`, []string{""}},
+		{"folders and task options", []string{"--folders", "--scope", "all", "--fields", "id", "--tags-any", "a"}, "", []string{"/fields", "/scope", "/tags_any"}},
+		{"bad values", []string{"--scope", "done", "--ids", "0,x", "--folder", "work", "--source", ""}, "", []string{"", "/folder", "/ids/0", "/ids/1", "/scope", "/source"}},
+		{"bad --from and a bad option", []string{"--from", "-", "--scope", "done"}, `{"ok":false,"error":{"kind":"busy","message":"m"},"warnings":[]}`, []string{"/ids", "/scope"}},
+		{"input file", []string{"-i", "-"}, `{"folders": true, "ids": [1]}`, []string{"/ids"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := run(t, commands, tc.stdin, append([]string{"pick"}, tc.args...)...)
+			if r.code != ExitError || r.kind() != "invalid-input" {
+				t.Fatalf("exit %d: %s", r.code, r.raw)
+			}
+			var fields []string
+			for _, p := range r.envelope["error"].(map[string]any)["details"].(map[string]any)["problems"].([]any) {
+				fields = append(fields, p.(map[string]any)["field"].(string))
+			}
+			if !slices.Equal(fields, tc.fields) {
+				t.Errorf("fields %q, want %q: %s", fields, tc.fields, r.raw)
+			}
+		})
 	}
 }

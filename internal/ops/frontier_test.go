@@ -194,10 +194,11 @@ func TestFrontierFields(t *testing.T) {
 	}
 }
 
-// Every operation the adapters know is implemented.
+// Every input the adapters know is an implemented operation's, except
+// pick's, which runs none.
 func TestEveryOperationImplemented(t *testing.T) {
-	for _, op := range Operations() {
-		if runners[op] == nil {
+	for op := range decoders {
+		if runners[op] == nil && op != "pick" {
 			t.Errorf("operation %s has no runner", op)
 		}
 	}

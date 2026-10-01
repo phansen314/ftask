@@ -14,7 +14,8 @@ import (
 // meaningful only when p ends up OK.
 type decoder func(f *model.Fields, p *model.Problems) any
 
-// decoders holds each operation's input adapter, by operation name.
+// decoders holds each operation's input adapter, by operation name, and
+// pick's, which is a command's: it runs no operation of its own.
 var decoders = map[string]decoder{
 	"version":       decodeVersion,
 	"info":          decodeInfo,
@@ -35,11 +36,12 @@ var decoders = map[string]decoder{
 	"move-folder":   decodeMoveFolder,
 	"frontier":      decodeFrontier,
 	"list":          decodeList,
+	"pick":          decodePick,
 }
 
 // Operations returns the name of every operation, sorted.
 func Operations() []string {
-	return slices.Sorted(maps.Keys(decoders))
+	return slices.Sorted(maps.Keys(runners))
 }
 
 // Decode checks the input of operation op, already read by jsonio, and returns

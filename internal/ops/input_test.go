@@ -39,15 +39,23 @@ var bases = map[string][]string{
 	},
 	"frontier": {`{"folder": "/proj", "recursive": false, "tags_any": ["a", "b"], "tags_all": ["c"], "limit": 10, "fields": ["title", "id"]}`},
 	"list":     {`{"folder": "/proj", "recursive": false, "readiness": ["ready", "complete"], "include_folders": true, "tags_any": ["a"], "tags_all": ["b", "c"], "limit": 0, "fields": ["readiness", "blocking"]}`},
+	"pick": {
+		`{"folder": "/proj", "recursive": false, "scope": "ready", "tags_any": ["a"], "tags_all": ["b"], "ids": [41, 42], "query": "renew", "select_one": true, "exit_zero": true, "fields": ["title", "id"], "folders": false}`,
+		`{"source": "ftask frontier --tags-any today", "scope": "all"}`,
+		`{"ids": []}`,
+		`{"folders": true, "folder": "/a", "recursive": false, "query": "x", "select_one": true, "exit_zero": false}`,
+	},
 }
 
-// scopeCandidates exercise frontier's and list's narrowing: field names and
-// readiness values, good and bad, and limits at their bounds.
+// scopeCandidates exercise frontier's, list's and pick's narrowing: field
+// names, readiness values and pick's scopes, good and bad, and limits at
+// their bounds.
 var scopeCandidates = []string{
 	`"ready"`, `"complete"`, `"id"`, `"notes_path"`, `"Ready"`, `"folders"`,
 	`["id"]`, `["blocking", "schema"]`, `["id", "id"]`, `["title", "Title"]`, `["nope"]`,
 	`["blocked"]`, `["ready", "ready"]`, `["done"]`, `["ready", 1]`,
 	`9007199254740991`, `9007199254740992`,
+	`"open"`, `"all"`,
 }
 
 // updateCandidates exercise the forms of update's tags and extra.
@@ -59,7 +67,7 @@ var updateCandidates = []string{
 }
 
 func TestInputsAgreeWithSchemas(t *testing.T) {
-	for _, op := range Operations() {
+	for op := range decoders {
 		if _, ok := bases[op]; !ok {
 			t.Errorf("%s: no base input", op)
 		}
@@ -176,6 +184,14 @@ func TestInputProblems(t *testing.T) {
 		{"update", `{"id": 42, "extra": {"remove": ["a", "a", 1]}}`, []string{"/extra/remove/1", "/extra/remove/2"}},
 		{"update", `{"id": 42, "extra": {"replace_all": []}}`, []string{"/extra/replace_all"}},
 		{"update", `{"id": 42, "title": ""}`, []string{"/title"}},
+		{"pick", `{"ids": [1], "source": "x"}`, []string{""}},
+		{"pick", `{"ids": [1, 1], "source": ""}`, []string{"", "/ids/1", "/source"}},
+		{"pick", `{"scope": "done"}`, []string{"/scope"}},
+		// With folders, every task-only field is refused, once.
+		{"pick", `{"folders": true, "scope": "all", "ids": [], "fields": ["id"], "tags_any": ["a"], "tags_all": ["a"]}`, []string{"/fields", "/ids", "/scope", "/tags_all", "/tags_any"}},
+		{"pick", `{"folders": true, "source": "x"}`, []string{"/source"}},
+		{"pick", `{"folders": true, "scope": "done", "ids": [0]}`, []string{"/ids", "/ids/0", "/scope"}},
+		{"pick", `{"folders": false, "scope": "all", "source": "x"}`, nil},
 		// Integer literals, which the agreement corpus leaves out.
 		{"show", `{"id": 2.0}`, []string{"/id"}},
 		{"complete", `{"id": 42e0}`, []string{"/id"}},
@@ -231,6 +247,19 @@ func TestDecodedInputs(t *testing.T) {
 		!u.Tags.Replace || u.Tags.ReplaceAll == nil || len(u.Tags.ReplaceAll) != 0 ||
 		u.Extra.ReplaceAll != nil || u.Extra.Merge.Len() != 0 || !reflect.DeepEqual(u.Extra.Remove, []string{"a"}) {
 		t.Errorf("update: %+v %+v %+v", u, u.Tags, u.Extra)
+	}
+	if got := decodeOK("pick", `{}`).(PickInput); !reflect.DeepEqual(got, PickInput{Folder: "/", Recursive: true, Scope: PickOpen}) {
+		t.Errorf("pick defaults: %+v", got)
+	}
+	// A snapshot or a live source shows everything upstream chose: all.
+	if got := decodeOK("pick", `{"ids": []}`).(PickInput); got.Scope != PickAll || got.IDs == nil || len(got.IDs) != 0 {
+		t.Errorf("pick ids: %+v", got)
+	}
+	if got := decodeOK("pick", `{"source": "s"}`).(PickInput); got.Scope != PickAll || got.Source == nil || *got.Source != "s" {
+		t.Errorf("pick source: %+v", got)
+	}
+	if got := decodeOK("pick", `{"ids": [3, 1], "scope": "ready"}`).(PickInput); got.Scope != PickReady || !reflect.DeepEqual(got.IDs, []model.ID{3, 1}) {
+		t.Errorf("pick ids, scope: %+v", got)
 	}
 	if _, _, e := Decode("nosuch", &jsonio.Object{}); e == nil || e.Kind != errs.KindInternal {
 		t.Errorf("unknown operation: %v", e)

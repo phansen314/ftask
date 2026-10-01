@@ -18,7 +18,7 @@ import (
 )
 
 // specs are the documents schemas are extracted from, relative to the root.
-var specs = []string{"design-spec.md", "operations.md", "cli-spec.md", "implementation-spec.md"}
+var specs = []string{"design-spec.md", "operations.md", "cli-spec.md", "implementation-spec.md", "pick-spec.md"}
 
 func main() {
 	root := flag.String("root", ".", "directory holding the specs")
