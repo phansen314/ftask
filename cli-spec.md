@@ -252,6 +252,68 @@ ftask init /mnt/usb/tasks --replace-config
 jq -n '{root: "~/tasks"}' | ftask init -i -
 ```
 
+### doctor
+
+Report everything wrong with the tree, and what `repair` would do about each problem. Changes nothing. Runs [`doctor`](operations.md#doctor).
+
+**Synopsis:** `ftask doctor [--kinds <kinds>]`, or `ftask doctor -i <file>`.
+
+**Operation:** [`doctor`](operations.md#doctor).
+
+**Arguments:** none.
+
+**Options:**
+
+| Option | Field | Default |
+|---|---|---|
+| `--kinds <kinds>` | `/kinds` | None: every kind, at most 20 items each. Comma list of [finding kinds](operations.md#finding-kinds), each reported in full. |
+
+**Input:** none beyond the Options mapping.
+
+**Output:** Passthrough. A tree with findings is reported as state (`ok: true`, `healthy: false`), so it exits `0`. To turn health into an exit status, use `jq -e .result.healthy`.
+
+**Errors:** none beyond the operation's.
+
+**Examples:**
+
+```sh
+ftask doctor                                   # healthy when .result.healthy is true; else .result.findings says why
+ftask doctor --kinds cycle,duplicate-id        # just these, in full
+ftask doctor | jq '.result.findings[] | select(.class != "manual") | .kind'   # what repair would fix
+```
+
+### repair
+
+Apply the repairs that are safe, then report what is left. Runs [`repair`](operations.md#repair).
+
+**Synopsis:** `ftask repair [--kinds <kinds>]`, or `ftask repair -i <file>`.
+
+**Operation:** [`repair`](operations.md#repair).
+
+**Arguments:** none.
+
+**Options:**
+
+| Option | Field | Default |
+|---|---|---|
+| `--kinds <kinds>` | `/kinds` | None: every *auto* kind. Comma list of [finding kinds](operations.md#finding-kinds) to repair. Naming `metadata-missing` is the only way to rebuild `ftask.json`. |
+
+**Input:** none beyond the Options mapping.
+
+**Output:** Passthrough: `repaired`, what it changed, and `findings`, what is left. Findings left for a person don't fail the command: it exits `0`, with `healthy: false`.
+
+**Errors:** none beyond the operation's.
+
+**Examples:**
+
+```sh
+ftask repair                                   # every auto repair
+ftask repair --kinds temp-leftover             # only the leftover temp files
+ftask repair --kinds metadata-missing          # rebuild a lost ftask.json; never done by default
+```
+
+There is no `doctor --fix`. Repairing is its own command, so that agent permission rules, which match a command line by its start, can ask before `ftask repair` whatever options follow.
+
 ### create-folder
 
 Create a folder, and optionally any missing parent folders. Runs [`create-folder`](operations.md#create-folder).

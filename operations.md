@@ -20,6 +20,7 @@ Every operation is one of three kinds:
 - ***read*** — Takes no lock and changes nothing. Read operations that walk the tree follow the design spec's [Walking the tree](design-spec.md#walking-the-tree) and [Reads](design-spec.md#reads) rules. Some reads (`version`, `info`) do not require a usable root.
 - ***write*** — Changes the tree. Requires a usable root, takes the write lock, and follows the design spec's [Guarantees](design-spec.md#guarantees) (and [Walking the tree](design-spec.md#walking-the-tree), when it walks). Uses the general [Precedence](#precedence).
 - ***setup*** — Creates what writes depend on. Only [`init`](#init) is a setup operation. It takes no lock, the write guarantees do not apply to it, and it defines its own error precedence.
+- ***diagnostic*** — Finds, and repairs, what a system crash or an outside change left in the tree (see the design spec's [Diagnosis and repair](design-spec.md#diagnosis-and-repair)). [`doctor`](#doctor) and [`repair`](#repair) are the diagnostic operations. They take the write lock, even `doctor`, which changes nothing, but do not require a usable root: they need the config and the root, and report a missing or unusable `ftask.json` as a [finding](#findings). They walk the whole tree, and define their own error precedence. `repair` follows the write [Guarantees](design-spec.md#guarantees).
 
 ## Operation template
 
@@ -40,7 +41,7 @@ Every operation is specified with the same parts, in this order. Every part is a
 | **Errors** | Table of [error kinds](#error-kinds) and when each is raised, in [precedence](#precedence) order. Operations that require a usable root list the [Root states](#root-states) errors as one row. `io` and `internal` are omitted: any operation can raise them. |
 | **Warnings** | Table of [warning kinds](#warning-kinds) and when each is reported. |
 | **Partial schema** | For a write or setup that touches several files: JSON Schema of `error.partial`, `$id` `<op>-partial`, describing what took effect before it failed. |
-| **Crash behavior** | What a process crash or system crash partway through can leave behind, and what [`doctor`](design-spec.md#doctor) would find. |
+| **Crash behavior** | What a process crash or system crash partway through can leave behind, and which [findings](#finding-kinds) [`doctor`](#doctor) would report. |
 | **Retry safety** | Whether running it again after `busy`, an error with `partial`, or a crash is safe, and with what outcome. |
 
 ## Output envelope
@@ -108,7 +109,7 @@ The `reason` fields of `invalid-input` problems, of `corrupt`, and of the `unusa
 
 ### Precedence
 
-An operation's **needed files** are the files it must read to do its job: the config and `ftask.json` for anything that requires a usable root, the entries along any input path, plus whatever its Needed files part lists. A problem with a needed file is an error. A problem with a **relevant** file — one that changes or explains the operation's result, as its Needed files part lists — is a warning. Problems with unrelated files the operation walks past are skipped silently; [`doctor`](design-spec.md#doctor) is the operation for finding those. The design spec's [Walking the tree](design-spec.md#walking-the-tree) applies these rules to blockers, duplicates, and unlistable folders.
+An operation's **needed files** are the files it must read to do its job: the config and `ftask.json` for anything that requires a usable root, the entries along any input path, plus whatever its Needed files part lists. A problem with a needed file is an error. A problem with a **relevant** file — one that changes or explains the operation's result, as its Needed files part lists — is a warning. Problems with unrelated files the operation walks past are skipped silently; [`doctor`](#doctor) is the operation for finding those. The design spec's [Walking the tree](design-spec.md#walking-the-tree) applies these rules to blockers, duplicates, and unlistable folders.
 
 A read or write operation reports one error. When several apply, it reports the first in this order:
 
@@ -119,7 +120,7 @@ A read or write operation reports one error. When several apply, it reports the 
 5. `corrupt` or `unsupported-format` for needed task files.
 6. `conflict`.
 
-Steps 4–6 are checked under the write lock. A write re-reads `ftask.json` after acquiring the lock (it decides on current state); a problem found only then is reported with the step 2 kinds. `io` and `internal` are reported wherever they occur. Setup defines its own order (see [`init`](#init)).
+Steps 4–6 are checked under the write lock. A write re-reads `ftask.json` after acquiring the lock (it decides on current state); a problem found only then is reported with the step 2 kinds. `io` and `internal` are reported wherever they occur. Setup and diagnostic operations define their own order (see [`init`](#init), [`doctor`](#doctor), and [`repair`](#repair)).
 
 When several errors of one step apply and the kind reports only one (e.g. two needed task files are both `corrupt`), the one reported is the first in [tree order](#tree-order). A kind that lists every instance (e.g. `not-found`'s `ids`) lists them all.
 
@@ -317,6 +318,94 @@ An `unusable-file` warning says which file and, in `reason`, one word for why �
 }
 ```
 
+## Findings
+
+A finding is a problem with the tree that [`doctor`](#doctor) reports and [`repair`](#repair) may fix: the damage a system crash or an outside change leaves, which other operations report as warnings, absorb, or skip silently (see the design spec's [Diagnosis and repair](design-spec.md#diagnosis-and-repair)). Findings are not warnings: they describe the whole tree, not one operation's result, and they are the result of `doctor` itself.
+
+- **Grouped by kind.** Findings come as one group per kind present, each with its kind's repair class, its item `count`, and its `items`. A tree with no findings is **healthy**.
+- **Short by default.** A group lists at most its first 20 items, with `truncated: true` when it has more; `count` is always the total. A kind the input names in `kinds` is listed in full.
+- **Deterministic order.** Groups are sorted by `kind`; the items of a group by the first entry of `paths`, then by `ids` (compared element by element, as numbers), as warnings are. The same tree always yields the same findings in the same order.
+- **What `repair` would do.** Each item's `action` names what `repair` does to it, or is `null` when `repair` leaves it to a person. `suggest` says what a person could do: a command to run, or a step to take. It is for humans, like `message`, and not part of the contract.
+
+### Finding kinds
+
+| Kind | Class | One item per | `paths` | `ids` | Other fields | `action` |
+|---|---|---|---|---|---|---|
+| `temp-leftover` | auto | ftask temp file or folder (its name starts with `.ftask-tmp-`) anywhere under the root: a write's leftover file, or the folder an interrupted [`delete-folder`](#delete-folder) renamed aside. Its contents are not looked at. | the entry | none | — | `remove` |
+| `metadata-missing` | on-request | root with no `ftask.json`: one item. | where `ftask.json` belongs | none | `last_id`: the highest ID in any task filename, or `0` | `create-metadata` |
+| `metadata-unusable` | manual | root whose `ftask.json` is unusable: one item. | `ftask.json` | none | `error`: the error every operation that requires a usable root fails with — `corrupt` (with its full `problems` or `detail`), `unsupported-format`, or `io` | `null` |
+| `id-above-last-id` | auto | task file whose filename ID is above `last_id`. Only when `ftask.json` is usable. | the task file | its ID | `last_id`: the highest ID in any task filename | `raise-last-id` |
+| `dangling-reference` | auto | pair of a task file and an ID in its `blocked_by` that names no task, as the [warning](#warning-kinds) of that name. Not reported while any folder can't be listed, since the task may be in it. | the referring task file | `[referring, missing]`, in that order | — | `remove-reference` |
+| `orphan-notes` | auto, for `empty` and `linked` items | `.md` named like a task's notes, with no task file of its ID beside it. | the `.md`, then each task file with its ID elsewhere, in [tree order](#tree-order) | its ID | `reason`, below | `remove` when `reason` is `empty` or `linked`; else `null` |
+| `duplicate-id` | manual | ID that more than one task file has. | every copy, in tree order | the one ID | `identical`: whether every copy is the same, byte for byte | `null` |
+| `cycle` | manual | group of tasks that block each other: a strongly connected component of the [dependency graph](design-spec.md#dependencies). | none | one cycle in the group: the shortest through its lowest ID, from that ID back to it, e.g. `[12, 15, 12]` (12 is blocked by 15, which is blocked by 12) | `group`: every ID in the group, ascending | `null` |
+| `unusable-file` | manual | task file that is [unusable](design-spec.md#file-validity). | the task file | its ID, from the filename | `error`: the error a write that needed the file would fail with — `corrupt` (with its full `problems` or `detail`), `unsupported-format`, or `io` | `null` |
+| `nested-tree` | manual | `ftask.json` in a folder other than the root: another tree's metadata, inside this one. | the file | none | — | `null` |
+| `stray-entry` | manual | entry that is not hidden and is not a folder, a task file, a `.md` named like a task's notes, or the root's `ftask.json` (see [Walking the tree](design-spec.md#walking-the-tree)). | the entry | none | `reason`, below | `null` |
+| `unreadable-folder` | manual | folder that can't be listed. Its entries are not looked at. | the folder | none | `code`: the symbolic OS error | `null` |
+
+Kind by kind:
+
+- **`orphan-notes`** — `reason` says what the notes are, and whether `repair` can remove them without losing anything:
+  - `empty`: zero bytes. Holds nothing.
+  - `linked`: the same file (same device and inode) as the notes of a task with this ID elsewhere — what an interrupted [`move`](#move) leaves. Its text is kept at the task.
+  - `task-elsewhere`: a task with this ID exists elsewhere, and its notes are a different file — e.g. an editor saved the old `.md` after a move. `suggest` says to merge the text into that task's notes.
+  - `no-task`: no task has this ID — e.g. a [`delete`](#delete) was interrupted, or the task was removed by hand. The text may be the user's only copy, so it is left to them.
+- **`cycle`** — the graph is built as for the [cycle check](#block): from usable task files only, with an ID's edges the union of every copy's. A cycle is reported once per group, not once per cycle, since a group can hold more cycles than tasks. Removing any one blocker on the example cycle breaks that cycle; `suggest` gives one [`unblock`](#unblock) that does.
+- **`nested-tree`** — reported as the cause. The nested tree's tasks and folders are still walked as part of this tree, so its symptoms (duplicate IDs, IDs above `last_id`) are reported under their own kinds. The nested `ftask.json` itself is not also a `stray-entry`.
+- **`stray-entry`** — `reason` is `name` when the name matches neither the folder-name nor the task-filename rule (e.g. `notes.txt`, `42.md~`); `type` when the name matches but the entry's type doesn't (e.g. a directory named `42.json`, a `.md` that is a folder); `symlink` for a symbolic link, whatever its name. A root `ftask.json` that is not a regular file is `metadata-unusable` instead.
+- **`unusable-file`** — the full diagnosis that the [`unusable-file`](#warning-kinds) warning leaves out. A task file whose filename ID differs from its `id` field is reported here, as `corrupt`.
+- **`id-above-last-id`** and **`metadata-missing`** — every task file counts, usable or not, by the ID in its filename: that is the ID it occupies (see [Tasks](design-spec.md#tasks)).
+
+### Finding schema
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "finding",
+  "type": "object",
+  "required": ["kind", "class", "count", "truncated", "items"],
+  "properties": {
+    "kind": { "type": "string", "description": "One of the Finding kinds; callers ignore unknown values." },
+    "class": { "type": "string", "enum": ["auto", "on-request", "manual"], "description": "The kind's repair class (see Diagnosis and repair)." },
+    "count": { "type": "integer", "minimum": 1, "description": "How many items the kind has, including any not listed." },
+    "truncated": { "type": "boolean", "description": "True when items lists fewer than count." },
+    "items": { "type": "array", "minItems": 1, "items": { "$ref": "finding-item" } }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    { "if": { "properties": { "kind": { "enum": ["metadata-unusable", "unusable-file"] } } }, "then": { "properties": { "items": { "items": { "required": ["error"] } } } } },
+    { "if": { "properties": { "kind": { "enum": ["metadata-missing", "id-above-last-id"] } } }, "then": { "properties": { "items": { "items": { "required": ["last_id"] } } } } },
+    { "if": { "properties": { "kind": { "enum": ["orphan-notes", "stray-entry"] } } }, "then": { "properties": { "items": { "items": { "required": ["reason"] } } } } },
+    { "if": { "properties": { "kind": { "const": "duplicate-id" } } }, "then": { "properties": { "items": { "items": { "required": ["identical"] } } } } },
+    { "if": { "properties": { "kind": { "const": "cycle" } } }, "then": { "properties": { "items": { "items": { "required": ["group"] } } } } },
+    { "if": { "properties": { "kind": { "const": "unreadable-folder" } } }, "then": { "properties": { "items": { "items": { "required": ["code"] } } } } }
+  ]
+}
+```
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "finding-item",
+  "type": "object",
+  "required": ["paths", "ids", "action", "suggest"],
+  "properties": {
+    "paths": { "type": "array", "items": { "type": "string" }, "description": "Filesystem paths involved; meaning per kind (see Finding kinds)." },
+    "ids": { "type": "array", "items": { "type": "integer" }, "description": "Task IDs involved; order and meaning per kind (see Finding kinds)." },
+    "action": { "type": ["string", "null"], "description": "What repair does to this item: remove, raise-last-id, remove-reference, or create-metadata; null when repair leaves it to a person. In repair's repaired list, what it did." },
+    "suggest": { "type": ["string", "null"], "description": "What a person could do, for humans. Not part of the contract." },
+    "reason": { "type": "string", "description": "For orphan-notes: empty, linked, task-elsewhere, or no-task. For stray-entry: name, type, or symlink." },
+    "code": { "type": "string", "description": "For unreadable-folder: the symbolic OS error (e.g. EACCES)." },
+    "identical": { "type": "boolean", "description": "For duplicate-id: whether every copy is the same, byte for byte." },
+    "group": { "type": "array", "items": { "type": "integer" }, "description": "For cycle: every ID in the group, ascending." },
+    "last_id": { "$ref": "root-file#/properties/last_id", "description": "For metadata-missing and id-above-last-id: the last_id repair writes." },
+    "error": { "$ref": "error", "description": "For metadata-unusable and unusable-file: the error an operation that needed the file would fail with." }
+  },
+  "additionalProperties": false
+}
+```
+
 ## Root states
 
 Whether read and write operations can run against this machine's root is one of three states. Finding the root starts with locating the config; when that is impossible, operations that require a usable root fail with `environment` before any state applies (see [Config file](design-spec.md#config-file)).
@@ -324,14 +413,14 @@ Whether read and write operations can run against this machine's root is one of 
 | State | Holds when | Operations that require a usable root fail with |
 |---|---|---|
 | ***Not initialized*** | Something is missing: the config, the root it names (the path must lead, through symlinks, to a directory), or `ftask.json` in that root. | `not-initialized`, with `missing` naming the first absent piece. Remedy depends on `missing` — see below. |
-| ***Initialized, not usable*** | Nothing is missing, but the config or `ftask.json` is unusable. | `corrupt` or `unsupported-format`, or `io` if the file is unreadable. Remedy: repair the file or its permissions, or use a binary that supports the format. |
+| ***Initialized, not usable*** | Nothing is missing, but the config or `ftask.json` is unusable. | `corrupt` or `unsupported-format`, or `io` if the file is unreadable. Remedy: repair the file or its permissions, or use a binary that supports the format. [`doctor`](#doctor) reports `ftask.json`'s problem in full. |
 | ***Usable*** | Nothing is missing, and the config and `ftask.json` both pass every check in [File validity](design-spec.md#file-validity). | — |
 
 Remedies for *not initialized*, by `missing`:
 
 - **`config`** — nothing is set up on this machine. Run [`init`](#init).
 - **`root`** — the config names a root that isn't there. Check the path first (an unmounted drive, a moved folder). Run `init` with `replace_config` only if a new or different tree is really intended: on an unmounted drive's mount point it would create a fresh empty tree.
-- **`metadata`** — the root exists but has lost its `ftask.json`. Run [`doctor`](design-spec.md#doctor), which can rebuild it. `init` refuses (the config exists, and the root isn't empty).
+- **`metadata`** — the root exists but has lost its `ftask.json`. Run [`doctor`](#doctor) to see the tree's state, then [`repair`](#repair) naming `metadata-missing`, which rebuilds it (see [Finding kinds](#finding-kinds) for the risk). `init` refuses (the config exists, and the root isn't empty).
 
 *Initialized* is about presence; *usable* additionally about content. A file that exists but is unusable never makes a root *not initialized*. In particular, a config that exists but is unusable — it doesn't parse, or names a root in an illegal [form](design-spec.md#root-path) — leaves the root *initialized, not usable*, even though no root can be read from it; operations fail with `corrupt`.
 
@@ -384,7 +473,7 @@ Every result of `frontier` and `list` carries `total` and `truncated`, whether o
 
 - **Restore only the removed paths**, never the whole tree: restoring `ftask.json` can lower `last_id` and let IDs be reused. A delete not yet committed is undone with `git restore -- proj/travel`; a committed one from a commit that still has the files, usually the parent of the one that removed them: `git restore --source=<commit>^ -- proj/travel`. A task is two paths, `42.json` and `42.md`.
 - **References don't come back.** The delete removed the task's ID from its dependents' `blocked_by`, and restoring their files too would undo any other change to them since. Re-[`block`](#block) the `dependents` the delete reported instead.
-- **What ftask would have checked is left to [`doctor`](design-spec.md#doctor):** a restored task's `blocked_by` may name tasks removed since, and its edges may close a cycle added while it was gone.
+- **What ftask would have checked is left to [`doctor`](#doctor):** a restored task's `blocked_by` may name tasks removed since (`dangling-reference`, which [`repair`](#repair) removes), and its edges may close a cycle added while it was gone (`cycle`, which a person breaks).
 
 ## Shared schemas
 
@@ -512,11 +601,11 @@ A [folder path](design-spec.md#folder-paths).
 
 ## Versioning
 
-ftask releases follow [semantic versioning](https://semver.org/). The operation input, output, partial, error, and warning schemas are ftask's public contract: a breaking change to any of them requires a new major version. There is no separate API version.
+ftask releases follow [semantic versioning](https://semver.org/). The operation input, output, partial, error, warning, and finding schemas are ftask's public contract: a breaking change to any of them requires a new major version. There is no separate API version.
 
 **Before 1.0**, the contract is not yet stable: a breaking change bumps the **minor** version instead (0.1 → 0.2), and its release says what changed. The same holds for the data formats; see [Format versions](design-spec.md#format-versions).
 
-Adding a new error kind, warning kind, or `conflict` rule is a **minor** change. Callers must therefore treat an unknown error kind as a generic failure and ignore unknown warning kinds. For the same reason the published schemas type `kind` (and `rule`) as a plain string, not a closed enum; the known values are listed in this document.
+Adding a new error kind, warning kind, finding kind, or `conflict` rule is a **minor** change. Callers must therefore treat an unknown error kind as a generic failure, and ignore unknown warning kinds and finding kinds. For the same reason the published schemas type `kind` (and `rule`) as a plain string, not a closed enum; the known values are listed in this document.
 
 Data formats are versioned separately; see the design spec's [Format versions](design-spec.md#format-versions). A release reports its format versions via [`version`](#version).
 
@@ -616,7 +705,7 @@ If a config already exists — whatever it names, and whether or not it parses �
 
 Present when `init` fails after creating the root directory or `ftask.json` — e.g. the config cannot be written. What it created stays; rerunning `init` with the same input completes it.
 
-**Crash behavior:** a crash may leave some of the pieces in place and not others — e.g. a new root directory without `ftask.json`, or a tree with `ftask.json` but no config. The config is written last, so until it exists nothing else uses the root, and a partial `init` is never mistaken for a usable one. Apart from possible leftover temp files — in the root, which `doctor` finds, or in the config directory, which the next `init` removes — there is nothing for `doctor` to find.
+**Crash behavior:** a crash may leave some of the pieces in place and not others — e.g. a new root directory without `ftask.json`, or a tree with `ftask.json` but no config. The config is written last, so until it exists nothing else uses the root, and a partial `init` is never mistaken for a usable one. Apart from possible leftover temp files — in the root, which [`doctor`](#doctor) finds as `temp-leftover`, or in the config directory, which the next `init` removes — there is nothing for `doctor` to find.
 
 **Retry safety:** after a crash or an error with `partial`, safe: the config is written last, so an interrupted `init` did not change the config, and rerunning it with the same input finishes the job (reporting `attached` if it had already written `ftask.json` — an empty tree it created itself). After a success, rerunning fails with `conflict` (`rule`: `config-exists`). A crash after the config is written — while only its temp file remains to remove — is a success, and a rerun fails the same way.
 
@@ -774,6 +863,183 @@ Every problem with the root is reported as state in the output, not as an error.
 
 **Retry safety:** safe.
 
+### doctor
+
+Report everything wrong with the tree, as [findings](#findings): what each is, and what [`repair`](#repair) would do about it, or what a person could. Changes nothing.
+
+**Kind:** diagnostic. Takes the write lock, so that what it reports is the tree at rest (see [Diagnosis and repair](design-spec.md#diagnosis-and-repair)). Does not require a usable root: it needs the config and the root, and reports a missing or unusable `ftask.json` as a finding. Walks the whole tree.
+
+**Input schema:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "doctor-input",
+  "type": "object",
+  "properties": {
+    "kinds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" }, "description": "Finding kinds to report, each listed in full. Omitted: every kind, at most 20 items each." }
+  },
+  "additionalProperties": false
+}
+```
+
+**Additional validation:** each of `kinds` is one of the [finding kinds](#finding-kinds).
+
+**Preconditions:** the config is usable and names a root that exists.
+
+**Needed files:** the config, and the root directory, which `doctor` opens and locks. Nothing else is needed: a problem with `ftask.json`, or with any entry under the root, is a finding, never an error. `doctor` lists every folder; reads `ftask.json` and every task file in full; and checks each `.md` named like a task's notes that has no task file beside it, for its size and its identity (see `orphan-notes`).
+
+**Effects:** none.
+
+**Invariants at risk:** none.
+
+**Output schema:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "doctor-output",
+  "type": "object",
+  "required": ["healthy", "findings"],
+  "properties": {
+    "healthy": { "type": "boolean", "description": "True when the tree has no findings of any kind, whether or not kinds named them." },
+    "findings": { "type": "array", "items": { "$ref": "finding" }, "description": "One group per kind found, or only the kinds named in kinds." }
+  },
+  "additionalProperties": false
+}
+```
+
+**Order:** as in [Findings](#findings).
+
+**Errors:**
+
+| Kind | When |
+|---|---|
+| `invalid-input` | `kinds` is empty, repeats a kind, or names a kind that is not a finding kind. |
+| `environment` | The config can't be located. |
+| `not-initialized` | `missing`: `config` or `root`. Never `metadata`: a missing `ftask.json` is the `metadata-missing` finding. |
+| `corrupt` | The config is corrupt. |
+| `busy` | Another write holds the write lock. |
+
+Errors are checked in the order above. Everything found after the lock is taken is a finding, not an error; `io` is still reported for the config, and for the root directory if it can't be opened or locked.
+
+**Warnings:** none. Every problem `doctor` finds is a finding.
+
+**Partial schema:** none.
+
+**Crash behavior:** none. `doctor` changes nothing, and the lock it holds is released when it exits or crashes.
+
+**Retry safety:** safe.
+
+### repair
+
+Apply the safe repairs: for each kind it repairs, every item whose `action` is not `null` (see [Finding kinds](#finding-kinds)). Then report what is left, as [`doctor`](#doctor) would.
+
+**Kind:** diagnostic. Takes the write lock. Does not require a usable root: it needs the config and the root, and a usable `ftask.json`, or none when it is asked to create one. Walks the whole tree.
+
+**Input schema:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "repair-input",
+  "type": "object",
+  "properties": {
+    "kinds": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" }, "description": "Finding kinds to repair, each listed in full in the output. Omitted: every auto kind. Naming an on-request kind is the only way to repair it." }
+  },
+  "additionalProperties": false
+}
+```
+
+**Additional validation:** each of `kinds` is one of the [finding kinds](#finding-kinds), and not a *manual* one: those are never repaired, and the problem's reason says to see `doctor`.
+
+**Preconditions:**
+
+| `ftask.json` | Outcome |
+|---|---|
+| usable | `repair` runs. |
+| missing, and `kinds` names `metadata-missing` | `repair` runs, and creates it. |
+| missing, otherwise | `not-initialized` (`missing`: `metadata`). Raising `last_id` and every later step need it, and creating it is the user's decision. |
+| present but unusable | `corrupt`, `unsupported-format`, or `io`. `repair` changes nothing in a tree whose `ftask.json` it can't read, or whose format it doesn't know. `doctor` reports the problem in full, for a person to fix. |
+
+Naming `metadata-missing` when `ftask.json` is present is not an error: there is nothing to repair for it.
+
+**Needed files:** as for `doctor`, plus `ftask.json`, and each task file it rewrites (a usable file, since `doctor` read its `blocked_by`).
+
+**Effects:** for each kind it repairs, each item's `action` is applied:
+
+- **`remove`** — the entry is removed: a `temp-leftover` file, or folder with everything in it; an `orphan-notes` `.md`.
+- **`create-metadata`** — `ftask.json` is created, with this binary's `schema` and the item's `last_id`.
+- **`raise-last-id`** — `last_id` is set to the item's `last_id`, the highest ID in any task filename. One write for every item.
+- **`remove-reference`** — the missing ID is removed from the task file's `blocked_by`, and `updated_at` is set to now, as [`unblock`](#unblock) does. A copy of a duplicated ID is rewritten like any other task file: the change is to that file alone.
+
+Afterwards, the findings that remain are reported, for every kind, as `doctor` would report them for the same `kinds`.
+
+**Invariants at risk:** none. Each repair removes a violation and adds none: removing a reference can't close a cycle, and `last_id` only goes up.
+
+**Output schema:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "repair-output",
+  "type": "object",
+  "required": ["repaired", "healthy", "findings"],
+  "properties": {
+    "repaired": { "type": "array", "items": { "$ref": "finding" }, "description": "What repair changed, grouped as findings; each item's action is what was done. Empty when there was nothing to repair." },
+    "healthy": { "type": "boolean", "description": "True when the tree has no findings left, of any kind." },
+    "findings": { "type": "array", "items": { "$ref": "finding" }, "description": "The findings left after the repairs, as doctor reports them." }
+  },
+  "additionalProperties": false
+}
+```
+
+**Order:** as in [Findings](#findings), for both `repaired` and `findings`.
+
+**Errors:**
+
+| Kind | When |
+|---|---|
+| `invalid-input` | `kinds` is empty, repeats a kind, or names a kind that is not a finding kind, or a *manual* one. |
+| `environment` | The config can't be located. |
+| `not-initialized` | `missing`: `config` or `root`; or `metadata`, when `ftask.json` is missing and `kinds` doesn't name `metadata-missing`. |
+| `corrupt` | The config, or `ftask.json`, is corrupt. |
+| `busy` | Another write holds the write lock. |
+| `unsupported-format` | `ftask.json`'s `schema` is not the version this binary supports. |
+
+Errors are checked in the order above, except that `ftask.json` is read only once the lock is taken, since `repair` decides on current state: its `not-initialized`, `corrupt`, and `unsupported-format` come after `busy`.
+
+**Warnings:** none. Every problem `repair` finds is a finding.
+
+**Partial schema:**
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "repair-partial",
+  "type": "object",
+  "required": ["repaired"],
+  "properties": {
+    "repaired": { "type": "array", "items": { "$ref": "finding" }, "description": "What repair changed before the error, grouped as in the output." }
+  },
+  "additionalProperties": false
+}
+```
+
+Present only when an error (e.g. `io`) comes after at least one repair. Each repair listed is complete; the rest were not made. The tree is no worse than before: every repair removes a finding and adds none.
+
+**Crash behavior:** steps run in this order, one item at a time:
+
+1. `temp-leftover` items are removed. A crash while a temp folder is being removed leaves part of it, still a `temp-leftover`.
+2. `ftask.json` is created, when `kinds` names `metadata-missing`.
+3. `last_id` is raised.
+4. `dangling-reference` items are removed, one task file at a time.
+5. `orphan-notes` items are removed. Each is checked again just before: an `empty` one must still be empty, a `linked` one still the same file as its task's notes. One that changed is left, and reported among the remaining findings.
+
+Creating `ftask.json` before raising `last_id` means a rebuilt `ftask.json` never needs raising. A [process crash](design-spec.md#crashes) between any two steps leaves a tree with fewer findings, and no new ones. A [system crash](design-spec.md#crashes) keeps the order of the files `repair` writes — `ftask.json` and rewritten task files are flushed like any write's — but can undo removals, which are not flushed; `doctor` then reports those items again.
+
+**Retry safety:** safe. After `busy`, an error with `partial`, or a crash, rerunning repairs what is left. After success, rerunning repairs nothing and returns an empty `repaired`.
+
 ## Folder operations
 
 ### create-folder
@@ -897,7 +1163,7 @@ Permanently remove a folder and everything under it, and remove the IDs of the t
 
 The tasks under `folder` may be open or complete, and their task files may be unusable: `delete-folder` needs only their filenames, never their contents.
 
-**Needed files:** the entries along `folder`'s path ([path walk](#path-walk)); the names of every entry under `folder`, at every depth; and, outside `folder`, every task file whose `blocked_by` names a task under it — those are rewritten. It lists everything under `folder` first, and fails with `io` if it meets a folder there it can't list: it must know every ID it removes. If `folder` holds a task, it then walks the rest of the tree — there is no index — and fails with `io` on a folder it can't list there too, since it must find every reference; if `folder` holds none, nothing outside it is read. Relevant files: every other task file outside `folder` — one that is unusable may hold a reference that can't be removed, so it is a warning, and the reference is left for [`doctor`](design-spec.md#doctor).
+**Needed files:** the entries along `folder`'s path ([path walk](#path-walk)); the names of every entry under `folder`, at every depth; and, outside `folder`, every task file whose `blocked_by` names a task under it — those are rewritten. It lists everything under `folder` first, and fails with `io` if it meets a folder there it can't list: it must know every ID it removes. If `folder` holds a task, it then walks the rest of the tree — there is no index — and fails with `io` on a folder it can't list there too, since it must find every reference; if `folder` holds none, nothing outside it is read. Relevant files: every other task file outside `folder` — one that is unusable may hold a reference that can't be removed, so it is a warning, and the reference is left for [`doctor`](#doctor).
 
 **Effects:**
 
@@ -942,7 +1208,7 @@ Tasks that were blocked only by tasks under `folder` become ready, as they would
 | `not-found`, `corrupt` | `folder` fails the [path walk](#path-walk) (`not-found`, `folders`: the outermost missing folder; or `corrupt`, `reason`: `unexpected-file`). |
 | `conflict` | (`rule`: `not-empty`) `recursive` is false and `folder` holds a task or folder. `ids`: the tasks under `folder`, ascending (empty if it holds only folders). |
 | `conflict` | (`rule`: `duplicate-id`) A task under `folder` has an ID with more than one task file. `ids`: every such ID, ascending. |
-| `conflict` | (`rule`: `id-above-last-id`) A task under `folder` has an ID above `last_id`. `ids`: every such ID, ascending. Repair with [`doctor`](design-spec.md#doctor) first. |
+| `conflict` | (`rule`: `id-above-last-id`) A task under `folder` has an ID above `last_id`. `ids`: every such ID, ascending. Run [`repair`](#repair) first, which raises `last_id`. |
 
 The `conflict` rules are checked in the order listed; the first that applies is reported.
 
@@ -975,7 +1241,7 @@ Present only when an error (e.g. `io`) comes after at least one dependent was re
 
 1. Each dependent is rewritten, one file at a time. A process crash here leaves some references removed and the folder in place — a valid tree.
 2. `folder` is renamed to a hidden temp name in the root — one atomic step, however large the folder. From here the folder is gone from the tree, and the operation has succeeded.
-3. The temp folder is removed. A process crash, or an error, here leaves a hidden leftover, which reads ignore and `doctor` reports; the operation still succeeds.
+3. The temp folder is removed. A process crash, or an error, here leaves a hidden leftover, which reads ignore, `doctor` reports as `temp-leftover`, and [`repair`](#repair) removes; the operation still succeeds.
 
 A [system crash](design-spec.md#crashes) keeps this order too: each dependent is flushed before the rename. The rename and the removal are not flushed, so a system crash can undo them, bringing the folder back — a valid tree — or leaving the hidden leftover.
 
@@ -1163,9 +1429,9 @@ Create a new, open task.
 }
 ```
 
-Present only when the failure came after `last_id` was incremented. Once the task file is written, `create` cannot fail: anything that goes wrong afterwards — writing the `.md` (a `notes-missing` warning), removing a temp file (no warning; `doctor` finds it) — leaves the operation successful. So a `partial` always means this operation consumed an ID and created no task. It does not mean no task has that ID: see Crash behavior.
+Present only when the failure came after `last_id` was incremented. Once the task file is written, `create` cannot fail: anything that goes wrong afterwards — writing the `.md` (a `notes-missing` warning), removing a temp file (no warning; [`doctor`](#doctor) finds it as `temp-leftover`) — leaves the operation successful. So a `partial` always means this operation consumed an ID and created no task. It does not mean no task has that ID: see Crash behavior.
 
-**Crash behavior:** after a [process crash](design-spec.md#crashes), the tree satisfies every invariant, leaving nothing for `doctor` beyond a possible leftover temp file, because steps run in this order:
+**Crash behavior:** after a [process crash](design-spec.md#crashes), the tree satisfies every invariant, leaving nothing for [`doctor`](#doctor) beyond a possible `temp-leftover`, because steps run in this order:
 
 1. `last_id` is incremented. A process crash here consumes an ID without creating a task — an allowed gap.
 2. The task file is created. A process crash here leaves a valid task whose `.md` is missing, which reads as empty notes.
@@ -1176,7 +1442,7 @@ A [system crash](design-spec.md#crashes) keeps this order too: `ftask.json` is f
 - **In a different folder**, it succeeds, producing two tasks with one ID. Reads report them as `duplicate-id`.
 - **In the same folder**, the existing task file blocks it: `create` fails with `corrupt` (`reason`: `unexpected-file`) and a `partial` for the consumed ID. A retry uses the next ID and succeeds.
 
-`doctor` finds the state before or after reuse (a task whose ID exceeds `last_id`; two task files with the same ID).
+`doctor` finds the state before reuse as `id-above-last-id`, which [`repair`](#repair) fixes by raising `last_id`, and the state after it as `duplicate-id`, which a person resolves.
 
 **Retry safety:** after `busy`, safe — nothing happened. After an error with `partial`, safe — `partial` confirms this operation created no task. After a crash or an unclear outcome, **not** safe: the task may already exist, and retrying creates a duplicate with a new ID. Callers that retry should first check whether the task was created. See [Idempotent create](design-spec.md#idempotent-create).
 
@@ -1332,13 +1598,13 @@ The task after the operation, per the [Task](#task) schema, plus `changed`.
 | `busy` | Another write holds the write lock. |
 | `not-found` | No task file has ID `id` (`ids`: `[id]`). |
 | `corrupt`, `unsupported-format` | The task file is unusable. |
-| `conflict` | (`rule`: `duplicate-id`) More than one task file has ID `id` (`ids`: `[id]`). A write must know which task it changes; repair the duplicate with [`doctor`](design-spec.md#doctor) first. |
+| `conflict` | (`rule`: `duplicate-id`) More than one task file has ID `id` (`ids`: `[id]`). A write must know which task it changes; [`doctor`](#doctor) reports the copies, for a person to resolve first. |
 
 **Warnings:** none.
 
 **Partial schema:** none. `complete` replaces a single file, all-or-nothing.
 
-**Crash behavior:** the task file is either the old version or the new one. There is nothing for `doctor` to find beyond a possible leftover temp file.
+**Crash behavior:** the task file is either the old version or the new one. There is nothing for `doctor` to find beyond a possible `temp-leftover`, which [`repair`](#repair) removes.
 
 **Retry safety:** safe. Rerunning on a task that is now complete changes nothing and returns `changed: false`.
 
@@ -1416,13 +1682,13 @@ The task after the operation, per the [Task](#task) schema, plus `changed`.
 | `busy` | Another write holds the write lock. |
 | `not-found` | No task file has ID `id` (`ids`: `[id]`). |
 | `corrupt`, `unsupported-format` | The task file is unusable. |
-| `conflict` | (`rule`: `duplicate-id`) More than one task file has ID `id` (`ids`: `[id]`). A write must know which task it changes; repair the duplicate with [`doctor`](design-spec.md#doctor) first. |
+| `conflict` | (`rule`: `duplicate-id`) More than one task file has ID `id` (`ids`: `[id]`). A write must know which task it changes; [`doctor`](#doctor) reports the copies, for a person to resolve first. |
 
 **Warnings:** none.
 
 **Partial schema:** none. `reopen` replaces a single file, all-or-nothing.
 
-**Crash behavior:** the task file is either the old version or the new one. There is nothing for `doctor` to find beyond a possible leftover temp file.
+**Crash behavior:** the task file is either the old version or the new one. There is nothing for `doctor` to find beyond a possible `temp-leftover`, which [`repair`](#repair) removes.
 
 **Retry safety:** safe. Rerunning on a task that is now open changes nothing and returns `changed: false`.
 
@@ -1456,7 +1722,7 @@ Add one or more blockers to a task's `blocked_by`. All-or-nothing: every blocker
 - Every **new** blocker — an ID in `blockers` not already in the task's `blocked_by` — names an existing task, open or complete. A blocker ID with several task files exists.
 - Adding the new blockers creates no cycle.
 
-Blockers already present are no-ops: they are neither checked for existence nor for cycles. A dangling or cyclic blocker already in `blocked_by` (after a system crash or an outside change) is left for [`doctor`](design-spec.md#doctor).
+Blockers already present are no-ops: they are neither checked for existence nor for cycles. A dangling or cyclic blocker already in `blocked_by` (after a system crash or an outside change) is left for [`doctor`](#doctor), which reports it as `dangling-reference` or `cycle`.
 
 **Needed files:** The whole tree is walked (there is no index); a folder that can't be listed fails with `io`, since a write must *prove* the result acyclic. Needed:
 
@@ -1518,7 +1784,7 @@ The task after the operation, per the [Task](#task) schema, plus `added`.
 | `busy` | Another write holds the write lock. |
 | `not-found` | `id`, or a blocker, has no task file (`ids`: every missing one). |
 | `corrupt`, `unsupported-format` | The task file, or a task file the cycle check reaches, is unusable. |
-| `conflict` | (`rule`: `duplicate-id`) More than one task file has ID `id` (`ids`: `[id]`). A write must know which task it changes; repair the duplicate with [`doctor`](design-spec.md#doctor) first. |
+| `conflict` | (`rule`: `duplicate-id`) More than one task file has ID `id` (`ids`: `[id]`). A write must know which task it changes; [`doctor`](#doctor) reports the copies, for a person to resolve first. |
 | `conflict` | (`rule`: `acyclic`) A blocker would create a cycle. `ids`: every offending blocker, ascending; `cycles[i]`: the shortest cycle through `ids[i]` (ties by smallest ID sequence), starting at `id`. |
 
 **Warnings:**
@@ -1529,7 +1795,7 @@ The task after the operation, per the [Task](#task) schema, plus `added`.
 
 **Partial schema:** none. `block` replaces a single file, all-or-nothing.
 
-**Crash behavior:** the task file is either the old version or the new one. There is nothing for `doctor` to find beyond a possible leftover temp file.
+**Crash behavior:** the task file is either the old version or the new one. There is nothing for `doctor` to find beyond a possible `temp-leftover`, which [`repair`](#repair) removes.
 
 **Retry safety:** safe. Blockers already present are no-ops and are not rechecked, so rerunning adds nothing new and returns `added: []` — whatever has happened to the tree since. After a `conflict` (`acyclic`), drop the offending blockers and rerun the rest.
 
@@ -1609,13 +1875,13 @@ The task after the operation, per the [Task](#task) schema, plus `removed`.
 | `busy` | Another write holds the write lock. |
 | `not-found` | No task file has ID `id` (`ids`: `[id]`). |
 | `corrupt`, `unsupported-format` | The task file is unusable. |
-| `conflict` | (`rule`: `duplicate-id`) More than one task file has ID `id` (`ids`: `[id]`). A write must know which task it changes; repair the duplicate with [`doctor`](design-spec.md#doctor) first. |
+| `conflict` | (`rule`: `duplicate-id`) More than one task file has ID `id` (`ids`: `[id]`). A write must know which task it changes; [`doctor`](#doctor) reports the copies, for a person to resolve first. |
 
 **Warnings:** none.
 
 **Partial schema:** none. `unblock` replaces a single file, all-or-nothing.
 
-**Crash behavior:** the task file is either the old version or the new one. There is nothing for `doctor` to find beyond a possible leftover temp file.
+**Crash behavior:** the task file is either the old version or the new one. There is nothing for `doctor` to find beyond a possible `temp-leftover`, which [`repair`](#repair) removes.
 
 **Retry safety:** safe. Blockers already absent are left absent, so rerunning removes nothing more and returns `removed: []`.
 
@@ -1758,13 +2024,13 @@ The task after the operation, per the [Task](#task) schema, plus `changed`.
 | `busy` | Another write holds the write lock. |
 | `not-found` | No task file has ID `id` (`ids`: `[id]`). |
 | `corrupt`, `unsupported-format` | The task file is unusable. |
-| `conflict` | (`rule`: `duplicate-id`) More than one task file has ID `id` (`ids`: `[id]`). A write must know which task it changes; repair the duplicate with [`doctor`](design-spec.md#doctor) first. |
+| `conflict` | (`rule`: `duplicate-id`) More than one task file has ID `id` (`ids`: `[id]`). A write must know which task it changes; [`doctor`](#doctor) reports the copies, for a person to resolve first. |
 
 **Warnings:** none.
 
 **Partial schema:** none. `update` replaces a single file, all-or-nothing.
 
-**Crash behavior:** the task file is either the old version or the new one. There is nothing for `doctor` to find beyond a possible leftover temp file.
+**Crash behavior:** the task file is either the old version or the new one. There is nothing for `doctor` to find beyond a possible `temp-leftover`, which [`repair`](#repair) removes.
 
 **Retry safety:** safe. Every form is idempotent: rerunning with the same input leaves the task as it is and returns `changed: []`.
 
@@ -1796,7 +2062,7 @@ Permanently remove a task, and remove its ID from every other task's `blocked_by
 - Exactly one task file has ID `id`. The task may be open or complete, and its task file may be unusable: `delete` needs only its filename, never its contents — so it is also how an unusable task is removed.
 - `id` is at most `last_id`: a task above it only arises from a system crash or an outside change, and removing it would let its ID be reissued undetectably (see [Task IDs](design-spec.md#task-ids)).
 
-**Needed files:** every task file whose filename ID is `id`, and every task file whose `blocked_by` contains `id` — those are rewritten. There is no index, so `delete` walks the whole tree, and fails with `io` if it meets a folder it can't list: it must find every reference. Relevant files: every other task file — one that is unusable may hold a reference that can't be removed, so it is a warning, and the reference is left for [`doctor`](design-spec.md#doctor).
+**Needed files:** every task file whose filename ID is `id`, and every task file whose `blocked_by` contains `id` — those are rewritten. There is no index, so `delete` walks the whole tree, and fails with `io` if it meets a folder it can't list: it must find every reference. Relevant files: every other task file — one that is unusable may hold a reference that can't be removed, so it is a warning, and the reference is left for [`doctor`](#doctor).
 
 **Effects:**
 
@@ -1838,8 +2104,8 @@ Tasks that were blocked only by this one become ready, as they would if it had b
 | `environment`, `not-initialized`, `corrupt`, `unsupported-format` | The config can't be located, or the root is not usable (see [Root states](#root-states)). |
 | `busy` | Another write holds the write lock. |
 | `not-found` | No task file has ID `id` (`ids`: `[id]`). |
-| `conflict` | (`rule`: `duplicate-id`) More than one task file has ID `id` (`ids`: `[id]`). A write must know which task it removes; repair the duplicate with [`doctor`](design-spec.md#doctor) first. |
-| `conflict` | (`rule`: `id-above-last-id`) `id` is above `last_id` (`ids`: `[id]`). Repair with `doctor` first. |
+| `conflict` | (`rule`: `duplicate-id`) More than one task file has ID `id` (`ids`: `[id]`). A write must know which task it removes; [`doctor`](#doctor) reports the copies, for a person to resolve first. |
+| `conflict` | (`rule`: `id-above-last-id`) `id` is above `last_id` (`ids`: `[id]`). Run [`repair`](#repair) first, which raises `last_id`. |
 
 The `conflict` rules are checked in the order listed; the first that applies is reported.
 
@@ -1872,7 +2138,7 @@ Present only when an error (e.g. `io`) comes after at least one dependent was re
 
 1. Each dependent is rewritten, one file at a time. A crash here leaves some references removed and the task in place.
 2. The task file is removed. This is the moment the task is gone. Removing it before the `.md` means a failure never leaves a surviving task without its notes.
-3. The `.md` is removed. A crash before this leaves an orphaned `.md`, which reads ignore and `doctor` reports.
+3. The `.md` is removed. A crash before this leaves an orphaned `.md`, which reads ignore and `doctor` reports as `orphan-notes`. `repair` removes it if it is empty; otherwise it is `no-task`, left to a person, since notes the user asked to delete can't be told from notes kept on purpose.
 
 A [system crash](design-spec.md#crashes) keeps this order too: each dependent is flushed before the task file is removed. The removals are not flushed, so a system crash can undo them, bringing the task back — a valid tree — or leaving the orphaned `.md`.
 
@@ -1962,7 +2228,7 @@ The task after the operation, per the [Task](#task) schema, plus `from`, `create
 | `busy` | Another write holds the write lock. |
 | `not-found`, `corrupt` | `to` fails the [path walk](#path-walk) while `parents` is false (`not-found`, or `corrupt` with `reason` `unexpected-file`); or no task file has ID `id` (`not-found`). A missing folder and a missing task are reported in one `not-found`. |
 | `corrupt`, `unsupported-format` | The task file is unusable. |
-| `conflict` | (`rule`: `duplicate-id`) More than one task file has ID `id` (`ids`: `[id]`). A write must know which task it moves; repair the duplicate with [`doctor`](design-spec.md#doctor) first. |
+| `conflict` | (`rule`: `duplicate-id`) More than one task file has ID `id` (`ids`: `[id]`). A write must know which task it moves; [`doctor`](#doctor) reports the copies, for a person to resolve first. |
 
 **Warnings:** none.
 
@@ -1988,7 +2254,7 @@ Present only when an error (e.g. `io`) comes after `parents` created at least on
 1. With `parents`, missing folders are created, outermost first.
 2. The `.md` is hard-linked into `to`, replacing any stray `.md` there. A [process crash](design-spec.md#crashes) here leaves the task in place with its notes, and a stray `.md` in `to` that a retry replaces.
 3. The task file is renamed into `to`. This is the moment the task moves; its notes are already there.
-4. The old `.md` is removed. A crash before this leaves a stray `.md` in the old folder, which reads ignore and `doctor` reports.
+4. The old `.md` is removed. A crash before this leaves a stray `.md` in the old folder, which reads ignore and `doctor` reports as `orphan-notes` (`linked`: a second name for the notes now at the task), which `repair` removes.
 
 A task with no `.md` skips steps 2 and 4, and instead removes any stray `.md` in `to` under its name before step 3, so a stray can never become its notes. The notes are never lost, and the tree always satisfies every invariant.
 

@@ -13,7 +13,7 @@ How the design spec's [write lock](design-spec.md#write-lock) and [Guarantees](d
 - **Keep the lock's file alive.** The `*os.File` from `root.Open(".")` must stay referenced until the write ends. If it becomes unreachable, Go's finalizer may close the descriptor mid-write, which releases the lock. The write holds it explicitly and closes it (releasing the lock) only when done.
 - **Non-blocking acquisition.** `LOCK_EX | LOCK_NB`; if the lock is held, fail immediately (see *Fail fast* in [Guarantees](design-spec.md#guarantees)).
 - **Platform check.** `flock` on a directory descriptor is verified on Linux. On macOS it is confirmed from the XNU kernel source: `flock` accepts any descriptor on a filesystem, directories included; the advisory-lock layer rejects only FIFOs; and the local lock code never checks the file type. Its behavior matches Linux: the lock belongs to the open file description, is shared by `fork` and `dup` copies, and is advisory. An empirical check on macOS — contention, release on crash, close-on-exec — belongs in the implementation's test suite. Network filesystems are excluded (see [Assumptions](design-spec.md#assumptions)).
-- **Atomic file writes.** Write a complete temp file in the same directory (a hidden entry), then publish it: `rename` to replace an existing file, `link` to create a new one so an existing file is never clobbered. A process crash between writing the temp file and removing it can leave the temp file behind; it is ignored by reads and reported by [`doctor`](design-spec.md#doctor).
+- **Atomic file writes.** Write a complete temp file in the same directory (a hidden entry), then publish it: `rename` to replace an existing file, `link` to create a new one so an existing file is never clobbered. A process crash between writing the temp file and removing it can leave the temp file behind; it is ignored by reads and reported by [`doctor`](operations.md#doctor).
 - **Moves never replace.** [`move`](operations.md#move)'s task file and [`move-folder`](operations.md#move-folder)'s folder move with a rename that fails with `EEXIST` rather than replace what is at the new name: `renameat2` with `RENAME_NOREPLACE` on Linux, `renameatx_np` with `RENAME_EXCL` on macOS, both from `golang.org/x/sys/unix`, between the two folders opened through the `os.Root`. Plain `rename(2)` silently replaces an empty folder, so a check made beforehand under the lock would be the only guard; the no-replace rename is the backstop against an outside change, and reports it as `corrupt` (`unexpected-file`).
 - **Notes move by hard link.** `move` links the `.md` to a temp name in the destination folder, then renames that over any stray `.md` there, before moving the task file; the old `.md` is removed last. The notes are therefore at the destination before the task is, and a crash never leaves the task without them.
 - **Folders are removed by renaming them aside.** [`delete-folder`](operations.md#delete-folder) renames the folder to a temp name in the root (`.ftask-tmp-<random>`, a hidden folder), then removes that with `RemoveAll`. The rename is the one step that takes the folder out of the tree; a crash or error during the removal leaves a hidden folder that reads ignore and `doctor` finds by its prefix.
@@ -138,7 +138,7 @@ Operations that must find an ID, prove it absent, or return a collection walk th
 - **Classification**, per [Walking the tree](design-spec.md#walking-the-tree): a hidden entry is skipped; a folder name that is a directory is descended into; `<id>.json` that is a regular file is a task; everything else, symlinks included, is skipped.
 - **Result:** an index from each ID to every location that has it, in tree order; the list of folders; and the folders that could not be listed, with their errno.
 
-`create` without `blocked_by`, `create-folder`, `version`, `info`, and `init` do not walk.
+`create` without `blocked_by`, `create-folder`, `version`, `info`, and `init` do not walk. `doctor` and `repair` walk with a recorder for what the index skips (see [The survey](#the-survey)).
 
 ### Loading task files
 
@@ -167,7 +167,7 @@ Operations use the index through a few helpers:
 7. load needed files (`corrupt`, `unsupported-format`: the first in tree order);
 8. conflicts (`duplicate-id`, `acyclic`, `id-exhausted`).
 
-`io` and `internal` return wherever they occur. `init` runs its own order.
+`io` and `internal` return wherever they occur. `init`, `doctor`, and `repair` run their own orders.
 
 ### Warnings
 
@@ -270,7 +270,7 @@ Implements the CLI spec's [Output](cli-spec.md#output) and [Exit codes](cli-spec
 
 ### One exit point
 
-`main` calls `run()`, which returns the exit code; `main` then calls `os.Exit(code)`. Nothing else calls `os.Exit`, so deferred cleanup — removing temp files, closing the lock's file (which releases the lock) — always runs first. A process that dies by signal skips it; that is a crash, where a leftover temp file is expected and [`doctor`](design-spec.md#doctor) finds it.
+`main` calls `run()`, which returns the exit code; `main` then calls `os.Exit(code)`. Nothing else calls `os.Exit`, so deferred cleanup — removing temp files, closing the lock's file (which releases the lock) — always runs first. A process that dies by signal skips it; that is a crash, where a leftover temp file is expected and [`doctor`](operations.md#doctor) finds it.
 
 ### Writing the envelope
 
@@ -358,7 +358,7 @@ An operation is a function over a transaction: `func(tx *store.Tx, in Input) (Re
 
 Every file ftask writes — task files, `.md` notes, `ftask.json`, the config — is published through a temp file, per [Mechanism](#mechanism)'s atomic file writes:
 
-- **Name.** `.ftask-tmp-<random>`, in the directory of the file it will become: hidden (so reads ignore it), recognizably ftask's (so [`doctor`](design-spec.md#doctor) can find leftovers), and random (so two writes never collide).
+- **Name.** `.ftask-tmp-<random>`, in the directory of the file it will become: hidden (so reads ignore it), recognizably ftask's (so [`doctor`](operations.md#doctor) can find leftovers), and random (so two writes never collide).
 - **Created exclusively** (`O_CREATE|O_EXCL`), written in full, flushed (`fsync`), then published: `link` to create a new file, so an existing one is never clobbered (`EEXIST` is `corrupt`, `unexpected-file`); `rename` to replace one. The folder is then flushed, and the temp file removed.
 - **Why flush.** Without it, a system crash can leave a published file empty — a new file published by `link` gets no help from ext4's `auto_da_alloc` — or keep a later step while losing it, e.g. a task file without the `last_id` increment before it, which reissues the ID. Flushing the temp file makes the published file whole; flushing the folder makes the publish itself durable before the next step starts.
 - **Flush failures.** A failed file flush fails the write, with nothing published. A failed folder flush does not: the file is already published, so an error would report a change as not made. It is ignored, like a temp file that can't be removed.
@@ -411,6 +411,51 @@ The config is written last, as [`init`](operations.md#init)'s crash behavior req
 | `usable` | `config.state` and `tree.metadata` both `ok`, and `tree.root_exists` |
 | `compatible` | `tree.schema` equals the supported `ftask.json` version; `null` when `tree.schema` is `null` |
 
+## `doctor` and `repair`
+
+How the [diagnostic](operations.md#operation-kinds) operations, [`doctor`](operations.md#doctor) and [`repair`](operations.md#repair), are built on the same transaction, walk, and cache as every other operation.
+
+### Transaction
+
+`store.Diagnose(env, w, fn)` runs `fn` as [`store.Write`](#operations-and-transactions) does — locate the config, check it and the root, take the lock (`busy` on `EAGAIN`) — except that it reads `ftask.json` without failing on it. The transaction carries what it found as `MetaState()`: `ok` with the root file, or `missing`, `unreadable`, `corrupt`, or `unsupported-format` with the error each would raise. It allows writes, so `repair` uses the same `Create`, `Replace`, `SetLastID`, and `Remove` as every other write, and turns the state into its own [Preconditions](operations.md#repair) errors. `doctor` writes nothing through it.
+
+### The survey
+
+The [index](#the-index) walk takes an optional recorder, the **survey**. Normal operations pass none and pay nothing for it. A diagnostic transaction passes one, so the survey comes from the same single walk as the index, in the same tree order. The survey records:
+
+- each entry whose name starts with `fsys.TempPrefix`, file or folder; a temp folder is not descended into;
+- each entry the index skips that is not hidden — a non-matching name, a matching name of the wrong type, a symlink — with its `stray-entry` reason;
+- each `.md` named like a task's notes that is a regular file, with its folder;
+- each `ftask.json` below the root, which is not also recorded as a stray entry.
+
+Every other hidden entry is skipped, and not descended into, as by every walk. Folders that can't be listed are already in the index. `Tx.Survey()` is built and cached with `Tx.Index()`, and `NextStep` drops both.
+
+### Checks
+
+Each finding kind is one check: a function from the index, the survey, `MetaState()`, and the [task-file cache](#loading-task-files) to its items. Every task file is loaded once, through the cache, whichever checks need it. The checks run in a fixed order, and the [findings](operations.md#findings) are then grouped, sorted, and capped as the operations spec says.
+
+- **`duplicate-id`.** `identical` compares the copies' bytes as read: the same bytes are the same task, whatever their validity.
+- **`orphan-notes`.** `empty` is a size of zero from `Lstat`. `linked` compares the orphan's `Lstat` with that of the notes of each task with its ID, with `os.SameFile`; `fsys` passes the `FileInfo` through unchanged, so the fault-injecting implementation keeps the comparison working.
+- **`cycle`.** `graph.CycleGroups(edges)` finds the strongly connected components with Tarjan's algorithm, written iteratively so a long chain of blockers can't overflow the goroutine stack. A component of one task is not a cycle: a task's own ID in its `blocked_by` makes its file corrupt, so it has no edge to itself. Groups are sorted by their lowest ID, and each group's IDs ascending. `graph.ExampleCycle(group, edges)` runs the [cycle check](#cycle-check)'s breadth-first search, over the group's edges only, from its lowest ID L until an edge leads back to L. By the same argument as [Why the first path found is the one required](#why-the-first-path-found-is-the-one-required), that is the shortest cycle through L, then lexicographically smallest. The graph is built as the cycle check's is (from usable task files only, with a duplicated ID's edges the union of its copies'), but over the whole tree.
+- **`suggest`.** Built by each check, as a command where one fits (e.g. `ftask unblock 12 --blockers 15`). Tests check only that it is present where the operations spec gives one, since it is not part of the contract.
+
+### Repair steps
+
+`repair` computes the findings with the same checks, under the same lock. It keeps only the items of the kinds it repairs whose `action` is not `null` (all of them, not just the 20 the output lists), and applies them in its [Crash behavior](operations.md#repair) order. Then it calls `tx.NextStep()` and runs the checks again, for the findings left.
+
+- **Temp folders** are removed with `RemoveAll` through the root, as [`delete-folder`](operations.md#delete-folder)'s last step does.
+- **Dangling references** are removed by the function [`unblock`](operations.md#unblock) uses to take IDs out of one task file's `blocked_by` and set `updated_at`, so the two can't drift apart. `repair` calls it once per task file, with every missing ID in that file.
+- **Orphan notes** are checked again just before removal, with a fresh `Lstat` (still zero bytes, or still the same file as the task's notes). A `.md` that no longer qualifies is left, and the second run of the checks reports it.
+
+### `doctor` and `repair` tests
+
+- **Cycle groups.** On thousands of small random graphs, `CycleGroups` must match the groups from a transitive closure (two IDs share a group exactly when each reaches the other), and `ExampleCycle` must match enumerating every simple cycle through L and picking the shortest, then lexicographically smallest.
+- **One fixture per finding kind**, in-process: a tree built by hand, the exact item `doctor` reports for it, and what `repair` leaves. This covers the outside changes the crash matrix can't make: a `last_id` merged backwards, a duplicate ID, a cycle, a nested tree, a stray entry, an unreadable folder, a missing or unusable `ftask.json`.
+- **System-crash states**, as fixtures too, since crash injection kills processes, not machines: a task file above `last_id`, an empty task file, a removal undone.
+- **Every `orphan-notes` reason**, including a `linked` `.md` that is changed, or given a different inode, between the check and the removal: it is left, and reported.
+- **Caps.** 25 temp leftovers: 20 items, `count` 25, `truncated`; with `kinds` naming the kind, all 25.
+- **Preconditions.** `repair` with `ftask.json` missing, with and without `metadata-missing`; with it corrupt, and with a newer `schema`: an error, and nothing changed.
+
 ## Comparing values in `update`
 
 [`update`](operations.md#update) reports a field as changed only when its value differs *as a JSON value*: maps regardless of key order, `tags` as a set, numbers by numeric value. Numbers inside `extra` are `json.Number`, compared exactly with `math/big.Rat` (`SetString` parses decimal and exponent forms exactly), never through `float64`, which would call `1e400` equal to `2e400` or merge distinct 20-digit integers. Numbers outside `extra` are integers within ±(2^53−1) and compare as `int64`.
@@ -429,6 +474,7 @@ Tests that must pause a write or crash it at an exact point use hooks compiled o
 | JSON writing | exact bytes of a task file; `extra` numbers round-tripped unchanged | [JSON writing](#json-writing) |
 | Validation | adapter–schema agreement; output conformance of every envelope | [Schemas in tests](#schemas-in-tests) |
 | Cycle check | brute-force comparison on random graphs; corrupt file ordered after `id` | [Cycle check](#cycle-check) |
+| `doctor` and `repair` | cycle groups by brute force; a fixture per finding kind; system-crash states; orphan rechecks; caps; preconditions | [`doctor` and `repair` tests](#doctor-and-repair-tests) |
 | OS errors | errno-table completeness per platform; one test per call-site row | [OS errors](#os-errors) |
 | Exit and signals | closed pipe, `/dev/full`, SIGTERM, forced panic → 134, one envelope per exit `0`/`1`/`2` | [Exit and signals](#exit-and-signals) |
 
@@ -442,6 +488,7 @@ In `e2e/`, on Linux and macOS:
 4. **Keep-alive.** The hook forces a garbage collection while the lock is held; the lock is still held ([Mechanism](#mechanism)).
 5. **Stress.** 16 processes each create 50 tasks, retrying on `busy`. Afterwards: 800 tasks, all IDs distinct, `last_id` 800, no lost update.
 6. **Racing `block`s.** `block A --blockers B` and `block B --blockers A` run concurrently, each retrying on `busy`, many rounds: in each, exactly one succeeds and the other ends `conflict` (`acyclic`).
+7. **Diagnostics take the lock.** A `doctor` held open at a test hook makes a write `busy`; a write held open makes `doctor` and `repair` `busy`.
 
 The macOS run of this suite is the empirical check [Mechanism](#mechanism)'s platform check assigns to the test suite.
 
@@ -452,12 +499,15 @@ Each write operation's **Crash behavior** lists what each step can leave behind;
 - the tree is what Crash behavior says (e.g. `create` killed before step 2: `last_id` incremented, no task; before step 3: a task with no `.md`, whose notes read as empty);
 - every invariant holds, as the design spec promises after a process crash;
 - the next write succeeds — nothing is wedged;
-- the only leftovers are temp files — and the old `.md` an interrupted `delete` or `move` can leave — the only things `doctor` should find;
+- `doctor` reports exactly the findings Crash behavior predicts for that point, and nothing else: none, a `temp-leftover`, or the `orphan-notes` an interrupted `delete` or `move` leaves;
+- `repair`, then `doctor`, reports `healthy: true` — except for the `no-task` `orphan-notes` an interrupted `delete` of a task with notes leaves, which is a person's to remove;
 - rerunning the operation gives exactly the outcome its **Retry safety** claims.
+
+`repair` is one of the writes in the matrix, run on a tree seeded with one item of each auto kind: after a crash before any step, `doctor` reports a subset of the seeded findings and nothing new, and rerunning `repair` finishes the job.
 
 **Errors midway.** The same steps with an injected errno instead of a kill: the envelope's `partial` matches the operation's partial schema and what took effect.
 
-System crashes — steps lost or reordered by power loss — are not simulated. Each published file is flushed, with its folder, before the next step ([Writing files](#writing-files)), so publishes keep their order; the steps that aren't flushed — creating folders, renames, removals — make no durability promise, and the design spec leaves their consequences to `doctor`.
+System crashes — steps lost or reordered by power loss — are not simulated. Each published file is flushed, with its folder, before the next step ([Writing files](#writing-files)), so publishes keep their order; the steps that aren't flushed — creating folders, renames, removals — make no durability promise, and the design spec leaves their consequences to [`doctor` and `repair`](#doctor-and-repair), whose tests build those states as fixtures.
 
 ### Precedence tests
 

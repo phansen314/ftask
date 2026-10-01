@@ -12,8 +12,8 @@ Operations on this data model are specified in [operations.md](operations.md).
 - **Notes are the exception.** A task's `.md` may be edited directly with any editor. Notes carry no invariants, so an outside change to them cannot violate any. It can leave stray entries, though: editor side files (e.g. `42.md~`), and an orphaned `.md` if a task is moved or removed while its notes are open in an editor. Both are handled as [Walking the tree](#walking-the-tree) describes. If an editor save and an ftask write to the same `.md` overlap, one of them may be lost.
 - **One user.** ftask serves a single OS user. That user's config names exactly one root. Every process running as the user and reaching the root — shells, agents, editors — shares one [write lock](#write-lock). A process whose environment points to a different config location (`HOME`, `XDG_CONFIG_HOME`) sees that config, or none, and gets [`not-initialized`](operations.md#error-kinds); one that gives no config location at all gets [`environment`](operations.md#error-kinds) (see [Config file](#config-file)). Sharing one root between OS users is not supported.
 - **The root is on a local filesystem.** Network mounts (SMB, NFS, and the like) are not supported: their locking cannot be relied on, so the [write lock](#write-lock) may not exclude other writers. A synced folder is fine — its files are local, and a separate process syncs them.
-- **Syncing and committing are allowed.** The root may be a git repository or a synced folder, since those tools carry files ftask wrote. Git is also the only undo for a delete (see [Undo](operations.md#undo)). Anything they leave inconsistent — a merge that introduces a cycle, a missing blocker, a conflicting file — is an outside change; repairing it is the job of [`doctor`](#doctor), not of normal operation.
-- **Hidden entries are ignored.** Any entry under the root whose name starts with `.` (e.g. `.git`, `.DS_Store`) is ignored by read and write operations. Only `doctor` looks at them, to find ftask's own leftover temp files.
+- **Syncing and committing are allowed.** The root may be a git repository or a synced folder, since those tools carry files ftask wrote. Git is also the only undo for a delete (see [Undo](operations.md#undo)). Anything they leave inconsistent — a merge that introduces a cycle, a missing blocker, a conflicting file — is an outside change; finding it is the job of [`doctor`](operations.md#doctor), and repairing it, where that is safe, of [`repair`](operations.md#repair) — not of normal operation (see [Diagnosis and repair](#diagnosis-and-repair)).
+- **Hidden entries are ignored.** Any entry under the root whose name starts with `.` (e.g. `.git`, `.DS_Store`) is ignored by read and write operations. Only `doctor` and `repair` look at them, to find ftask's own leftover temp files; they too ignore every other hidden entry.
 
 ## Supported platforms
 
@@ -58,7 +58,7 @@ ftask writes nothing into the root but folders, tasks, and [`ftask.json`](#root-
 
 A task is two files sharing a stem: its task file (`.json`), holding the task's fields, and its notes file (`.md`). ftask always creates both, with an empty `.md` when there are no notes.
 
-The task file is **authoritative**: a task exists exactly when its task file does, and for existence the task's ID is the one in its filename — even if the file itself is unusable. The `.md` holds nothing but prose. A missing `.md` is allowed and reads as empty notes, so a crash between writing the two files leaves a valid task. Outside an interrupted write, ftask never leaves a `.md` without its task file. A `.md` without one — left by an editor, or by a [`move`](operations.md#move) or [`delete`](operations.md#delete) interrupted by an error or a crash — is not a task: reads ignore it, and [`doctor`](#doctor) reports it.
+The task file is **authoritative**: a task exists exactly when its task file does, and for existence the task's ID is the one in its filename — even if the file itself is unusable. The `.md` holds nothing but prose. A missing `.md` is allowed and reads as empty notes, so a crash between writing the two files leaves a valid task. Outside an interrupted write, ftask never leaves a `.md` without its task file. A `.md` without one — left by an editor, or by a [`move`](operations.md#move) or [`delete`](operations.md#delete) interrupted by an error or a crash — is not a task: reads ignore it, and [`doctor`](operations.md#doctor) reports it as [`orphan-notes`](operations.md#finding-kinds).
 
 #### Task file schema
 
@@ -175,7 +175,7 @@ Folders are addressed by their path from the root, written with `/` separators a
 - Positive integer, no leading zeros, at most 15 digits. The **ID ceiling**, 999,999,999,999,999, is below 2^53, so every ID is exact in JSON readers that store numbers as doubles (JavaScript, `jq`). Issuing an ID past it fails with [`conflict`](operations.md#error-kinds) (`rule`: `id-exhausted`).
 - Unique across the whole tree, not per folder, since `blocked_by` references tasks by ID alone (see [Invariants](#invariants)).
 - Assigned from a monotonically increasing sequence, recorded as `last_id` in [`ftask.json`](#root-metadata) so it travels with the tree. The sequence may have gaps: an ID can be consumed without a task being created (e.g. by a process crash mid-create).
-- **Never reused**, even after its task is deleted — short of an outside change (e.g. a merge of `ftask.json` that keeps a lower `last_id`) or a system crash on a disk that ignores flushes, either of which can cause reuse (see `create` › Crash behavior in [`create`](operations.md#create)). [`doctor`](#doctor) detects it.
+- **Never reused**, even after its task is deleted — short of an outside change (e.g. a merge of `ftask.json` that keeps a lower `last_id`) or a system crash on a disk that ignores flushes, either of which can cause reuse (see `create` › Crash behavior in [`create`](operations.md#create)). [`doctor`](operations.md#doctor) detects it, as `id-above-last-id` before reuse and `duplicate-id` after.
 
 #### Task filenames
 
@@ -239,7 +239,7 @@ Rules spanning several files. Every tree ftask alone has written satisfies all f
 - ***Unique IDs.*** No two task files have the same ID.
 - ***IDs within `last_id`.*** Every task's `id` is at most `last_id`.
 
-A system crash or an outside change can leave a tree violating an invariant; see [File validity](#file-validity) for how such trees are read, and [`doctor`](#doctor) for repair.
+A system crash or an outside change can leave a tree violating an invariant; see [File validity](#file-validity) for how such trees are read, and [Diagnosis and repair](#diagnosis-and-repair) for how it is found and repaired.
 
 ### Root metadata
 
@@ -280,7 +280,7 @@ Rules are checked at two levels, and they fail differently:
 | Level | Checked against | Rules | When broken |
 |---|---|---|---|
 | **File** | The one file alone | Valid JSON (per step 1 below) with no duplicate keys; integer fields written as integer literals (`42`, never `42.0` or `4.2e1`); the file's JSON Schema; the [naming and validation](#naming-and-validation) rules the schema can't express (e.g. timestamps are real calendar date-times); the task's own ID not in its `blocked_by`; the filename ID equals the `id` field | The file is **`corrupt`**. Reads skip it with an [`unusable-file`](operations.md#warning-kinds) warning; a write that needs it fails with `corrupt`. |
-| **Tree** | Several files together | The [invariants](#invariants) | The files stay usable. Reads report or absorb the violation (e.g. a dangling blocker counts as blocking); [`doctor`](#doctor) repairs it. |
+| **Tree** | Several files together | The [invariants](#invariants) | The files stay usable. Reads report or absorb the violation (e.g. a dangling blocker counts as blocking); [`doctor`](operations.md#doctor) finds it (see [Diagnosis and repair](#diagnosis-and-repair)). |
 
 Every versioned file (`ftask.json`, a task file) is checked in three steps, stopping at the first failure:
 
@@ -332,10 +332,10 @@ These apply to write operations (see [Operation kinds](operations.md#operation-k
 - **Writes decide on current state.** Everything a write's correctness depends on — the task it modifies, the graph it checks for cycles, the references it removes, the next ID — is read after the write lock is acquired, never before.
 - **No lost updates.** Following from the above, two writes to the same task, one after the other, both take effect.
 - **Atomic files.** Each file ftask writes is replaced all-or-nothing. A reader never sees a partially written file from ftask. Because each is flushed before it is published (see [Crashes](#crashes)), a file ftask wrote comes back from a system crash whole: the version written, or, if the crash came before it was published, the one before. A read reports an empty or garbled task file as unusable (see [Reads](#reads)); only an outside change, or a disk that ignores flushes, can leave one.
-- **Writes introduce no violations.** A completed write introduces no new invariant violation, provided the tree already satisfied the invariants the write checks. A tree damaged by a system crash or an outside change stays damaged until [`doctor`](#doctor) repairs it; see `create` › Crash behavior in [`create`](operations.md#create) for the one way a write can then compound the damage.
+- **Writes introduce no violations.** A completed write introduces no new invariant violation, provided the tree already satisfied the invariants the write checks. A tree damaged by a system crash or an outside change stays damaged until it is repaired (see [Diagnosis and repair](#diagnosis-and-repair)); see `create` › Crash behavior in [`create`](operations.md#create) for the one way a write can then compound the damage.
 - **Partial work is ordered and reported.** A write that touches several files orders its steps so each intermediate state is as benign as possible. If it fails partway, it reports what it had already done rather than pretending nothing happened.
 - **Crashes do not wedge ftask.** A write interrupted by a process or system crash never prevents later writes from starting, and needs no manual cleanup to unblock them.
-- **Crashes may leave inconsistency.** A write interrupted partway through a multi-file change may leave the tree violating an invariant. After a system crash this holds even for writes whose steps are ordered to be safe, when the steps a crash loses are ones ftask does not flush (see [Crashes](#crashes)). Repairing that is the job of `doctor`, not of normal operation.
+- **Crashes may leave inconsistency.** A write interrupted partway through a multi-file change may leave the tree violating an invariant. After a system crash this holds even for writes whose steps are ordered to be safe, when the steps a crash loses are ones ftask does not flush (see [Crashes](#crashes)). Repairing that is the job of [Diagnosis and repair](#diagnosis-and-repair), not of normal operation.
 
 ### Walking the tree
 
@@ -343,7 +343,7 @@ These rules apply to every operation that walks the tree — reads and writes al
 
 **Which entries count.**
 
-- An entry that matches neither the folder-name nor the task-filename rules (e.g. an editor's backup file, a `.md` without a task file) is skipped silently; [`doctor`](#doctor) reports it. The root's own `ftask.json` is exempt: it is the [root metadata](#root-metadata), not a stray entry.
+- An entry that matches neither the folder-name nor the task-filename rules (e.g. an editor's backup file, a `.md` without a task file) is skipped silently; [`doctor`](operations.md#doctor) reports it. The root's own `ftask.json` is exempt: it is the [root metadata](#root-metadata), not a stray entry.
 - So is an entry whose name matches but whose type doesn't: a folder name must be a directory, a task filename a regular file.
 - Symbolic links under the root are never followed. A symlink is treated as a non-matching entry, whatever it points to.
 - **Exception:** an entry the input names, or that its path passes through, is not skipped. It is checked by the [path walk](operations.md#path-walk), which reports a wrong type or a symlink as an error.
@@ -352,7 +352,7 @@ These rules apply to every operation that walks the tree — reads and writes al
 
 - Problems with **needed files** — the files the operation must read to do its job — are errors.
 - Problems with **relevant files** — files that change the result, or explain it — are warnings. A relevant file that is present but unusable is reported as [`unusable-file`](operations.md#warning-kinds), never silently skipped.
-- Problems with any other file the operation walks past are skipped silently, and left to [`doctor`](#doctor).
+- Problems with any other file the operation walks past are skipped silently, and left to [`doctor`](operations.md#doctor).
 
 **Blockers.** When deriving readiness, a task's blockers are read — and their problems reported — only when the task is open, since a complete task's readiness doesn't depend on them. (The cycle check in [`block`](operations.md#block) is different: it follows every task on its path, open or complete.) For an open task, every blocker is evaluated, even once one is known to block, so the same tree always yields the same `blocking` list and the same warnings.
 
@@ -393,6 +393,26 @@ The write lock that serializes writes (see [Guarantees](#guarantees)) is the **r
 
 How the lock is taken, and how files are replaced atomically, is in the implementation spec's [Mechanism](implementation-spec.md#mechanism).
 
+## Diagnosis and repair
+
+A system crash or an outside change can leave a tree that breaks an [invariant](#invariants), or that holds entries no rule accounts for. Normal operations report or absorb such damage, and never repair it (see [Guarantees](#guarantees)). Two operations do: [`doctor`](operations.md#doctor) finds it, and [`repair`](operations.md#repair) fixes what can be fixed safely. Each problem they find is a [finding](operations.md#findings), of one of a fixed set of [kinds](operations.md#finding-kinds).
+
+- **At rest.** Both take the write lock, even `doctor`, which changes nothing. With no write running, every ftask temp file is a leftover, never a write in progress, and what `doctor` reports is the tree's state, not a write half done. If another write holds the lock, both fail with `busy`.
+- **They run when nothing else can.** Both need the config and the root it names, but not a usable `ftask.json`: a missing or unusable `ftask.json` is a finding, not an error. They are the way out of a root that every other operation refuses.
+- **The whole tree.** Both walk every folder, and look at what other operations skip: ftask's own temp files and folders, entries that match no naming rule, and `.md` files with no task file. Other hidden entries (`.git`, `.DS_Store`) are still ignored.
+- **Safe repairs only.** `repair` changes only what can't lose information or change meaning, given the tree is at rest: a temp file holds nothing anyone wrote; raising `last_id` only moves it up, as it always moves; a dangling reference names a task that isn't there; an empty `.md`, or a second name for notes that are also at their task, holds nothing that isn't kept elsewhere. Duplicate IDs, cycles, and unusable files all need someone to decide which version is right, so `doctor` explains them and suggests what to run, and `repair` leaves them to a person.
+- **Repairs are ordinary writes.** Each file `repair` changes is written atomically, as every write's is, and running it again is always safe.
+
+Every finding kind is in one of three classes:
+
+| Class | What `repair` does | Kinds |
+|---|---|---|
+| ***auto*** | Repairs it whenever it runs, unless the caller names other kinds. | `temp-leftover`, `id-above-last-id`, `dangling-reference`, `orphan-notes` (only the items that are safe; see [Finding kinds](operations.md#finding-kinds)) |
+| ***on-request*** | Repairs it only when the caller names the kind. | `metadata-missing` |
+| ***manual*** | Never repairs it. `doctor` reports it, with a suggestion. | `duplicate-id`, `cycle`, `unusable-file`, `metadata-unusable`, `nested-tree`, `stray-entry`, `unreadable-folder` |
+
+Rebuilding a missing `ftask.json` is on-request because the `last_id` it writes is the highest ID found. A task with a higher ID that was deleted before `ftask.json` was lost would have its ID issued again, breaking *Never reused* (see [Task IDs](#task-ids)). Only the user knows, e.g. from git history, whether that happened.
+
 ## Configuration
 
 ### Config file
@@ -422,24 +442,13 @@ ftask keeps no other per-machine state.
 
 ## Future work
 
-### doctor
+### Checking a path before init
 
-An operation for repairing trees affected by a system crash or an outside change (see [Assumptions](#assumptions)). It detects, and where the user agrees, repairs:
+Check a candidate path before [`init`](operations.md#init), with no root configured: report whether the path, or any directory above it, lies inside an existing tree. This is the check `init` deliberately does not make. It needs no root, so it does not belong in [`doctor`](operations.md#doctor), which diagnoses the configured one.
 
-- Dependency cycles.
-- `blocked_by` IDs that refer to tasks that don't exist.
-- Task files whose filename ID doesn't match the `id` in the file.
-- A `.md` with no matching task file.
-- A missing `ftask.json`.
-- Broken ID promises (see [Task IDs](#task-ids)):
-  - a task whose ID exceeds `last_id` — the state that precedes reuse;
-  - two task files with the same ID — reuse that has happened.
-- Entries that match neither the folder-name nor the task-filename rules.
-- A tree nested inside another: an `ftask.json` in any folder other than the root. Reported as the cause, alongside its symptoms (duplicate IDs, a stray file).
-- Leftover temp files from an interrupted write, and the hidden temp folder an interrupted [`delete-folder`](operations.md#delete-folder) leaves.
-- Partial changes left by an interrupted write (see [Crashes](#crashes)).
+### Renumbering a duplicate ID
 
-`doctor` can also check a candidate path before `init`, with no root configured: it reports whether the path, or any directory above it, lies inside an existing tree. This is the check `init` deliberately does not make.
+Let [`repair`](operations.md#repair) give one copy of a [`duplicate-id`](operations.md#finding-kinds) a fresh ID, when the user names the copy to keep. Which copy keeps the ID is the user's decision; doing the renumbering is not.
 
 ### Claims
 
