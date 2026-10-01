@@ -84,7 +84,7 @@ A usage error is a problem with the command line itself: an unknown command or o
 
 **Shape, not values.** `usage` is about the shape of the command line: an unknown, missing, extra, or conflicting token. A token in the right place whose value is unacceptable — one that cannot be converted to its field's type (e.g. `ftask show abc`, where the ID is an integer) or that fails the operation's validation — is `invalid-input`, with `field` the JSON Pointer of the input field it sets, per the command's Arguments and Options tables. A bad value is therefore the same error whether it arrives as an argument or through `--input`.
 
-`usage` is a CLI-only error kind: no operation raises it, and it is not listed in the operations' [error kinds](operations.md#error-kinds). So are [`pick`](#pick)'s `cancelled` and `unavailable`. As with any kind, callers treat an unknown one as a generic failure.
+`usage` is a CLI-only error kind: no operation raises it, and it is not listed in the operations' [error kinds](operations.md#error-kinds). So are [`pick`](#pick)'s `cancelled`, `unavailable` and `incomplete`. As with any kind, callers treat an unknown one as a generic failure.
 
 `details` reports the **first** problem the parser finds, as a one-item list; the list leaves room to report more in a later release. Its `reason` is human-readable and may change between releases.
 

@@ -286,7 +286,7 @@ By default the Go runtime kills a process with SIGPIPE when it writes to a close
 
 ### Interrupts
 
-No handlers are installed for SIGINT, SIGTERM, or SIGHUP. Go's default terminates the process by the signal, which the shell sees as `128+n` — exactly the CLI spec's *interrupts are crashes*: no envelope, and the operation's Crash behavior and Retry safety apply.
+No handlers are installed for SIGINT, SIGTERM, or SIGHUP, except by `pick`, which catches and discards SIGINT and SIGQUIT while fzf runs (see [pick-spec](pick-spec.md#errors)). Go's default terminates the process by the signal, which the shell sees as `128+n` — exactly the CLI spec's *interrupts are crashes*: no envelope, and the operation's Crash behavior and Retry safety apply.
 
 ### Crashes
 
