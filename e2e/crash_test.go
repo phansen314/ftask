@@ -1,10 +1,12 @@
 package e2e
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -66,7 +68,10 @@ type crashCase struct {
 	// setup.
 	init  bool
 	setup [][]string
-	args  []string
+	// seed, if set, then changes the tree as no ftask command would: the
+	// outside change repair repairs.
+	seed func(t *testing.T, root string)
+	args []string
 	// order is what the write changes, relative to the home, in the order
 	// its Crash behavior says the changes land. Paths in one group land in
 	// one call.
@@ -76,6 +81,10 @@ type crashCase struct {
 	// exit code, a fragment of the envelope, and whether the tree must then
 	// be as after an uninterrupted run.
 	rerun func(stage int) (code int, want string, same bool)
+	// found is the finding kinds besides temp-leftover that doctor reports
+	// for a crash leaving the tree at a stage, and kept those repair leaves
+	// to a person; nil for none.
+	found, kept map[int][]string
 }
 
 func safe(want string) func(int) (int, string, bool) {
@@ -155,6 +164,10 @@ var crashCases = []crashCase{
 		setup: [][]string{{"create", "a", "--notes", "n"}, {"create", "b", "--blocked-by", "1"}},
 		args:  []string{"delete", "1"},
 		order: [][]string{{"tasks/2.json"}, {"tasks/1.json"}, {"tasks/1.md"}},
+		// The task is gone, its notes left: no-task, which only a person
+		// may remove.
+		found: map[int][]string{2: {"orphan-notes"}},
+		kept:  map[int][]string{2: {"orphan-notes"}},
 		rerun: func(stage int) (int, string, bool) {
 			if stage >= 2 {
 				// The task is gone; an orphaned .md may be left for doctor.
@@ -181,6 +194,9 @@ var crashCases = []crashCase{
 		setup: [][]string{{"create", "a", "--notes", "n"}},
 		args:  []string{"move", "1", "--to", "/p", "-p"},
 		order: [][]string{{"tasks/p"}, {"tasks/p/1.md"}, {"tasks/1.json", "tasks/p/1.json"}, {"tasks/1.md"}},
+		// The notes have two names, one beside no task file: linked, which
+		// repair removes.
+		found: map[int][]string{2: {"orphan-notes"}, 3: {"orphan-notes"}},
 		rerun: func(stage int) (int, string, bool) {
 			if stage == 3 {
 				// Moved; the old .md is left for doctor.
@@ -190,12 +206,88 @@ var crashCases = []crashCase{
 		},
 	},
 	{
+		// One item of each auto kind: a temp file; tasks 1 and 2 above
+		// last_id; 1 blocked by 2, whose task file is gone, leaving its
+		// empty notes.
+		name:  "repair",
+		setup: [][]string{{"create", "a"}, {"create", "b"}, {"block", "1", "--blockers", "2"}},
+		seed: func(t *testing.T, root string) {
+			for name, data := range map[string]string{
+				".ftask-tmp-seed": "x",
+				"ftask.json":      "{\n  \"schema\": 1,\n  \"last_id\": 0\n}\n",
+			} {
+				if err := os.WriteFile(filepath.Join(root, name), []byte(data), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.Remove(filepath.Join(root, "2.json")); err != nil {
+				t.Fatal(err)
+			}
+		},
+		args:  []string{"repair"},
+		order: [][]string{{"tasks/ftask.json"}, {"tasks/1.json"}, {"tasks/2.md"}},
+		found: map[int][]string{
+			0: {"dangling-reference", "id-above-last-id", "orphan-notes"},
+			1: {"dangling-reference", "orphan-notes"},
+			2: {"orphan-notes"},
+		},
+		rerun: safe(`"ok":true`),
+	},
+	{
 		name:  "move-folder",
 		setup: [][]string{{"create-folder", "/a"}, {"create", "a", "--folder", "/a"}},
 		args:  []string{"move-folder", "/a", "--to", "/x/y", "-p"},
 		order: [][]string{{"tasks/x"}, {"tasks/a", "tasks/a/1.json", "tasks/a/1.md", "tasks/x/y", "tasks/x/y/1.json", "tasks/x/y/1.md"}},
 		rerun: safe(`"folder":"/x/y"`),
 	},
+}
+
+// diagnose checks doctor and repair on a tree a crash left at stage: doctor
+// reports exactly the findings Crash behavior predicts, and after repair only
+// those it leaves to a person (implementation-spec.md, Crash injection).
+func (c crashCase) diagnose(t *testing.T, tr *tree, stage int, crashed snapshot) {
+	t.Helper()
+	want := slices.Clone(c.found[stage])
+	if slices.ContainsFunc(crashed.temps, func(p string) bool { return strings.HasPrefix(p, "tasks/") }) {
+		want = append(want, "temp-leftover")
+	}
+	slices.Sort(want)
+	if got := findingKinds(t, tr.cmd("doctor")); !slices.Equal(got, want) {
+		t.Errorf("stage %d: doctor found %v, want %v", stage, got, want)
+	}
+	if got := findingKinds(t, tr.cmd("repair")); !slices.Equal(got, c.kept[stage]) {
+		t.Errorf("stage %d: repair left %v, want %v", stage, got, c.kept[stage])
+	}
+	if got := findingKinds(t, tr.cmd("doctor")); !slices.Equal(got, c.kept[stage]) {
+		t.Errorf("stage %d: doctor after repair found %v, want %v", stage, got, c.kept[stage])
+	}
+}
+
+// findingKinds runs doctor or repair, and returns the kinds of the findings
+// it reports, in order; nil for none.
+func findingKinds(t *testing.T, cmd *exec.Cmd) []string {
+	t.Helper()
+	r := run(t, cmd)
+	envelope(t, r)
+	var out struct {
+		Result struct {
+			Healthy  bool `json:"healthy"`
+			Findings []struct {
+				Kind string `json:"kind"`
+			} `json:"findings"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(r.stdout), &out); err != nil || r.code != 0 {
+		t.Fatalf("%q: exit %d: %s", cmd.Args[1:], r.code, r.stdout)
+	}
+	var kinds []string
+	for _, f := range out.Result.Findings {
+		kinds = append(kinds, f.Kind)
+	}
+	if out.Result.Healthy != (kinds == nil) {
+		t.Errorf("%q: healthy %v with findings %v", cmd.Args[1:], out.Result.Healthy, kinds)
+	}
+	return kinds
 }
 
 // fixture is the tree c runs against, in a home of its own.
@@ -214,6 +306,9 @@ func (c crashCase) fixture(t *testing.T) *tree {
 		if r.code != 0 {
 			t.Fatalf("setup %q: exit %d: %s", args, r.code, r.stdout)
 		}
+	}
+	if c.seed != nil {
+		c.seed(t, tr.root())
 	}
 	return tr
 }
@@ -289,8 +384,13 @@ func TestCrashInjection(t *testing.T) {
 				last, seen[stage] = stage, true
 				t.Logf("k=%d: stage %d, temps %v", k, stage, crashed.temps)
 
-				if _, err := os.Stat(filepath.Join(tr.home, configDir, "config.toml")); err == nil {
+				// A seeded tree starts out breaking invariants; repair's
+				// promise is checked by diagnose instead.
+				if _, err := os.Stat(filepath.Join(tr.home, configDir, "config.toml")); err == nil && c.seed == nil {
 					steps(t, []step{{tr.cmd("list", "--readiness", "ready,blocked,complete", "--include-folders"), 0, `"warnings":[]`}})
+				}
+				if _, err := os.Stat(filepath.Join(tr.home, configDir, "config.toml")); err == nil {
+					c.diagnose(t, tr, stage, crashed)
 				}
 				code, want, same := c.rerun(stage)
 				steps(t, []step{{tr.cmd(c.args...), code, want}})

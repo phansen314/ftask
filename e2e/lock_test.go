@@ -80,6 +80,30 @@ func TestLockKeepAlive(t *testing.T) {
 	}
 }
 
+// doctor and repair take the lock: a doctor held makes a write busy, and a
+// write held makes both busy (implementation-spec.md, Lock 7).
+func TestLockDiagnostics(t *testing.T) {
+	tr := newTree(t)
+	h := hold(t, tr.cmd("doctor"))
+	steps(t, []step{
+		{tr.cmd("create", "a"), 1, `"kind":"busy"`},
+		{tr.cmd("list"), 0, `"tasks":[]`},
+	})
+	h.release()
+	if r := h.wait(); r.code != 0 || !strings.Contains(r.stdout, `"healthy":true`) {
+		t.Fatalf("doctor: exit %d: %s%s", r.code, r.stdout, r.stderr)
+	}
+	h = hold(t, tr.cmd("create", "a"))
+	steps(t, []step{
+		{tr.cmd("doctor"), 1, `"kind":"busy"`},
+		{tr.cmd("repair"), 1, `"kind":"busy"`},
+	})
+	h.release()
+	if r := h.wait(); r.code != 0 {
+		t.Fatalf("holder: exit %d: %s%s", r.code, r.stdout, r.stderr)
+	}
+}
+
 // SIGTERM mid-write is a crash: death by the signal (143 to a shell), no
 // envelope, and the lock released (implementation-spec.md, Exit and
 // signals).
