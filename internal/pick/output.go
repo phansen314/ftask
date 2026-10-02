@@ -17,12 +17,26 @@ import (
 // (pick-spec.md, fzf contract).
 const selectionFile = "selection"
 
-// enter records the selection, the keys fzf passes ({+1}: the marked
-// lines', or the one under the cursor; none with an empty list), and
-// accepts.
-func enter(s *Session, args []string, _ Env) ([]byte, *errs.Error) {
+// enter is Enter: its arguments are the query, then the keys fzf passes
+// ({+1}: the marked lines', or the one under the cursor; none with an
+// empty list). In a prompt, it applies the query as the value. Otherwise
+// it records the selection and accepts.
+func enter(s *Session, args []string, env Env) ([]byte, *errs.Error) {
+	if len(args) == 0 {
+		return nil, errs.Usage([]errs.UsageProblem{{Reason: "missing query"}})
+	}
+	if b, _, e := s.Read(modeFile); e != nil {
+		return nil, e
+	} else if string(b) == modePrompt {
+		return applyPrompt(s, args[0], env)
+	}
+	return record(s, args[1:])
+}
+
+// record records the selection, keys, and accepts.
+func record(s *Session, keys []string) ([]byte, *errs.Error) {
 	var b strings.Builder
-	for _, k := range args {
+	for _, k := range keys {
 		b.WriteString(k + "\n")
 	}
 	if e := s.Write(selectionFile, []byte(b.String())); e != nil {
@@ -36,7 +50,7 @@ func quit(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 	if len(args) != 0 {
 		return nil, errs.Usage([]errs.UsageProblem{{Argument: &args[0], Reason: "unexpected argument"}})
 	}
-	return enter(s, nil, env)
+	return record(s, nil)
 }
 
 // Output is pick's result for tasks (pick-output).

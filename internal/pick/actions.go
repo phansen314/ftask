@@ -35,10 +35,19 @@ type action struct {
 	arity arity
 	// run runs the action on its targets, in line order, through r.
 	run func(r *actionRun, targets []shownLine)
+	// apply, for an action that asks for a value in a prompt, applies the
+	// value once entered; it returns whether the prompt stays open.
+	apply func(r *actionRun, value string, targets []shownLine) (keep bool)
 }
 
 // actions are the actions, in the order their keys are bound.
-var actions = []action{completeAction, editAction, scopeAction, reloadAction}
+var actions []action
+
+// init fills actions, which some actions' own code reads (the command
+// keys, for a prompt).
+func init() {
+	actions = []action{completeAction, editAction, newAction, scopeAction, reloadAction}
+}
 
 func lookupAction(key string) (action, bool) {
 	i := slices.IndexFunc(actions, func(a action) bool { return a.key == key })
@@ -247,6 +256,12 @@ type actionRun struct {
 	reload bool
 	// also is more for fzf to do, after the reload and status line.
 	also string
+	// clearQuery, after a prompt, clears the search query rather than
+	// restore it.
+	clearQuery bool
+	// cursorTo is the key of the line the cursor goes to once the reload
+	// is in, if the line is in it.
+	cursorTo string
 	// err is a session failure, which ends the action.
 	err *errs.Error
 }

@@ -59,6 +59,9 @@ const (
 	// cursorFile holds the line a callback wants the cursor on once its
 	// reload is in: on-load's arming (pick-spec.md, Actions).
 	cursorFile = "cursor"
+	// hideFile, when present, has on-load hide the input: leaving a
+	// prompt for command mode (see leavePrompt).
+	hideFile = "hide-input"
 	// textPrefix begins the files that hold text fzf shows, by name:
 	// text-footer, text-header, text-prompt, text-query.
 	textPrefix = "text-"
@@ -67,19 +70,29 @@ const (
 // textNames are the texts the text verb shows.
 var textNames = []string{"footer", "header", "prompt", "query"}
 
-// onLoad runs on fzf's load event, when it is bound: it moves the cursor to
-// the line recorded, if any, and unbinds load again. fzf may run it once,
-// unarmed, for the first list, before start's unbind takes effect.
+// onLoad runs on fzf's load event, when it is bound: it hides the input
+// and moves the cursor to the line recorded, as armed, and unbinds load
+// again. fzf may run it once, unarmed, for the first list, before start's
+// unbind takes effect.
 func onLoad(s *Session, args []string, _ Env) ([]byte, *errs.Error) {
 	if len(args) != 0 {
 		return nil, errs.Usage([]errs.UsageProblem{{Argument: &args[0], Reason: "unexpected argument"}})
+	}
+	var out string
+	if _, ok, e := s.Read(hideFile); e != nil {
+		return nil, e
+	} else if ok {
+		if e := s.Delete(hideFile); e != nil {
+			return nil, e
+		}
+		out = "hide-input+"
 	}
 	b, ok, e := s.Read(cursorFile)
 	switch {
 	case e != nil:
 		return nil, e
 	case !ok:
-		return []byte("unbind(load)"), nil
+		return []byte(out + "unbind(load)"), nil
 	}
 	if e := s.Delete(cursorFile); e != nil {
 		return nil, e
@@ -88,7 +101,7 @@ func onLoad(s *Session, args []string, _ Env) ([]byte, *errs.Error) {
 	if err != nil || n < 1 {
 		return nil, errs.Internal("session cursor file holds " + strconv.Quote(string(b)))
 	}
-	return []byte("pos(" + strconv.Itoa(n) + ")+unbind(load)"), nil
+	return []byte(out + "pos(" + strconv.Itoa(n) + ")+unbind(load)"), nil
 }
 
 // text prints one of the session's texts, which fzf shows as it is

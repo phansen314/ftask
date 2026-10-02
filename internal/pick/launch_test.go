@@ -30,7 +30,7 @@ func TestPickerArgs(t *testing.T) {
 		"--query", "renew pass",
 		"--header", "/\nenter: pick · tab: mark · esc: commands",
 		"--preview", "'/opt/my ftask/ftask' __pick preview {1}",
-		"--bind", "enter:transform:'/opt/my ftask/ftask' __pick enter {+1}",
+		"--bind", "enter:transform:'/opt/my ftask/ftask' __pick enter {q} {+1}",
 		"--bind", "esc:transform:'/opt/my ftask/ftask' __pick esc {q}",
 		"--bind", "ctrl-space:transform:'/opt/my ftask/ftask' __pick command {q}",
 		"--bind", "ctrl-d:delete-char",
@@ -46,9 +46,10 @@ func TestPickerArgs(t *testing.T) {
 		"--bind", "?:preview:'/opt/my ftask/ftask' __pick help",
 		"--bind", "c:transform:'/opt/my ftask/ftask' __pick act 'c' {+1}",
 		"--bind", "e:transform:'/opt/my ftask/ftask' __pick act 'e' {+1}",
+		"--bind", "n:transform:'/opt/my ftask/ftask' __pick act 'n'",
 		"--bind", "s:transform:'/opt/my ftask/ftask' __pick act 's'",
 		"--bind", "r:transform:'/opt/my ftask/ftask' __pick act 'r'",
-		"--bind", "start:unbind(load,j,k,g,G,space,q,i,/,?,c,e,s,r)",
+		"--bind", "start:unbind(load,j,k,g,G,space,q,i,/,?,c,e,n,s,r)",
 		"--bind", "load:transform:'/opt/my ftask/ftask' __pick on-load",
 	}
 	if got := pk.args(); !slices.Equal(got, want) {

@@ -164,7 +164,7 @@ func TestRunOutcomes(t *testing.T) {
 
 	// Enter on marked lines: line order, as the final read has them.
 	out, line := tr.pick(map[string]any{}, fzfDoes{do: func(t *testing.T, helper func(...string) string) {
-		if got := helper("enter", "1@/a", "3@/a"); got != "accept" {
+		if got := helper("enter", "", "1@/a", "3@/a"); got != "accept" {
 			t.Errorf("enter printed %q", got)
 		}
 	}})
@@ -177,7 +177,7 @@ func TestRunOutcomes(t *testing.T) {
 
 	// Fields shape the tasks; actions and notes_edited are empty.
 	_, line = tr.pick(map[string]any{"fields": []string{"title"}}, fzfDoes{do: func(t *testing.T, helper func(...string) string) {
-		helper("enter", "2@/a")
+		helper("enter", "", "2@/a")
 	}})
 	if got := string(result(t, line)); got != `{"tasks":[{"id":2,"title":"two"}],"missing":[],"actions":[],"notes_edited":[]}` {
 		t.Errorf("fields: %s", got)
@@ -190,7 +190,7 @@ func TestRunOutcomes(t *testing.T) {
 	_, line = tr.pick(map[string]any{}, fzfDoes{status: 1, do: func(t *testing.T, helper func(...string) string) {
 		tr.run("move", map[string]any{"id": 1, "to": "/b"})
 		tr.run("delete", map[string]any{"id": 2})
-		helper("enter", "1@/a", "2@/a")
+		helper("enter", "", "1@/a", "2@/a")
 	}})
 	if got := string(result(t, line)); !strings.Contains(got, `"folder":"/b"`) || !strings.Contains(got, `"missing":[2]`) {
 		t.Errorf("changed meanwhile: %s", got)
@@ -199,7 +199,7 @@ func TestRunOutcomes(t *testing.T) {
 	// Quit, and Enter with nothing under the cursor: an empty selection.
 	for _, do := range []func(t *testing.T, helper func(...string) string){
 		func(t *testing.T, helper func(...string) string) { helper("quit") },
-		func(t *testing.T, helper func(...string) string) { helper("enter") },
+		func(t *testing.T, helper func(...string) string) { helper("enter", "") },
 	} {
 		_, line := tr.pick(map[string]any{}, fzfDoes{do: do, status: 1})
 		if got := string(result(t, line)); got != `{"tasks":[],"missing":[],"actions":[],"notes_edited":[]}` {
@@ -225,7 +225,7 @@ func TestRunIncomplete(t *testing.T) {
 	tr := newTestTree(t)
 	tr.run("create", map[string]any{"title": "one"})
 	out, line := tr.pick(map[string]any{}, fzfDoes{do: func(t *testing.T, helper func(...string) string) {
-		helper("enter", "1@/")
+		helper("enter", "", "1@/")
 		cfg := filepath.Join(tr.env.ConfigDir, "config.toml")
 		if err := os.Remove(cfg); err != nil {
 			t.Fatal(err)

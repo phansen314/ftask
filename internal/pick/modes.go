@@ -48,6 +48,7 @@ func commandKeys() []string {
 const (
 	insertHint  = "enter: pick · tab: mark · esc: commands"
 	commandHint = "c: complete · i: search · ?: keys · q: quit"
+	promptHint  = "enter: apply · esc: cancel"
 )
 
 // help is command mode's keys, which ? shows in the preview until the
@@ -57,6 +58,7 @@ var help = [][2]string{
 	{"tab space", "mark or unmark"},
 	{"c", "complete; or reopen, when every one is complete"},
 	{"e", "edit notes, in $VISUAL, else $EDITOR, else vi"},
+	{"n", "new task, titled in a prompt that starts with the query"},
 	{"s", "scope: ready, open, all"},
 	{"r", "reload"},
 	{"j k", "down, up"},
@@ -69,16 +71,20 @@ var help = [][2]string{
 }
 
 // header is the header in a mode: in command mode, the mode and the
-// query, which is hidden; then the scope line; then the mode's keys.
-func header(command bool, query, scopeLine string) string {
-	if !command {
-		return scopeLine + "\n" + insertHint
+// query, which is hidden; in prompt mode, what the prompt asks for; then
+// the scope line; then the mode's keys.
+func header(mode, query, label, scopeLine string) string {
+	switch mode {
+	case modeCommand:
+		line := "[cmd]"
+		if query != "" {
+			line += " query: " + errs.OneLine(query)
+		}
+		return line + "\n" + scopeLine + "\n" + commandHint
+	case modePrompt:
+		return "[" + strings.TrimSuffix(label, "> ") + "]\n" + scopeLine + "\n" + promptHint
 	}
-	mode := "[cmd]"
-	if query != "" {
-		mode += " query: " + errs.OneLine(query)
-	}
-	return mode + "\n" + scopeLine + "\n" + commandHint
+	return scopeLine + "\n" + insertHint
 }
 
 // escVerb is Esc: command mode from insert mode, and quit from command
@@ -91,8 +97,11 @@ func escVerb(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 	if e != nil {
 		return nil, e
 	}
-	if string(b) == modeCommand {
+	switch string(b) {
+	case modeCommand:
 		return quit(s, nil, env)
+	case modePrompt:
+		return cancelPrompt(s, env)
 	}
 	return commandVerb(s, args, env)
 }
@@ -102,6 +111,12 @@ func escVerb(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 func commandVerb(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 	if e := oneArg(args); e != nil {
 		return nil, e
+	}
+	// In a prompt, ctrl-space cancels it, as Esc does.
+	if b, _, e := s.Read(modeFile); e != nil {
+		return nil, e
+	} else if string(b) == modePrompt {
+		return cancelPrompt(s, env)
 	}
 	if e := s.Write(modeFile, []byte(modeCommand)); e != nil {
 		return nil, e
@@ -157,7 +172,13 @@ func writeHeader(s *Session, env Env) (string, *errs.Error) {
 	if e != nil {
 		return "", e
 	}
-	h := header(string(mode) == modeCommand, string(query), scopeLine(scope, sh.Missing))
+	var label string
+	if string(mode) == modePrompt {
+		if label, e = promptLabel(s); e != nil {
+			return "", e
+		}
+	}
+	h := header(string(mode), string(query), label, scopeLine(scope, sh.Missing))
 	if e := s.Write(textPrefix+"header", []byte(h)); e != nil {
 		return "", e
 	}

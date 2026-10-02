@@ -517,6 +517,65 @@ func TestPickScopeAndReload(t *testing.T) {
 	})
 }
 
+// n end to end: the prompt borrows the query line, starting with the
+// query, and the list stays put while the title is typed; Enter creates
+// the task, clears the query, and puts the cursor on the new task. A
+// refused title keeps the prompt open; Esc cancels it.
+func TestPickNew(t *testing.T) {
+	eachFzf(t, func(t *testing.T, fzfDir string) {
+		tr := pickTree(t)
+		p := startPick(t, fzfDir, tr.cmd("pick", "--fields", "id"))
+		p.loaded()
+		p.setQuery("pa", 2)
+		p.command()
+		p.send("n")
+		p.waitScreen("new> pa")
+		p.waitScreen("[new]")
+		p.send("ck snacks")
+		st := p.waitState("the title typed", func(st fzfState) bool { return st.Query == "pack snacks" })
+		if st.MatchCount != 2 {
+			t.Errorf("the list moved while typing the title: %+v", st)
+		}
+		p.send(keyEnter)
+		p.waitScreen("✓ created 4")
+		p.waitState("the cursor on the new task", func(st fzfState) bool {
+			return st.Query == "" && st.TotalCount == 4 && lineKey(st.Current) == "4@/"
+		})
+		p.waitScreen("[cmd]")
+		inCommandMode := func() {
+			t.Helper()
+			// The input hides on the reload's load event, just after the
+			// prompt closes; then unbound keys type nothing, and ? after
+			// them, showing the keys, shows they were handled.
+			p.waitFor("the input hidden", func() bool { return !strings.Contains(p.screen(), "> ") })
+			p.send("xz?")
+			p.waitScreen("until the cursor moves")
+			if q := p.state().Query; q != "" {
+				t.Errorf("typed into the query in command mode: %q", q)
+			}
+		}
+		inCommandMode()
+
+		// A refused title: the prompt stays open; Esc cancels it.
+		p.send("n")
+		p.waitScreen("new> ")
+		p.send(keyEnter)
+		p.waitScreen("✗ create: invalid-input")
+		if !strings.Contains(p.screen(), "new> ") {
+			t.Errorf("prompt closed:\n%s", p.screen())
+		}
+		p.send(keyEsc)
+		p.waitScreen("[cmd]")
+		inCommandMode()
+		p.send(keyEnter)
+		r := p.result()
+		out := decode(t, r)
+		if r.code != 0 || len(out.Result.Actions) != 2 || len(out.Result.Tasks) != 1 || out.Result.Tasks[0].ID != 4 {
+			t.Errorf("exit %d: %s", r.code, r.stdout)
+		}
+	})
+}
+
 // pick in a pipeline: --from reads an upstream envelope, of each accepted
 // shape, while the picker draws on the terminal; stdout goes downstream.
 // The rejections end pick before the picker opens (pick-spec.md, Accepted
