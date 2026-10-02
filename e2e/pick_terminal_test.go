@@ -287,7 +287,7 @@ func TestPickModes(t *testing.T) {
 		// Keys command mode doesn't bind, and those bound to edit the
 		// query, do nothing while it is hidden; k after them shows they
 		// were handled.
-		p.send("xz\x7f" + keyCtrlU + keyCtrlD + "\x17" + "k")
+		p.send("zw\x7f" + keyCtrlU + keyCtrlD + "\x17" + "k")
 		cursorOn(1)
 		if st := p.state(); st.Query != "s" || st.MatchCount != 3 {
 			t.Errorf("query %q matching %d", st.Query, st.MatchCount)
@@ -551,7 +551,7 @@ func TestPickNew(t *testing.T) {
 			// prompt closes; then unbound keys type nothing, and ? after
 			// them, showing the keys, shows they were handled.
 			p.waitFor("the input hidden", func() bool { return !strings.Contains(p.screen(), "> ") })
-			p.send("xz?")
+			p.send("zw?")
 			p.waitScreen("until the cursor moves")
 			if q := p.state().Query; q != "" {
 				t.Errorf("typed into the query in command mode: %q", q)
@@ -711,6 +711,45 @@ func TestPickTags(t *testing.T) {
 		}
 		p.send(keyEnter)
 		if r := p.result(); r.code != 0 || !strings.Contains(r.stdout, `"tasks":[{"id":1,"tags":["travel","urgent"]}]`) {
+			t.Errorf("exit %d: %s", r.code, r.stdout)
+		}
+	})
+}
+
+// x end to end: the editor gets the task as JSON; a file that isn't valid
+// is kept and reopened with the edits by the next x; a valid edit is one
+// update, shown on the line.
+func TestPickX(t *testing.T) {
+	eachFzf(t, func(t *testing.T, fzfDir string) {
+		tr := pickTree(t)
+		ed := filepath.Join(t.TempDir(), "ed")
+		// First run, it breaks the file; on finding it broken, it fixes
+		// it and retitles the task.
+		script := `#!/bin/sh
+if grep -q nope "$1"; then
+	sed -i.bak -e '/nope/d' -e 's/"Book flights"/"Book cheap flights"/' "$1"
+else
+	echo nope >> "$1"
+fi
+`
+		if err := os.WriteFile(ed, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		cmd := tr.cmd("pick", "--fields", "id,title")
+		cmd.Env = append(cmd.Env, "VISUAL="+ed, "FTASK_PICK_OPTS=--preview-window=hidden")
+		p := startPick(t, fzfDir, cmd)
+		p.loaded()
+		p.command()
+		p.send("x")
+		p.waitScreen("✗ x 1: not a JSON object")
+		p.send("x")
+		p.waitScreen("✓ updated 1")
+		p.waitScreen("Book cheap flights")
+		p.send(keyEnter)
+		r := p.result()
+		out := decode(t, r)
+		if r.code != 0 || len(out.Result.Actions) != 1 || !strings.Contains(r.stdout, `"input":{"id":1,"title":"Book cheap flights"}`) ||
+			!strings.Contains(r.stdout, `"tasks":[{"id":1,"title":"Book cheap flights"}]`) {
 			t.Errorf("exit %d: %s", r.code, r.stdout)
 		}
 	})

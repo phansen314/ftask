@@ -46,7 +46,7 @@ var actions []action
 // init fills actions, which some actions' own code reads (the command
 // keys, for a prompt).
 func init() {
-	actions = []action{completeAction, editAction, newAction, priorityAction, tagsAction, scopeAction, reloadAction}
+	actions = []action{completeAction, editAction, newAction, priorityAction, tagsAction, xAction, scopeAction, reloadAction}
 }
 
 func lookupAction(key string) (action, bool) {
@@ -170,6 +170,12 @@ func act(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 	a, ok := lookupAction(args[0])
 	if !ok {
 		return nil, errs.Usage([]errs.UsageProblem{{Argument: &args[0], Reason: "unknown action"}})
+	}
+	// An x kept for its edits lasts until any other action.
+	if a.key != xAction.key {
+		if e := discardX(s); e != nil {
+			return nil, e
+		}
 	}
 	var sh shown
 	if e := readJSON(s, shownFile, &sh); e != nil {

@@ -24,6 +24,7 @@ var verbs = map[string]verb{
 	"act":        act,
 	"edit":       editVerb,
 	"after-edit": afterEdit,
+	"after-x":    afterX,
 	"lines":      linesVerb,
 	"esc":        escVerb,
 	"command":    commandVerb,

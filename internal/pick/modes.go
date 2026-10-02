@@ -61,6 +61,7 @@ var help = [][2]string{
 	{"n", "new task, titled in a prompt that starts with the query"},
 	{"p", "priority: a number, or null for none"},
 	{"t", "tags: a b to set, +a -b to change, - for none"},
+	{"x", "edit title, priority, tags and extra as JSON"},
 	{"s", "scope: ready, open, all"},
 	{"r", "reload"},
 	{"j k", "down, up"},
