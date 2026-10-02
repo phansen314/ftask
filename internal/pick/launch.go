@@ -75,9 +75,14 @@ func (pk picker) args() []string {
 		"--bind", "i:transform:"+pk.helper("insert"),
 		"--bind", "/:transform:"+pk.helper("insert"),
 		"--bind", "?:preview:"+pk.helper("help"),
+	)
+	for _, ac := range actions {
+		a = append(a, "--bind", ac.key+":transform:"+pk.helper("act", ac.key)+" {+1}")
+	}
+	a = append(a,
 		// load is bound from the start, so that a callback can rebind it
 		// to move the cursor once a reload is in (pick-spec.md, Actions).
-		"--bind", "start:unbind(load,"+strings.Join(commandKeys, ",")+")",
+		"--bind", "start:unbind(load,"+strings.Join(commandKeys(), ",")+")",
 		"--bind", "load:transform:"+pk.helper("on-load"),
 	)
 	if pk.warnings > 0 {
@@ -101,10 +106,12 @@ func helperLine(exe, verb string, args ...string) string {
 	return strings.Join(words, " ")
 }
 
-// scopeLine is the header's line for the scope: the scope folder and the
-// filters in effect.
-func (pk picker) scopeLine() string {
-	s := pk.scope
+// scopeLine is the header's line for the scope.
+func (pk picker) scopeLine() string { return scopeLine(pk.scope, pk.missing) }
+
+// scopeLine is the header's line for a scope: its folder and the filters in
+// effect, and how many of a snapshot's IDs the load lacks.
+func scopeLine(s Scope, missing int) string {
 	parts := []string{string(s.Folder)}
 	if !s.Recursive {
 		parts[0] += " (not subfolders)"
@@ -118,8 +125,8 @@ func (pk picker) scopeLine() string {
 	if s.IDs != nil {
 		parts = append(parts, plural(len(s.IDs), "given ID"))
 	}
-	if pk.missing > 0 {
-		parts = append(parts, plural(pk.missing, "given ID")+" not found")
+	if missing > 0 {
+		parts = append(parts, plural(missing, "given ID")+" not found")
 	}
 	return strings.Join(parts, " · ")
 }

@@ -232,20 +232,21 @@ func TestText(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer s.Remove()
-	if out, e := text(s, []string{"footer"}, Env{}); string(out) != "" || e != nil {
+	env := Env{Sys: System{Environ: func() []string { return nil }}}
+	if out, e := text(s, []string{"footer"}, env); string(out) != "" || e != nil {
 		t.Errorf("never written: %q, %v", out, e)
 	}
 	s.Write(textPrefix+"footer", []byte("✗ x: )+execute-silent(touch X)+(\nnext\x1b[31m\u2028"))
-	if out, e := text(s, []string{"footer"}, Env{}); string(out) != "✗ x: )+execute-silent(touch X)+(\\nnext\\x1b[31m\\u2028" || e != nil {
+	if out, e := text(s, []string{"footer"}, env); string(out) != "✗ x: )+execute-silent(touch X)+(\\nnext\\x1b[31m\\u2028" || e != nil {
 		t.Errorf("got %q, %v", out, e)
 	}
 	// The header keeps its lines, each escaped.
 	s.Write(textPrefix+"header", []byte("[cmd] query: a\x1bb\n/\nkeys"))
-	if out, _ := text(s, []string{"header"}, Env{}); string(out) != "[cmd] query: a\\x1bb\n/\nkeys" {
+	if out, _ := text(s, []string{"header"}, env); string(out) != "[cmd] query: a\\x1bb\n/\nkeys" {
 		t.Errorf("header: %q", out)
 	}
 	for _, args := range [][]string{nil, {"other"}, {"footer", "x"}} {
-		if _, e := text(s, args, Env{}); e == nil || e.Kind != errs.KindUsage {
+		if _, e := text(s, args, env); e == nil || e.Kind != errs.KindUsage {
 			t.Errorf("%q: %v", args, e)
 		}
 	}

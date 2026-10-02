@@ -67,10 +67,10 @@ func Run(in *jsonio.Object, problems []errs.Problem, env Env) ops.Envelope {
 		return ops.Envelope{Error: e, Warnings: l.Warnings}
 	}
 	defer s.Remove()
-	if e := writePreviews(s, l); e != nil {
+	if e := writeJSON(s, scopeFile, scope); e != nil {
 		return ops.Envelope{Error: e, Warnings: l.Warnings}
 	}
-	if e := s.Write(scopeLineFile, []byte(pk.scopeLine())); e != nil {
+	if e := writeLoaded(s, l, views, lines, missing); e != nil {
 		return ops.Envelope{Error: e, Warnings: l.Warnings}
 	}
 	status, e := show(env, fzf, pk, lines, s)

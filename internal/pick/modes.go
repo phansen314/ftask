@@ -1,6 +1,7 @@
 package pick
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/phansen314/ftask/internal/errs"
@@ -24,13 +25,23 @@ const (
 	// insert mode.
 	modeFile    = "mode"
 	modeCommand = "command"
-	// scopeLineFile holds the header's line for the scope, which the
-	// header keeps in every mode.
-	scopeLineFile = "scope-line"
+	// queryFile holds the query while in command mode, which hides it, for
+	// the header.
+	queryFile = "query"
 )
 
-// commandKeys are the keys bound only in command mode.
-var commandKeys = []string{"j", "k", "g", "G", "space", "q", "i", "/", "?"}
+// moveKeys are the keys bound only in command mode, other than actions'.
+var moveKeys = []string{"j", "k", "g", "G", "space", "q", "i", "/", "?"}
+
+// commandKeys are the keys bound only in command mode: moveKeys, then each
+// action's.
+func commandKeys() []string {
+	keys := slices.Clone(moveKeys)
+	for _, a := range actions {
+		keys = append(keys, a.key)
+	}
+	return keys
+}
 
 // Key hints, the header's last line in each mode.
 const (
@@ -90,7 +101,10 @@ func commandVerb(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 	if e := s.Write(modeFile, []byte(modeCommand)); e != nil {
 		return nil, e
 	}
-	return switchMode(s, true, args[0], env)
+	if e := s.Write(queryFile, []byte(args[0])); e != nil {
+		return nil, e
+	}
+	return switchMode(s, true, env)
 }
 
 // insertVerb enters insert mode.
@@ -101,30 +115,52 @@ func insertVerb(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 	if e := s.Delete(modeFile); e != nil {
 		return nil, e
 	}
-	return switchMode(s, false, "", env)
+	return switchMode(s, false, env)
 }
 
-// switchMode writes the mode's header and returns the actions that switch
-// fzf to the mode.
-func switchMode(s *Session, command bool, query string, env Env) ([]byte, *errs.Error) {
-	scopeLine, _, e := s.Read(scopeLineFile)
+// switchMode returns the actions that switch fzf to the mode the session
+// is now in.
+func switchMode(s *Session, command bool, env Env) ([]byte, *errs.Error) {
+	header, e := writeHeader(s, env)
 	if e != nil {
 		return nil, e
-	}
-	if e := s.Write(textPrefix+"header", []byte(header(command, query, string(scopeLine)))); e != nil {
-		return nil, e
-	}
-	exe, err := env.Sys.Executable()
-	if err != nil {
-		return nil, errs.Internal("locating the ftask binary: " + err.Error())
 	}
 	keys := "+unbind("
 	input := "show-input"
 	if command {
 		keys, input = "+rebind(", "hide-input"
 	}
-	return []byte(input + keys + strings.Join(commandKeys, ",") + ")" +
-		"+transform-header(" + helperLine(exe, "text", "header") + ")"), nil
+	return []byte(input + keys + strings.Join(commandKeys(), ",") + ")+" + header), nil
+}
+
+// writeHeader writes the header for the session's mode, scope and last
+// load, and returns the action that shows it.
+func writeHeader(s *Session, env Env) (string, *errs.Error) {
+	var scope Scope
+	var sh shown
+	if e := readJSON(s, scopeFile, &scope); e != nil {
+		return "", e
+	}
+	if e := readJSON(s, shownFile, &sh); e != nil {
+		return "", e
+	}
+	mode, _, e := s.Read(modeFile)
+	if e != nil {
+		return "", e
+	}
+	query, _, e := s.Read(queryFile)
+	if e != nil {
+		return "", e
+	}
+	h := header(string(mode) == modeCommand, string(query), scopeLine(scope, sh.Missing))
+	if e := s.Write(textPrefix+"header", []byte(h)); e != nil {
+		return "", e
+	}
+	exe, err := env.Sys.Executable()
+	if err != nil {
+		return "", errs.Internal("locating the ftask binary: " + err.Error())
+	}
+	return "transform-header(" + helperLine(exe, "text", "header") + ")", nil
 }
 
 // helpVerb prints command mode's keys, for the preview.

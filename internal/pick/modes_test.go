@@ -32,7 +32,8 @@ func TestModeVerbs(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer s.Remove()
-	s.Write(scopeLineFile, []byte("/trips"))
+	writeJSON(s, scopeFile, Scope{Folder: "/trips", Recursive: true})
+	writeJSON(s, shownFile, shown{})
 	env := Env{Sys: System{Executable: func() (string, error) { return "/bin/ft ask", nil }}}
 	toHeader := "+transform-header('/bin/ft ask' __pick text 'header')"
 	toCommand := "hide-input+rebind(j,k,g,G,space,q,i,/,?)" + toHeader

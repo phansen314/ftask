@@ -64,7 +64,10 @@ type IncompleteDetails struct {
 // A recorded selection is Enter or quit, whatever the status; without one,
 // 130 is cancel, and any other status is fzf-failed.
 func finish(env Env, s *Session, status int, fields []string) ops.Envelope {
-	actions := []any{}
+	actions, e := loggedActions(s)
+	if e != nil {
+		return ops.Failed(e)
+	}
 	b, recorded, e := s.Read(selectionFile)
 	switch {
 	case e != nil:

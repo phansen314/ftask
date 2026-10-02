@@ -55,6 +55,8 @@ type tree struct {
 	env ops.Env
 	// filter is fzf --filter's fake, for --select-one and --exit-zero.
 	filter func(path string, args, env []string, stdin []byte) ([]byte, int, error)
+	// session is the session directory of the pick running now.
+	session string
 }
 
 func newTestTree(t *testing.T) *tree {
@@ -107,6 +109,7 @@ func (tr *tree) pick(in map[string]any, fzf fzfDoes) (ops.Envelope, []byte) {
 		Filter:          tr.filter,
 	}
 	sys.RunFzf = func(_ string, _ []string, env []string, _ []byte) (int, error) {
+		tr.session = lookupEnv(env, SessionVar)
 		helper := func(args ...string) string {
 			hsys := sys
 			hsys.Environ = func() []string { return env }

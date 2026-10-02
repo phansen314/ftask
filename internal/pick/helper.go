@@ -21,6 +21,8 @@ type verb func(s *Session, args []string, env Env) ([]byte, *errs.Error)
 // verbs are the helper's verbs, by name.
 var verbs = map[string]verb{
 	"enter":   enter,
+	"act":     act,
+	"lines":   linesVerb,
 	"esc":     escVerb,
 	"command": commandVerb,
 	"insert":  insertVerb,
@@ -91,7 +93,7 @@ func onLoad(s *Session, args []string, _ Env) ([]byte, *errs.Error) {
 // (pick-spec.md, No data in action text): one line, its control characters
 // escaped as on the CLI's stderr line, except the header, whose lines the
 // helper composes, each escaped so. A text never written is empty.
-func text(s *Session, args []string, _ Env) ([]byte, *errs.Error) {
+func text(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 	switch {
 	case len(args) == 0:
 		return nil, errs.Usage([]errs.UsageProblem{{Reason: "missing text name"}})
@@ -103,6 +105,11 @@ func text(s *Session, args []string, _ Env) ([]byte, *errs.Error) {
 	b, _, e := s.Read(textPrefix + args[0])
 	if e != nil {
 		return nil, e
+	}
+	if args[0] == "footer" {
+		// The status line, cut to the terminal less the list's margin.
+		cols, _ := strconv.Atoi(lookupEnv(env.Sys.Environ(), "FZF_COLUMNS"))
+		return []byte(fitWidth(errs.OneLine(string(b)), cols-2)), nil
 	}
 	if args[0] == "header" {
 		lines := strings.Split(string(b), "\n")
