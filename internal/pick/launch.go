@@ -58,7 +58,7 @@ func (pk picker) args() []string {
 		"--tabstop", "1",
 		"--prompt", promptOf(pk.scope),
 		"--query", pk.query,
-		"--header", header("", "", "", pk.scopeLine()),
+		"--header", header("", "", "", false, pk.scopeLine()),
 		"--preview", pk.helper("preview")+" {1}",
 		"--bind", "enter:transform:"+pk.helper("enter")+" {q} {+1}",
 		"--bind", "esc:transform:"+pk.helper("esc")+" {q}",

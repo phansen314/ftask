@@ -149,7 +149,14 @@ func applyPrompt(s *Session, value string, env Env) ([]byte, *errs.Error) {
 	if r.clearQuery {
 		query = ""
 	}
-	leave, e := leavePrompt(s, env, query)
+	return backToTasks(s, env, r, query, status)
+}
+
+// backToTasks leaves a prompt or choose list for command mode with the
+// task list, after the run r applied something: with query as the search
+// query, the list reloaded, and status in the status line.
+func backToTasks(s *Session, env Env, r *actionRun, query, status string) ([]byte, *errs.Error) {
+	leave, e := leaveMode(s, env, query)
 	if e != nil {
 		return nil, e
 	}
@@ -166,7 +173,7 @@ func applyPrompt(s *Session, value string, env Env) ([]byte, *errs.Error) {
 		if err != nil {
 			return nil, errInternalExe(err)
 		}
-		out = "reload-sync(" + helperLine(exe, "lines") + ")"
+		out = "clear-selection+reload-sync(" + helperLine(exe, "lines") + ")"
 	} else if r.cursorTo != "" {
 		moved, e := armCursor(s, r.cursorTo)
 		switch {
@@ -187,6 +194,22 @@ func applyPrompt(s *Session, value string, env Env) ([]byte, *errs.Error) {
 		b += "+" + r.also
 	}
 	return []byte(b), nil
+}
+
+// cancelToTasks leaves a prompt or choose list for command mode with the
+// task list as it was, and query as the search query.
+func cancelToTasks(s *Session, env Env, query string) ([]byte, *errs.Error) {
+	leave, e := leaveMode(s, env, query)
+	if e != nil {
+		return nil, e
+	}
+	exe, err := env.Sys.Executable()
+	if err != nil {
+		return nil, errInternalExe(err)
+	}
+	// The task lines again: the reload's load event hides the input. load
+	// is armed before the reload starts, as in backToTasks.
+	return []byte(leave + "+rebind(load)+clear-selection+reload-sync(" + helperLine(exe, "lines") + ")"), nil
 }
 
 // armCursor records the position of the line with key in the last load,
@@ -212,31 +235,23 @@ func cancelPrompt(s *Session, env Env) ([]byte, *errs.Error) {
 	if e := readJSON(s, promptFile, &st); e != nil {
 		return nil, e
 	}
-	leave, e := leavePrompt(s, env, st.Saved)
-	if e != nil {
-		return nil, e
-	}
-	exe, err := env.Sys.Executable()
-	if err != nil {
-		return nil, errInternalExe(err)
-	}
-	// The same lines again: the reload's load event hides the input.
-	// load is armed before the reload starts, as in applyPrompt.
-	return []byte(leave + "+rebind(load)+reload-sync(" + helperLine(exe, "lines") + ")"), nil
+	return cancelToTasks(s, env, st.Saved)
 }
 
-// leavePrompt closes the prompt for command mode, with query as the search
-// query, and returns the actions that do it, but for hiding the input: a
-// query change and hide-input in one transform's output lose the query
-// change (fzf 0.63.0 to 0.74.4), so the input is hidden on the next load
-// event, which the caller brings about with a reload and rebind(load).
-func leavePrompt(s *Session, env Env, query string) (string, *errs.Error) {
+// leaveMode closes a prompt or choose list for command mode, with query as
+// the search query, and returns the actions that do it, but for hiding the
+// input: a query change and hide-input in one transform's output lose the
+// query change (fzf 0.63.0 to 0.74.4), so the input is hidden on the next
+// load event, which the caller brings about with a reload and
+// rebind(load). Tab, unbound in a single-choice list, comes back.
+func leaveMode(s *Session, env Env, query string) (string, *errs.Error) {
 	var scope Scope
 	if e := readJSON(s, scopeFile, &scope); e != nil {
 		return "", e
 	}
 	for _, step := range []func() *errs.Error{
 		func() *errs.Error { return s.Delete(promptFile) },
+		func() *errs.Error { return s.Delete(chooseFile) },
 		func() *errs.Error { return s.Write(modeFile, []byte(modeCommand)) },
 		func() *errs.Error { return s.Write(queryFile, []byte(query)) },
 		func() *errs.Error { return s.Write(textPrefix+"query", []byte(query)) },
@@ -258,7 +273,7 @@ func leavePrompt(s *Session, env Env, query string) (string, *errs.Error) {
 	return "enable-search" +
 		"+" + setQuery(exe, query) +
 		"+transform-prompt(" + helperLine(exe, "text", "prompt") + ")" +
-		"+rebind(" + strings.Join(commandKeys(), ",") + ")+" + header, nil
+		"+rebind(" + strings.Join(commandKeys(), ",") + ",tab)+" + header, nil
 }
 
 // setQuery is the action that sets the query to the session's text-query,

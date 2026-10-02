@@ -26,6 +26,7 @@ var verbs = map[string]verb{
 	"after-edit": afterEdit,
 	"after-x":    afterX,
 	"lines":      linesVerb,
+	"choices":    choicesVerb,
 	"esc":        escVerb,
 	"command":    commandVerb,
 	"insert":     insertVerb,
@@ -61,7 +62,7 @@ const (
 	// reload is in: on-load's arming (pick-spec.md, Actions).
 	cursorFile = "cursor"
 	// hideFile, when present, has on-load hide the input: leaving a
-	// prompt for command mode (see leavePrompt).
+	// prompt or choose list for command mode (see leaveMode).
 	hideFile = "hide-input"
 	// textPrefix begins the files that hold text fzf shows, by name:
 	// text-footer, text-header, text-prompt, text-query.

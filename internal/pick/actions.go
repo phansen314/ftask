@@ -38,6 +38,9 @@ type action struct {
 	// apply, for an action that asks for a value in a prompt, applies the
 	// value once entered; it returns whether the prompt stays open.
 	apply func(r *actionRun, value string, targets []shownLine) (keep bool)
+	// choose, for an action that swaps in a choose list, applies the
+	// action to the chosen lines' keys.
+	choose func(r *actionRun, chosen []string, targets []shownLine)
 }
 
 // actions are the actions, in the order their keys are bound.

@@ -37,7 +37,7 @@ func TestNewAction(t *testing.T) {
 		got = helper("enter", "Buy tickets", "1@/")
 		for _, part := range []string{
 			// No hide-input: on-load does it, after the reload.
-			"enable-search+change-query()+transform-prompt('/bin/ftask' __pick text 'prompt')+rebind(" + keys + ")+transform-header(",
+			"enable-search+change-query()+transform-prompt('/bin/ftask' __pick text 'prompt')+rebind(" + keys + ",tab)+transform-header(",
 			"+rebind(load)+clear-selection+reload-sync('/bin/ftask' __pick lines)+",
 		} {
 			if !strings.Contains(got, part) {
@@ -61,7 +61,7 @@ func TestNewAction(t *testing.T) {
 			helper("act", "n")
 			helper("text", "query")
 			got := helper(cancel, "half a title")
-			if !strings.HasPrefix(got, "enable-search+transform-query(") || !strings.HasSuffix(got, "+rebind(load)+reload-sync('/bin/ftask' __pick lines)") {
+			if !strings.HasPrefix(got, "enable-search+transform-query(") || !strings.HasSuffix(got, "+rebind(load)+clear-selection+reload-sync('/bin/ftask' __pick lines)") {
 				t.Errorf("%s printed %q", cancel, got)
 			}
 			if got := helper("on-load"); got != "hide-input+unbind(load)" {

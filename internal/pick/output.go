@@ -29,6 +29,8 @@ func enter(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 		return nil, e
 	} else if string(b) == modePrompt {
 		return applyPrompt(s, args[0], env)
+	} else if string(b) == modeChoose {
+		return applyChoose(s, args[1:], env)
 	}
 	return record(s, args[1:])
 }

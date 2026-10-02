@@ -49,6 +49,8 @@ const (
 	insertHint  = "enter: pick · tab: mark · esc: commands"
 	commandHint = "c: complete · i: search · ?: keys · q: quit"
 	promptHint  = "enter: apply · esc: cancel"
+	chooseHint  = "enter: choose · tab: mark · esc: cancel"
+	pickOneHint = "enter: choose · esc: cancel"
 )
 
 // help is command mode's keys, which ? shows in the preview until the
@@ -76,7 +78,7 @@ var help = [][2]string{
 // header is the header in a mode: in command mode, the mode and the
 // query, which is hidden; in prompt mode, what the prompt asks for; then
 // the scope line; then the mode's keys.
-func header(mode, query, label, scopeLine string) string {
+func header(mode, query, label string, single bool, scopeLine string) string {
 	switch mode {
 	case modeCommand:
 		line := "[cmd]"
@@ -86,6 +88,12 @@ func header(mode, query, label, scopeLine string) string {
 		return line + "\n" + scopeLine + "\n" + commandHint
 	case modePrompt:
 		return "[" + strings.TrimSuffix(label, "> ") + "]\n" + scopeLine + "\n" + promptHint
+	case modeChoose:
+		hint := chooseHint
+		if single {
+			hint = pickOneHint
+		}
+		return "[" + strings.TrimSuffix(label, "> ") + "]\n" + scopeLine + "\n" + hint
 	}
 	return scopeLine + "\n" + insertHint
 }
@@ -105,6 +113,8 @@ func escVerb(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 		return quit(s, nil, env)
 	case modePrompt:
 		return cancelPrompt(s, env)
+	case modeChoose:
+		return cancelChoose(s, env)
 	}
 	return commandVerb(s, args, env)
 }
@@ -115,11 +125,13 @@ func commandVerb(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 	if e := oneArg(args); e != nil {
 		return nil, e
 	}
-	// In a prompt, ctrl-space cancels it, as Esc does.
+	// In a prompt or choose list, ctrl-space cancels it, as Esc does.
 	if b, _, e := s.Read(modeFile); e != nil {
 		return nil, e
 	} else if string(b) == modePrompt {
 		return cancelPrompt(s, env)
+	} else if string(b) == modeChoose {
+		return cancelChoose(s, env)
 	}
 	if e := s.Write(modeFile, []byte(modeCommand)); e != nil {
 		return nil, e
@@ -176,12 +188,18 @@ func writeHeader(s *Session, env Env) (string, *errs.Error) {
 		return "", e
 	}
 	var label string
-	if string(mode) == modePrompt {
+	var single bool
+	switch string(mode) {
+	case modePrompt:
 		if label, e = promptLabel(s); e != nil {
 			return "", e
 		}
+	case modeChoose:
+		if label, single, e = chooseLabel(s); e != nil {
+			return "", e
+		}
 	}
-	h := header(string(mode), string(query), label, scopeLine(scope, sh.Missing))
+	h := header(string(mode), string(query), label, single, scopeLine(scope, sh.Missing))
 	if e := s.Write(textPrefix+"header", []byte(h)); e != nil {
 		return "", e
 	}

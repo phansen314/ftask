@@ -16,17 +16,17 @@ func TestCommandKeys(t *testing.T) {
 }
 
 func TestHeaderByMode(t *testing.T) {
-	if got := header("", "renew", "", "/trips"); got != "/trips\n"+insertHint {
+	if got := header("", "renew", "", false, "/trips"); got != "/trips\n"+insertHint {
 		t.Errorf("insert: %q", got)
 	}
-	if got := header(modeCommand, "renew", "", "/trips"); got != "[cmd] query: renew\n/trips\n"+commandHint {
+	if got := header(modeCommand, "renew", "", false, "/trips"); got != "[cmd] query: renew\n/trips\n"+commandHint {
 		t.Errorf("command: %q", got)
 	}
-	if got := header(modeCommand, "", "", "/trips"); got != "[cmd]\n/trips\n"+commandHint {
+	if got := header(modeCommand, "", "", false, "/trips"); got != "[cmd]\n/trips\n"+commandHint {
 		t.Errorf("command, no query: %q", got)
 	}
 	// The query is data: a control character in it can't split the header.
-	if got := header(modeCommand, "a\nb", "", "/"); !strings.HasPrefix(got, "[cmd] query: a\\nb\n/\n") {
+	if got := header(modeCommand, "a\nb", "", false, "/"); !strings.HasPrefix(got, "[cmd] query: a\\nb\n/\n") {
 		t.Errorf("control character: %q", got)
 	}
 }
@@ -54,13 +54,13 @@ func TestModeVerbs(t *testing.T) {
 	if out, e := escVerb(s, []string{"renew"}, env); string(out) != toCommand || e != nil {
 		t.Fatalf("esc in insert mode: %q, %v", out, e)
 	}
-	if h := headerNow(); h != header(modeCommand, "renew", "", "/trips") {
+	if h := headerNow(); h != header(modeCommand, "renew", "", false, "/trips") {
 		t.Errorf("command header: %q", h)
 	}
 	if out, e := insertVerb(s, nil, env); string(out) != toInsert || e != nil {
 		t.Fatalf("insert: %q, %v", out, e)
 	}
-	if h := headerNow(); h != header("", "", "", "/trips") {
+	if h := headerNow(); h != header("", "", "", false, "/trips") {
 		t.Errorf("insert header: %q", h)
 	}
 	if out, e := commandVerb(s, []string{""}, env); string(out) != toCommand || e != nil {
