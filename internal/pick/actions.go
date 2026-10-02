@@ -38,7 +38,7 @@ type action struct {
 }
 
 // actions are the actions, in the order their keys are bound.
-var actions = []action{completeAction, editAction}
+var actions = []action{completeAction, editAction, scopeAction, reloadAction}
 
 func lookupAction(key string) (action, bool) {
 	i := slices.IndexFunc(actions, func(a action) bool { return a.key == key })
@@ -185,12 +185,19 @@ func act(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 	if status == "" {
 		status = statusLine(r.outcomes)
 	}
-	if len(r.outcomes) == 0 {
-		return setStatus(s, env, sh.Warnings, status)
+	var out []byte
+	var e *errs.Error
+	if len(r.outcomes) == 0 && !r.reload {
+		out, e = setStatus(s, env, sh.Warnings, status)
+	} else {
+		// Reload after every action that ran an operation (pick-spec.md,
+		// Actions).
+		out, e = reloadWithStatus(s, env, status)
 	}
-	// Reload after every action that ran an operation (pick-spec.md,
-	// Actions).
-	return reloadWithStatus(s, env, status)
+	if e != nil || r.also == "" {
+		return out, e
+	}
+	return []byte(string(out) + "+" + r.also), nil
 }
 
 // reloadWithStatus reloads, then shows status in the status line. A load
@@ -235,6 +242,11 @@ type actionRun struct {
 	// next, when set, is what fzf does next instead of the reload: e.g.
 	// run an editor.
 	next string
+	// reload asks for a reload though no operation ran, e.g. to show a
+	// new scope.
+	reload bool
+	// also is more for fzf to do, after the reload and status line.
+	also string
 	// err is a session failure, which ends the action.
 	err *errs.Error
 }
@@ -451,6 +463,10 @@ func kindText(e *errs.Error) string {
 		return fmt.Sprintf("%s (%s)", e.Kind, d.Rule)
 	}
 	return string(e.Kind)
+}
+
+func errInternalExe(err error) *errs.Error {
+	return errs.Internal("locating the ftask binary: " + err.Error())
 }
 
 // fitWidth cuts a one-line text to width terminal cells, with …; width 0

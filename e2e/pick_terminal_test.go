@@ -483,6 +483,40 @@ func TestPickEdit(t *testing.T) {
 	})
 }
 
+// s and r end to end: s cycles the scope and reloads, and the prompt names
+// it; r finds a task another process created.
+func TestPickScopeAndReload(t *testing.T) {
+	eachFzf(t, func(t *testing.T, fzfDir string) {
+		tr := pickTree(t)
+		if r := run(t, tr.cmd("complete", "3")); r.code != 0 {
+			t.Fatal(r.stdout)
+		}
+		p := startPick(t, fzfDir, tr.cmd("pick", "--fields", "id"))
+		if st := p.loaded(); st.TotalCount != 2 {
+			t.Fatalf("open: %+v", st)
+		}
+		p.command()
+		p.send("s")
+		p.waitScreen("✓ scope: all")
+		p.waitState("all three", func(st fzfState) bool { return st.TotalCount == 3 })
+		p.send("i")
+		p.waitScreen("all> ")
+		p.command()
+
+		if r := run(t, tr.cmd("create", "Buy adapter", "--folder", "/trips")); r.code != 0 {
+			t.Fatal(r.stdout)
+		}
+		p.send("r")
+		p.waitScreen("✓ reloaded")
+		p.waitState("the new task", func(st fzfState) bool { return st.TotalCount == 4 })
+		p.waitScreen("Buy adapter")
+		p.send(keyEsc)
+		if r := p.result(); r.code != 0 || !strings.Contains(r.stdout, `"actions":[]`) {
+			t.Errorf("exit %d: %s", r.code, r.stdout)
+		}
+	})
+}
+
 // pick in a pipeline: --from reads an upstream envelope, of each accepted
 // shape, while the picker draws on the terminal; stdout goes downstream.
 // The rejections end pick before the picker opens (pick-spec.md, Accepted

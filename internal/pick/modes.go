@@ -57,6 +57,8 @@ var help = [][2]string{
 	{"tab space", "mark or unmark"},
 	{"c", "complete; or reopen, when every one is complete"},
 	{"e", "edit notes, in $VISUAL, else $EDITOR, else vi"},
+	{"s", "scope: ready, open, all"},
+	{"r", "reload"},
 	{"j k", "down, up"},
 	{"g G", "first, last line"},
 	{"i /", "search: back to insert mode, with the query"},

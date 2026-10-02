@@ -56,7 +56,7 @@ func (pk picker) args() []string {
 		"--nth", lineNth,
 		"--tiebreak", "index",
 		"--tabstop", "1",
-		"--prompt", string(pk.scope.Readiness)+"> ",
+		"--prompt", promptOf(pk.scope),
 		"--query", pk.query,
 		"--header", header(false, "", pk.scopeLine()),
 		"--preview", pk.helper("preview")+" {1}",
@@ -77,7 +77,11 @@ func (pk picker) args() []string {
 		"--bind", "?:preview:"+pk.helper("help"),
 	)
 	for _, ac := range actions {
-		a = append(a, "--bind", ac.key+":transform:"+pk.helper("act", ac.key)+" {+1}")
+		bind := ac.key + ":transform:" + pk.helper("act", ac.key)
+		if ac.arity != noTargets {
+			bind += " {+1}"
+		}
+		a = append(a, "--bind", bind)
 	}
 	a = append(a,
 		// load is bound from the start, so that a callback can rebind it
