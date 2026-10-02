@@ -136,6 +136,7 @@ ftask delete-folder -r /proj/old               # .result.ids: what went; .result
 ## Hard rules
 
 - **Never** hand-edit, create, rename, or delete anything under the root except a task's notes `.md` — use `move`, `move-folder`, `delete`, and `delete-folder`. Task `.json` files and `ftask.json` belong to ftask; a hand edit can break invariants no command will repair.
+- **Never run `ftask pick`.** It's an interactive picker that needs the user's terminal. When the user wants to choose tasks themselves, suggest they run it in their own terminal (`ftask pick > picked.json`, say) and hand you the output. That envelope is read like any other: `result.tasks` (or `result.folders`) is their selection, `result.missing` what vanished meanwhile, and `result.actions` every change they made in the picker, each with its own `output` envelope, failures included; `result.notes_edited` lists tasks whose notes they edited. A failed `pick` (`cancelled`, `incomplete`, or `unavailable` after fzf ran) still lists its changes, in `.error.details.actions`.
 - Don't pass `--input` unless building input from other JSON; flags are clearer.
 - Don't create tasks the user didn't ask for. When a follow-up turns up during other work, offer it: "Want me to add a task for X?"
 
