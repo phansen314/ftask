@@ -57,7 +57,7 @@ func Helper(args []string, env Env) (out []byte, reported bool, e *errs.Error) {
 		return nil, false, errs.Usage([]errs.UsageProblem{{Argument: &args[0], Reason: "unknown verb"}})
 	}
 	if out, e = v(s, args[1:], env); e != nil {
-		return failed(s, args[0], e, env), true, e
+		return failed(s, args, e, env), true, e
 	}
 	return out, false, nil
 }
@@ -74,18 +74,26 @@ var listVerbs = []string{"lines", "choices"}
 // actions or listed: for an action verb, the status line, showing e; for
 // a list verb, nothing, which leaves the list empty; for the rest, whose
 // output fzf shows as it is (the preview, a text, the editor's terminal),
-// e as one line.
-func failed(s *Session, verb string, e *errs.Error, env Env) []byte {
+// e as one line, but for the query, which would become the value a prompt
+// applies: that prints nothing, which leaves the query as it is.
+func failed(s *Session, args []string, e *errs.Error, env Env) []byte {
+	verb := args[0]
 	msg := "✗ " + errText(e)
+	var sh shown
+	readJSON(s, shownFile, &sh) // no load to count warnings from: none
 	switch {
 	case slices.Contains(actionVerbs, verb):
-		var sh shown
-		readJSON(s, shownFile, &sh) // no load to count warnings from: none
 		if out, e := setStatus(s, env, sh.Warnings, msg); e == nil {
 			return out
 		}
 		return []byte{} // nothing to show it with: do nothing
 	case slices.Contains(listVerbs, verb):
+		// The empty list says nothing: the status line, which the reload's
+		// chain shows after the list, says why.
+		status, _, _ := s.Read(statusFile)
+		setStatus(s, env, sh.Warnings, joinStatus(string(status), msg))
+		return []byte{}
+	case verb == "text" && len(args) > 1 && args[1] == "query":
 		return []byte{}
 	}
 	return []byte(errs.OneLine(msg) + "\n")

@@ -279,3 +279,29 @@ func TestActionBindings(t *testing.T) {
 		t.Errorf("command keys %q", keys)
 	}
 }
+
+// A line's task is found as the final read finds it: by its key, else the
+// one task with its ID; never one copy of several picked at random.
+func TestFindLine(t *testing.T) {
+	at := func(id model.ID, folder model.FolderPath) model.TaskView {
+		var v model.TaskView
+		v.ID, v.Folder = id, folder
+		return v
+	}
+	tasks := []model.TaskView{at(1, "/a"), at(2, "/a"), at(2, "/b")}
+	for _, tc := range []struct {
+		line   shownLine
+		i      int
+		failed string
+	}{
+		{shownLine{Key: "1@/a", ID: 1}, 0, ""},
+		{shownLine{Key: "1@/moved", ID: 1}, 0, ""},
+		{shownLine{Key: "2@/b", ID: 2}, 2, ""},
+		{shownLine{Key: "2@/c", ID: 2}, -1, "has 2 copies, none in /c"},
+		{shownLine{Key: "3@/a", ID: 3}, -1, "is gone"},
+	} {
+		if i, failed := findLine(tasks, tc.line); i != tc.i || failed != tc.failed {
+			t.Errorf("%s: %d, %q, want %d, %q", tc.line.Key, i, failed, tc.i, tc.failed)
+		}
+	}
+}

@@ -825,7 +825,7 @@ Fuzzy-pick tasks, or folders, in an interactive [fzf](https://github.com/junegun
 
 **Synopsis:** `ftask pick [--folder <path>] [--recursive=false] [--scope <scope>] [--tags-any <tags>] [--tags-all <tags>] [--ids <ids> | --from <file> | --source <command>] [--query <text>] [--select-one] [--exit-zero] [--fields <names>]`, `ftask pick --folders [--folder <path>] [--recursive=false] [--query <text>] [--select-one] [--exit-zero]`, or `ftask pick -i <file>`.
 
-**Operation:** none of its own: [`list`](operations.md#list) for each load, and one write operation per target for each action. See [pick-spec.md, Command](pick-spec.md#command).
+**Operation:** none of its own: [`list`](operations.md#list) for each load and for `u`'s list, [`show`](operations.md#show) for `e` and `x`, and one write operation per target for each action. See [pick-spec.md, Command](pick-spec.md#command).
 
 **Arguments:** none.
 

@@ -1,6 +1,7 @@
 package pick
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -274,14 +275,58 @@ func TestHelperFailed(t *testing.T) {
 		if e == nil || !reported || out != "" {
 			t.Errorf("act, unwritable: %q, %v, %v", out, reported, e)
 		}
+		// After an action's status, as a reload's chain has it.
+		os.WriteFile(filepath.Join(tr.session, statusFile), []byte("✓ completed 1"), 0o600)
 		if out, reported, e = run("lines", "x"); e == nil || !reported || out != "" {
 			t.Errorf("lines: %q, %v, %v", out, reported, e)
 		}
-		if out, reported, e = run("text", "nope"); e == nil || !reported || out != "✗ usage: usage: unknown text\n" {
+		if out, reported, e = run("text", "nope"); e == nil || !reported || out != "✗ usage: unknown text\n" {
 			t.Errorf("text: %q, %v, %v", out, reported, e)
 		}
+		// The lines' failure is said in the status line, which the
+		// reload's chain shows after the list.
+		if f, _, _ := run("text", "footer"); f != "✓ completed 1 · ✗ usage: unexpected argument" {
+			t.Errorf("after lines: footer %q", f)
+		}
+		// The query's failure prints nothing: it would become the value a
+		// prompt applies.
+		query := filepath.Join(tr.session, textPrefix+"query")
+		os.Remove(query)
+		if err := os.Mkdir(query, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if out, reported, e = run("text", "query"); e == nil || !reported || out != "" {
+			t.Errorf("text query: %q, %v, %v", out, reported, e)
+		}
+		os.Remove(query)
 		helper("quit")
 	}})
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// An action that fails while opening a prompt leaves the session in command
+// mode, where fzf still is: the next Enter emits, never applies the prompt.
+func TestActFailedBackToCommand(t *testing.T) {
+	tr := newTestTree(t)
+	tr.run("create", map[string]any{"title": "one"})
+	tr.pick(map[string]any{}, fzfDoes{do: func(t *testing.T, helper func(...string) string) {
+		helper("command", "")
+		env := Env{Ops: tr.env, Sys: System{
+			Environ:    func() []string { return []string{SessionVar + "=" + tr.session} },
+			Executable: func() (string, error) { return "", errors.New("gone") },
+		}}
+		if _, reported, e := Helper([]string{"act", "t", "1@/"}, env); e == nil || !reported {
+			t.Fatalf("act: %v, %v", reported, e)
+		}
+		if b, _ := os.ReadFile(filepath.Join(tr.session, modeFile)); string(b) != modeCommand {
+			t.Errorf("mode %q", b)
+		}
+		if _, err := os.Stat(filepath.Join(tr.session, promptFile)); err == nil {
+			t.Error("prompt left open")
+		}
+		if got := helper("enter", "renew", "1@/"); got != "accept" {
+			t.Errorf("enter printed %q", got)
+		}
+	}})
+}

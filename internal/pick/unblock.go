@@ -21,10 +21,10 @@ func openUnblock(r *actionRun, targets []shownLine) {
 		r.status = "✗ u: " + errText(failed.Error)
 		return
 	}
-	lines, found := unblockChoices(l, t, !noColor(r.env.Sys.Environ()))
+	lines, why := unblockChoices(l, t, !noColor(r.env.Sys.Environ()))
 	switch {
-	case !found:
-		r.status = "✗ u: " + string(idNumber(t.ID)) + " is gone"
+	case why != "":
+		r.status = "✗ u: " + string(idNumber(t.ID)) + " " + why
 		return
 	case len(lines) == 0:
 		r.status = string(idNumber(t.ID)) + " has no blockers"
@@ -38,25 +38,12 @@ func openUnblock(r *actionRun, targets []shownLine) {
 
 // unblockChoices are the lines of t's blockers in the load: each blocker's
 // task, in pick's line order, then each ID with no task, ascending, keyed
-// by the ID alone. t is found as the final read finds a selected line
-// (pick-spec.md, Output): by its key, else as the one task with its ID,
-// wherever it now is, e.g. moved by another process. found is false if
-// the load has neither.
-func unblockChoices(l *Load, t shownLine, color bool) (lines []string, found bool) {
-	i := slices.IndexFunc(l.Tasks, func(v model.TaskView) bool { return key(v) == t.Key })
-	if i < 0 {
-		for j, v := range l.Tasks {
-			if v.ID != t.ID {
-				continue
-			}
-			if i >= 0 {
-				return nil, false // several copies, none in the line's folder
-			}
-			i = j
-		}
-	}
-	if i < 0 {
-		return nil, false
+// by the ID alone. t is found as findLine finds it, e.g. moved by another
+// process meanwhile; failed says why it isn't.
+func unblockChoices(l *Load, t shownLine, color bool) (lines []string, failed string) {
+	i, failed := findLine(l.Tasks, t)
+	if failed != "" {
+		return nil, failed
 	}
 	blockedBy := l.Tasks[i].BlockedBy
 	var missing []model.ID
@@ -72,7 +59,7 @@ func unblockChoices(l *Load, t shownLine, color bool) (lines []string, found boo
 	for _, id := range missing {
 		lines = append(lines, fmt.Sprintf("%d\t?  %d\t\t(no such task)", id, id))
 	}
-	return lines, true
+	return lines, ""
 }
 
 // removeBlockers removes the chosen blockers, by ID, from the target's

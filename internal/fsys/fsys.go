@@ -7,7 +7,7 @@ import (
 
 // FS opens roots, and makes the few calls that happen outside one: init's
 // creation of the root and the config directory, reading the config, and
-// checking what the root path leads to.
+// checking what the root path leads to; and pick's reads of notes files.
 type FS interface {
 	// OpenRoot opens the directory at path, following symlinks. Every later
 	// call through the Root is relative to this one resolution.
@@ -16,8 +16,8 @@ type FS interface {
 	Mkdir(path string, perm fs.FileMode) error
 	// MkdirAll creates the config directory and any missing parents.
 	MkdirAll(path string, perm fs.FileMode) error
-	// ReadFile reads the config file, following symlinks: a config is often
-	// a symlink into a dotfiles checkout.
+	// ReadFile reads a file outside any root, following symlinks: the config
+	// (often a symlink into a dotfiles checkout), and pick's notes files.
 	ReadFile(path string) ([]byte, error)
 	// Stat follows symlinks: whether the root path leads to a directory
 	// (init's check of an existing root).

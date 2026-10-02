@@ -22,26 +22,30 @@ func TestUnblockChoices(t *testing.T) {
 		tv{id: 3, folder: "/b", r: model.Ready}.view(),
 		tv{id: 4, folder: "/", r: model.Ready, priority: p(1)}.view(),
 	}}
-	lines, found := unblockChoices(l, shownLine{Key: "9@/", ID: 9}, false)
+	lines, why := unblockChoices(l, shownLine{Key: "9@/", ID: 9}, false)
 	var ks []string
 	for _, line := range lines {
 		k, _, _ := strings.Cut(line, "\t")
 		ks = append(ks, k)
 	}
-	if !found || !slices.Equal(ks, []string{"4@/", "3@/a", "3@/b", "2@/", "50", "99"}) {
-		t.Fatalf("%v: %q", found, ks)
+	if why != "" || !slices.Equal(ks, []string{"4@/", "3@/a", "3@/b", "2@/", "50", "99"}) {
+		t.Fatalf("%s: %q", why, ks)
 	}
 	if lines[4] != "50\t?  50\t\t(no such task)" {
 		t.Errorf("missing line %q", lines[4])
 	}
 	// Moved: the one task with its ID, wherever it now is.
-	if moved, found := unblockChoices(l, shownLine{Key: "9@/gone", ID: 9}, false); !found || !slices.Equal(moved, lines) {
-		t.Errorf("moved: %v, %q", found, moved)
+	if moved, why := unblockChoices(l, shownLine{Key: "9@/gone", ID: 9}, false); why != "" || !slices.Equal(moved, lines) {
+		t.Errorf("moved: %s, %q", why, moved)
 	}
-	// No task with its ID, or several copies, none in its folder.
-	for _, sl := range []shownLine{{Key: "8@/", ID: 8}, {Key: "3@/c", ID: 3}} {
-		if _, found := unblockChoices(l, sl, false); found {
-			t.Errorf("%s: found a target the load hasn't", sl.Key)
+	// No task with its ID, or several copies, none in its folder: each
+	// said as it is.
+	for _, tc := range []struct {
+		sl   shownLine
+		want string
+	}{{shownLine{Key: "8@/", ID: 8}, "is gone"}, {shownLine{Key: "3@/c", ID: 3}, "has 2 copies, none in /c"}} {
+		if _, why := unblockChoices(l, tc.sl, false); why != tc.want {
+			t.Errorf("%s: %q, want %q", tc.sl.Key, why, tc.want)
 		}
 	}
 }

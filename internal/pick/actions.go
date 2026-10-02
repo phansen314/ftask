@@ -196,6 +196,9 @@ func act(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 	r := &actionRun{s: s, env: env}
 	a.run(r, targets)
 	if r.err != nil {
+		// fzf stays in command mode, the only one act runs in: a prompt or
+		// choose list half opened must not take the next Enter.
+		backToCommand(s)
 		return nil, r.err
 	}
 	if r.next != "" {
@@ -348,9 +351,8 @@ func (r *actionRun) call(id model.ID, op string, in *jsonio.Object, done, what s
 	return out
 }
 
-// current is t's task as it now is, read fresh by ID: of several copies,
-// the one in t's line's folder, else the first. failed says why there is
-// none.
+// current is t's task as it now is, read fresh by ID, found as findLine
+// finds it. failed says why there is none.
 func current(env Env, t shownLine) (v model.TaskView, failed string) {
 	in := &jsonio.Object{}
 	in.Set("id", idNumber(t.ID))
@@ -359,8 +361,35 @@ func current(env Env, t shownLine) (v model.TaskView, failed string) {
 		return model.TaskView{}, errText(out.Error)
 	}
 	views := out.Result.(ops.ShowOutput).Tasks
-	i := max(0, slices.IndexFunc(views, func(v model.TaskView) bool { return key(v) == t.Key }))
+	i, failed := findLine(views, t)
+	if failed != "" {
+		return model.TaskView{}, failed
+	}
 	return views[i], ""
+}
+
+// findLine is the index in tasks of t's task, as the final read finds a
+// selected line (pick-spec.md, Output): by its key, else the one task with
+// its ID, wherever it now is. failed says why there is none: no task with
+// its ID, or several copies, none in the line's folder.
+func findLine(tasks []model.TaskView, t shownLine) (i int, failed string) {
+	if i = slices.IndexFunc(tasks, func(v model.TaskView) bool { return key(v) == t.Key }); i >= 0 {
+		return i, ""
+	}
+	copies := 0
+	for j, v := range tasks {
+		if v.ID == t.ID {
+			i, copies = j, copies+1
+		}
+	}
+	switch {
+	case copies == 0:
+		return -1, "is gone"
+	case copies > 1:
+		_, folder, _ := strings.Cut(t.Key, "@")
+		return -1, fmt.Sprintf("has %d copies, none in %s", copies, folder)
+	}
+	return i, ""
 }
 
 // idNumber is id as an operation's input holds it.
@@ -449,6 +478,14 @@ func setStatus(s *Session, env Env, warnings int, status string) ([]byte, *errs.
 	return []byte("transform-footer(" + helperLine(exe, "text", "footer") + ")"), nil
 }
 
+// backToCommand puts the session back in command mode after a failure,
+// as best it can: it is already failing.
+func backToCommand(s *Session) {
+	s.Delete(promptFile)
+	s.Delete(chooseFile)
+	s.Write(modeFile, []byte(modeCommand))
+}
+
 // clearMarks is out, an action's ending without a reload, after clearing
 // the marks: they are cleared after every action (pick-spec.md, Modes).
 func clearMarks(out []byte, e *errs.Error) ([]byte, *errs.Error) {
@@ -527,7 +564,11 @@ func firstFew(items []string) string {
 // errText is an error as the status line shows it: its kind, its rule if
 // any, and its message.
 func errText(e *errs.Error) string {
-	return kindText(e) + ": " + e.Message
+	msg := e.Message
+	if e.Kind == errs.KindUsage {
+		msg = strings.TrimPrefix(msg, "usage: ") // the kind says it already
+	}
+	return kindText(e) + ": " + msg
 }
 
 // kindText is an error's kind, with its rule if it has one: "conflict
