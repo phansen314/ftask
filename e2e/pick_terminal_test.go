@@ -8,8 +8,11 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // The picker end to end, in a terminal, against each fzf under test
@@ -1003,6 +1006,41 @@ func TestPickSource(t *testing.T) {
 			p.result()
 		})
 
+		// A later run that takes too long is killed with its process
+		// group, the list kept; the limit is shortened by a test hook.
+		t.Run("timeout", func(t *testing.T) {
+			dir := t.TempDir()
+			script := filepath.Join(dir, "source")
+			body := "#!/bin/sh\nif [ -e ran ]; then\n\tsleep 30 &\n\techo $! > bg.pid\n\tsleep 30\nfi\ntouch ran\n'" + binary + "' list --fields id\n"
+			if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			cmd := tr.cmd("pick", "--source", script)
+			cmd.Dir = dir
+			cmd.Env = append(cmd.Env, "FTASK_E2E_SOURCE_LIMIT=300ms", "FTASK_PICK_OPTS=--preview-window=hidden")
+			p := startPick(t, fzfDir, cmd)
+			total := p.loaded().TotalCount
+			p.command()
+			start := time.Now()
+			p.send("r")
+			p.waitScreen("✗ source: timed out after 10s")
+			if d := time.Since(start); d > 5*time.Second {
+				t.Errorf("timed out after %v", d)
+			}
+			if st := p.state(); st.TotalCount != total {
+				t.Errorf("list changed: %+v", st)
+			}
+			// The command's background child went with it.
+			b, err := os.ReadFile(filepath.Join(dir, "bg.pid"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			pid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+			p.waitFor("the background child gone", func() bool { return syscall.Kill(pid, 0) == syscall.ESRCH })
+			p.send(keyEsc)
+			p.result()
+		})
+
 		t.Run("first run fails", func(t *testing.T) {
 			p := startPick(t, fzfDir, tr.cmd("pick", "--source", "echo nope; echo 'no such thing' >&2"))
 			r := p.result()
@@ -1027,12 +1065,13 @@ func TestPickFolders(t *testing.T) {
 		}
 		folders := func(r result) string {
 			t.Helper()
-			out := decode(t, r)
+			envelope(t, r)
 			var res struct {
+				OK     bool            `json:"ok"`
 				Result json.RawMessage `json:"result"`
 			}
 			json.Unmarshal([]byte(r.stdout), &res)
-			if r.code != 0 || !out.OK {
+			if r.code != 0 || !res.OK {
 				t.Errorf("exit %d: %s", r.code, r.stdout)
 			}
 			return string(res.Result)
@@ -1065,6 +1104,18 @@ func TestPickFolders(t *testing.T) {
 		p.send(keyEnter)
 		if got := folders(p.result()); got != `{"folders":["/home","/trips"],"missing":[],"actions":[]}` {
 			t.Errorf("marks: %s", got)
+		}
+
+		// Chosen, then deleted by another process: missing.
+		p = startPick(t, fzfDir, tr.cmd("pick", "--folders"))
+		p.loaded()
+		p.setQuery("hom", 1)
+		if r := run(t, tr.cmd("delete-folder", "/home")); r.code != 0 {
+			t.Fatal(r.stdout)
+		}
+		p.send(keyEnter)
+		if got := folders(p.result()); got != `{"folders":[],"missing":["/home"],"actions":[]}` {
+			t.Errorf("missing: %s", got)
 		}
 
 		p = startPick(t, fzfDir, tr.cmd("pick", "--folders"))

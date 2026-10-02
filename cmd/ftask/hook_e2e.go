@@ -25,6 +25,9 @@ import (
 //   - FTASK_E2E_HOLD: once the write lock is taken, write "held\n" to stderr
 //     and wait for EOF on fd 3 before going on. With FTASK_E2E_HOLD_GC, force
 //     garbage collections first, to show the lock survives them.
+//   - FTASK_E2E_SOURCE_LIMIT=<duration>: pick's live source is killed after
+//     this, not 10s, on a reload, so e2e can time it out quickly. The
+//     status line still names the real limit.
 func init() {
 	envHook = func(env *cli.Env) {
 		if os.Getenv("FTASK_E2E_PANIC") != "" {
@@ -50,6 +53,19 @@ func init() {
 		}
 		if hooks != nil {
 			env.Ops.FS = fsys.Fault{FS: env.Ops.FS, Hook: fsys.Hooks(hooks...)}
+		}
+		if v := os.Getenv("FTASK_E2E_SOURCE_LIMIT"); v != "" {
+			d, err := time.ParseDuration(v)
+			if err != nil || d <= 0 {
+				panic(fmt.Sprintf("FTASK_E2E_SOURCE_LIMIT: %q", v))
+			}
+			run := env.Pick.RunSource
+			env.Pick.RunSource = func(command string, environ []string, limit time.Duration) ([]byte, []byte, bool, error) {
+				if limit > 0 {
+					limit = d
+				}
+				return run(command, environ, limit)
+			}
 		}
 	}
 }
