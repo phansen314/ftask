@@ -755,6 +755,62 @@ fi
 	})
 }
 
+// b end to end, the first choose list: it swaps in the candidate
+// blockers, which typing filters and Tab marks, through a filter; Enter
+// blocks the target with them, in the list's order, and goes back to the
+// task list in command mode, input hidden; a task the target already
+// reaches is not offered; Esc cancels.
+func TestPickBlock(t *testing.T) {
+	eachFzf(t, func(t *testing.T, fzfDir string) {
+		tr := pickTree(t)
+		p := startPick(t, fzfDir, tr.cmd("pick", "--fields", "id,blocked_by"))
+		p.loaded()
+		p.command()
+		p.send("G")
+		p.waitState("the cursor on 3", func(st fzfState) bool { return lineKey(st.Current) == "3@/trips" })
+		p.send("b")
+		p.waitScreen("blockers of 3> ")
+		p.waitScreen("[blockers of 3]")
+		st := p.waitState("the choose list", func(st fzfState) bool { return st.TotalCount == 2 && !st.Reading })
+		if len(st.Selected) != 0 || lineKey(st.Current) != "1@/trips" {
+			t.Fatalf("choose list: %+v", st)
+		}
+		p.setQuery("pass", 1)
+		p.send(keyTab)
+		p.waitState("2 marked", func(st fzfState) bool { return len(st.Selected) == 1 })
+		p.send(keyCtrlU)
+		p.waitState("the filter cleared", func(st fzfState) bool { return st.Query == "" && st.MatchCount == 2 })
+		p.send(keyTab)
+		p.waitState("1 marked too", func(st fzfState) bool { return len(st.Selected) == 2 })
+		p.send(keyEnter)
+		p.waitScreen("✓ blocked 3")
+		// Back on the target, which is blocked now, so last.
+		p.waitState("the task list, on 3", func(st fzfState) bool {
+			return st.TotalCount == 3 && len(st.Selected) == 0 && lineKey(st.Current) == "3@/trips"
+		})
+		p.waitFor("the input hidden", func() bool { return !strings.Contains(p.screen(), "> ") })
+		p.waitScreen("◐  3")
+
+		// 3 is blocked by 1, so 3 isn't offered to block 1; Esc cancels.
+		p.send("g")
+		p.waitState("the cursor on 1", func(st fzfState) bool { return lineKey(st.Current) == "1@/trips" })
+		p.send("b")
+		p.waitScreen("blockers of 1> ")
+		p.waitState("2 alone", func(st fzfState) bool {
+			return st.TotalCount == 1 && !st.Reading && lineKey(st.Current) == "2@/trips"
+		})
+		p.send(keyEsc)
+		p.waitState("the task list, on 1", func(st fzfState) bool { return st.TotalCount == 3 && lineKey(st.Current) == "1@/trips" })
+		p.waitFor("the input hidden", func() bool { return !strings.Contains(p.screen(), "> ") })
+		p.send(keyEsc)
+		r := p.result()
+		out := decode(t, r)
+		if r.code != 0 || len(out.Result.Actions) != 1 || !strings.Contains(r.stdout, `"input":{"id":3,"blockers":[1,2]}`) {
+			t.Errorf("exit %d: %s", r.code, r.stdout)
+		}
+	})
+}
+
 // pick in a pipeline: --from reads an upstream envelope, of each accepted
 // shape, while the picker draws on the terminal; stdout goes downstream.
 // The rejections end pick before the picker opens (pick-spec.md, Accepted

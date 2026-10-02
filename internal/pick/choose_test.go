@@ -67,7 +67,7 @@ func TestChoose(t *testing.T) {
 		helper("command", "o")
 
 		got := helper("act", "z", "1@/")
-		want := "show-input+unbind(" + keys + ")+transform-prompt('/bin/ftask' __pick text 'prompt')+change-query()+clear-selection+reload-sync('/bin/ftask' __pick choices)+transform-header('/bin/ftask' __pick text 'header')"
+		want := "show-input+unbind(" + keys + ")+transform-prompt('/bin/ftask' __pick text 'prompt')+change-query()+clear-selection+rebind(load)+reload-sync('/bin/ftask' __pick choices)+transform-header('/bin/ftask' __pick text 'header')"
 		if got != want {
 			t.Errorf("z printed\n%q\nwant\n%q", got, want)
 		}
@@ -90,7 +90,8 @@ func TestChoose(t *testing.T) {
 		if f, q, h := text("footer"), text("query"), text("header"); f != "✓ blocked 1" || q != "o" || !strings.HasPrefix(h, "[cmd] query: o\n") {
 			t.Errorf("footer %q, query %q, header %q", f, q, h)
 		}
-		if got := helper("on-load"); got != "hide-input+unbind(load)" {
+		// Back on the target, 1, now blocked, so after the ready 2 and 3.
+		if got := helper("on-load"); got != "hide-input+pos(3)+unbind(load)" {
 			t.Errorf("on-load %q", got)
 		}
 

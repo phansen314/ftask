@@ -64,6 +64,7 @@ var help = [][2]string{
 	{"p", "priority: a number, or null for none"},
 	{"t", "tags: a b to set, +a -b to change, - for none"},
 	{"x", "edit title, priority, tags and extra as JSON"},
+	{"b", "block: choose blockers (tab marks several)"},
 	{"s", "scope: ready, open, all"},
 	{"r", "reload"},
 	{"j k", "down, up"},

@@ -60,6 +60,9 @@ func (r *actionRun) openChoose(key, label string, lines []string, single bool, t
 		func() *errs.Error { return r.s.Write(choicesFile, []byte(b.String())) },
 		func() *errs.Error { return r.s.Write(modeFile, []byte(modeChoose)) },
 		func() *errs.Error { return r.s.Write(textPrefix+"prompt", []byte(label)) },
+		// The cursor starts on the first line, not where it was in the
+		// task list.
+		func() *errs.Error { return r.s.Write(cursorFile, []byte("1")) },
 	} {
 		if r.err = step(); r.err != nil {
 			return
@@ -83,7 +86,7 @@ func (r *actionRun) openChoose(key, label string, lines []string, single bool, t
 	// while it is hidden. Marks are cleared on every switch of lists.
 	r.next = "show-input+unbind(" + unbind + ")" +
 		"+transform-prompt(" + helperLine(exe, "text", "prompt") + ")" +
-		"+change-query()+clear-selection+reload-sync(" + helperLine(exe, "choices") + ")+" + header
+		"+change-query()+clear-selection+rebind(load)+reload-sync(" + helperLine(exe, "choices") + ")+" + header
 }
 
 // choicesVerb prints the open choose list's lines, for reload-sync.
@@ -127,6 +130,10 @@ func applyChoose(s *Session, keys []string, env Env) ([]byte, *errs.Error) {
 	if status == "" {
 		status = statusLine(r.outcomes)
 	}
+	// Back on the target, if it's still in the list.
+	if len(st.Targets) > 0 {
+		r.returnTo = st.Targets[0].Key
+	}
 	return backToTasks(s, env, r, st.Saved, status)
 }
 
@@ -153,6 +160,12 @@ func cancelChoose(s *Session, env Env) ([]byte, *errs.Error) {
 	var st chooseState
 	if e := readJSON(s, chooseFile, &st); e != nil {
 		return nil, e
+	}
+	// Back on the target.
+	if len(st.Targets) > 0 {
+		if _, e := armCursor(s, st.Targets[0].Key); e != nil {
+			return nil, e
+		}
 	}
 	return cancelToTasks(s, env, st.Saved)
 }

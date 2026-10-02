@@ -49,7 +49,7 @@ var actions []action
 // init fills actions, which some actions' own code reads (the command
 // keys, for a prompt).
 func init() {
-	actions = []action{completeAction, editAction, newAction, priorityAction, tagsAction, xAction, scopeAction, reloadAction}
+	actions = []action{completeAction, editAction, newAction, priorityAction, tagsAction, xAction, blockAction, scopeAction, reloadAction}
 }
 
 func lookupAction(key string) (action, bool) {
@@ -271,8 +271,10 @@ type actionRun struct {
 	// restore it.
 	clearQuery bool
 	// cursorTo is the key of the line the cursor goes to once the reload
-	// is in, if the line is in it.
+	// is in, if the line is in it; the status line says if it isn't.
 	cursorTo string
+	// returnTo is as cursorTo, but a line not in the list goes unsaid.
+	returnTo string
 	// err is a session failure, which ends the action.
 	err *errs.Error
 }
@@ -344,6 +346,9 @@ func (r *actionRun) call(id model.ID, op string, in *jsonio.Object, done, what s
 func idNumber(id model.ID) json.Number {
 	return json.Number(strconv.FormatInt(int64(id), 10))
 }
+
+// jsonNumberOf is an integer's text as an operation's input holds it.
+func jsonNumberOf(text string) json.Number { return json.Number(text) }
 
 // loggedActions is the action log, for the output: every entry, a null
 // output included.

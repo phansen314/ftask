@@ -182,6 +182,10 @@ func backToTasks(s *Session, env Env, r *actionRun, query, status string) ([]byt
 		case !moved:
 			status += " (not in this list)"
 		}
+	} else if r.returnTo != "" {
+		if _, e := armCursor(s, r.returnTo); e != nil {
+			return nil, e
+		}
 	}
 	footer, e := setStatus(s, env, warnings, status)
 	if e != nil {
