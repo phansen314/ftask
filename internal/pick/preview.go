@@ -137,6 +137,10 @@ func previewVerb(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 	case len(args) > 1:
 		return nil, errs.Usage([]errs.UsageProblem{{Argument: &args[1], Reason: "unexpected argument"}})
 	}
+	// A folder's line, in a choose list of folders: its path.
+	if strings.HasPrefix(args[0], "/") {
+		return []byte(args[0] + "\n"), nil
+	}
 	b, ok, e := s.Read(previewsFile)
 	var all map[string]previewEntry
 	if e != nil || !ok || json.Unmarshal(b, &all) != nil {

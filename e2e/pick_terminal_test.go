@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -848,6 +849,59 @@ func TestPickUnblock(t *testing.T) {
 		out := decode(t, r)
 		if r.code != 0 || len(out.Result.Actions) != 2 || !strings.Contains(r.stdout, `"input":{"id":3,"blockers":[1]}`) ||
 			!strings.Contains(r.stdout, `"input":{"id":3,"blockers":[2]}`) {
+			t.Errorf("exit %d: %s", r.code, r.stdout)
+		}
+	})
+}
+
+// m and f end to end: single-choice lists of folders, where Tab doesn't
+// mark; typing filters them. m moves the task, and the cursor follows it;
+// f narrows the list to the folder chosen.
+func TestPickMoveAndFolder(t *testing.T) {
+	eachFzf(t, func(t *testing.T, fzfDir string) {
+		tr := pickTree(t)
+		for _, f := range []string{"/trips/japan", "/home"} {
+			if r := run(t, tr.cmd("create-folder", f)); r.code != 0 {
+				t.Fatal(r.stdout)
+			}
+		}
+		p := startPick(t, fzfDir, tr.cmd("pick", "--fields", "id,folder"))
+		p.loaded()
+		p.command()
+		// 3, on the last line: the cursor finds it after the move only
+		// by its ID, its key changed.
+		p.send("G")
+		p.waitState("the cursor on 3", func(st fzfState) bool { return lineKey(st.Current) == "3@/trips" })
+		p.send("m")
+		p.waitScreen("move to> ")
+		p.waitScreen("[move to]")
+		p.waitState("the folders", func(st fzfState) bool { return st.TotalCount == 4 && !st.Reading && lineKey(st.Current) == "/" })
+		p.send(keyTab)
+		p.setQuery("jap", 1)
+		if st := p.state(); len(st.Selected) != 0 {
+			t.Errorf("Tab marked in a single-choice list: %+v", st)
+		}
+		p.send(keyEnter)
+		p.waitScreen("✓ moved 3")
+		p.waitState("on the moved task", func(st fzfState) bool { return lineKey(st.Current) == "3@/trips/japan" })
+		p.waitFor("the input hidden", func() bool { return !strings.Contains(p.screen(), "> ") })
+
+		p.send("f")
+		p.waitScreen("folder> ")
+		p.waitState("the folders", func(st fzfState) bool { return st.TotalCount == 4 && !st.Reading })
+		p.setQuery("jap", 1)
+		p.send(keyEnter)
+		p.waitScreen("✓ folder: /trips/japan")
+		p.waitState("the folder's one task", func(st fzfState) bool {
+			return st.TotalCount == 1 && lineKey(st.Current) == "3@/trips/japan"
+		})
+		// The header's scope line: the path alone, then the preview.
+		header := regexp.MustCompile(`(?m)^ +/trips/japan +│`)
+		p.waitFor("the header", func() bool { return header.MatchString(p.screen()) })
+		p.send(keyEsc)
+		r := p.result()
+		out := decode(t, r)
+		if r.code != 0 || len(out.Result.Actions) != 1 || !strings.Contains(r.stdout, `"input":{"id":3,"to":"/trips/japan"}`) {
 			t.Errorf("exit %d: %s", r.code, r.stdout)
 		}
 	})

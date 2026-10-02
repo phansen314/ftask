@@ -1,6 +1,7 @@
 package pick
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 
@@ -218,18 +219,30 @@ func cancelToTasks(s *Session, env Env, query string) ([]byte, *errs.Error) {
 
 // armCursor records the position of the line with key in the last load,
 // for on-load to move the cursor to once fzf shows it (pick-spec.md,
-// Actions). It reports false if the line isn't there.
+// Actions); or, a task moved since, the one line with key's ID. It
+// reports false if there is neither.
 func armCursor(s *Session, key string) (bool, *errs.Error) {
 	var sh shown
 	if e := readJSON(s, shownFile, &sh); e != nil {
 		return false, e
 	}
-	for i, l := range sh.Lines {
-		if l.Key == key {
-			return true, s.Write(cursorFile, []byte(strconv.Itoa(i+1)))
+	at := slices.IndexFunc(sh.Lines, func(l shownLine) bool { return l.Key == key })
+	if at < 0 {
+		id, _, _ := strings.Cut(key, "@")
+		for i, l := range sh.Lines {
+			if string(idNumber(l.ID)) != id {
+				continue
+			}
+			if at >= 0 {
+				return false, nil // two copies: neither
+			}
+			at = i
 		}
 	}
-	return false, nil
+	if at < 0 {
+		return false, nil
+	}
+	return true, s.Write(cursorFile, []byte(strconv.Itoa(at+1)))
 }
 
 // cancelPrompt is Esc in prompt mode: back to command mode, with the
