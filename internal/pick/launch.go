@@ -58,16 +58,26 @@ func (pk picker) args() []string {
 		"--tabstop", "1",
 		"--prompt", string(pk.scope.Readiness)+"> ",
 		"--query", pk.query,
-		"--header", pk.header(),
+		"--header", header(false, "", pk.scopeLine()),
 		"--preview", pk.helper("preview")+" {1}",
 		"--bind", "enter:transform:"+pk.helper("enter")+" {+1}",
-		// Until command mode (#19), Esc quits, as it will in command mode.
-		"--bind", "esc:transform:"+pk.helper("quit"),
+		"--bind", "esc:transform:"+pk.helper("esc")+" {q}",
+		"--bind", "ctrl-space:transform:"+pk.helper("command")+" {q}",
 		"--bind", "ctrl-d:delete-char",
 		"--bind", "ctrl-/:toggle-preview",
+		// Command mode's keys, unbound at start: they type in insert mode.
+		"--bind", "j:down",
+		"--bind", "k:up",
+		"--bind", "g:first",
+		"--bind", "G:last",
+		"--bind", "space:toggle+down",
+		"--bind", "q:transform:"+pk.helper("quit"),
+		"--bind", "i:transform:"+pk.helper("insert"),
+		"--bind", "/:transform:"+pk.helper("insert"),
+		"--bind", "?:preview:"+pk.helper("help"),
 		// load is bound from the start, so that a callback can rebind it
 		// to move the cursor once a reload is in (pick-spec.md, Actions).
-		"--bind", "start:unbind(load)",
+		"--bind", "start:unbind(load,"+strings.Join(commandKeys, ",")+")",
 		"--bind", "load:transform:"+pk.helper("on-load"),
 	)
 	if pk.warnings > 0 {
@@ -78,15 +88,22 @@ func (pk picker) args() []string {
 
 // helper is the sh command line of a helper verb, every word quoted.
 func (pk picker) helper(verb string, args ...string) string {
-	words := []string{shQuote(pk.exe), HelperCommand, verb}
+	return helperLine(pk.exe, verb, args...)
+}
+
+// helperLine is the sh command line that runs exe's helper verb with args,
+// every word quoted.
+func helperLine(exe, verb string, args ...string) string {
+	words := []string{shQuote(exe), HelperCommand, verb}
 	for _, a := range args {
 		words = append(words, shQuote(a))
 	}
 	return strings.Join(words, " ")
 }
 
-// header is the scope folder and the filters in effect, then the keys.
-func (pk picker) header() string {
+// scopeLine is the header's line for the scope: the scope folder and the
+// filters in effect.
+func (pk picker) scopeLine() string {
 	s := pk.scope
 	parts := []string{string(s.Folder)}
 	if !s.Recursive {
@@ -104,7 +121,7 @@ func (pk picker) header() string {
 	if pk.missing > 0 {
 		parts = append(parts, plural(pk.missing, "given ID")+" not found")
 	}
-	return strings.Join(parts, " · ") + "\n" + "enter: pick · tab: mark · ctrl-c: cancel"
+	return strings.Join(parts, " · ")
 }
 
 func tags(ts []model.Tag) string {

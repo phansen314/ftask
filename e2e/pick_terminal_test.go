@@ -95,6 +95,20 @@ func (p *picker) setQuery(q string, n int) fzfState {
 	})
 }
 
+// command enters command mode with Esc, and waits for its header.
+func (p *picker) command() {
+	p.t.Helper()
+	p.send(keyEsc)
+	p.waitScreen("[cmd]")
+}
+
+// quit quits from insert mode: Esc, then Esc again in command mode.
+func (p *picker) quit() {
+	p.t.Helper()
+	p.command()
+	p.send(keyEsc)
+}
+
 // Enter, quit and cancel, and the edges of each: Enter or quit with no line
 // to pick gives an empty selection, not an error. FZF_DEFAULT_OPTS that
 // would end fzf without a callback changes none of it.
@@ -133,17 +147,25 @@ func TestPickOutcomes(t *testing.T) {
 			p.send(keyEnter)
 		}, []int64{}},
 		{"enter on an empty list", true, func(p *picker) { p.send(keyEnter) }, []int64{}},
-		{"quit", false, func(p *picker) { p.send(keyEsc) }, []int64{}},
+		{"quit", false, func(p *picker) { p.quit() }, []int64{}},
+		{"quit with q", false, func(p *picker) {
+			p.command()
+			p.send("q")
+		}, []int64{}},
+		{"enter in command mode", false, func(p *picker) {
+			p.command()
+			p.send(keyEnter)
+		}, []int64{1}},
 		{"quit with marks", false, func(p *picker) {
 			p.send(keyTab)
 			p.waitState("1 marked", func(st fzfState) bool { return len(st.Selected) == 1 })
-			p.send(keyEsc)
+			p.quit()
 		}, []int64{}},
 		{"quit, query matching nothing", false, func(p *picker) {
 			p.setQuery("zzz", 0)
-			p.send(keyEsc)
+			p.quit()
 		}, []int64{}},
-		{"quit on an empty list", true, func(p *picker) { p.send(keyEsc) }, []int64{}},
+		{"quit on an empty list", true, func(p *picker) { p.quit() }, []int64{}},
 		{"cancel", false, func(p *picker) { p.send(keyCtrlC) }, nil},
 		{"cancel on an empty list", true, func(p *picker) { p.send(keyCtrlC) }, nil},
 	}
@@ -191,7 +213,8 @@ func TestPickOutcomes(t *testing.T) {
 }
 
 // Text from data is shown literally and never run: a title, notes with a
-// newline, and the initial query, each holding fzf action syntax
+// newline, and the initial query, in the input line and command mode's
+// header, each holding fzf action syntax
 // (pick-spec.md, fzf contract: No data in action text).
 func TestPickHostileText(t *testing.T) {
 	eachFzf(t, func(t *testing.T, fzfDir string) {
@@ -217,6 +240,11 @@ func TestPickHostileText(t *testing.T) {
 			s := p.screen()
 			return strings.Count(s, hostile) >= 3 && strings.Contains(s, "last")
 		})
+		// Command mode's header shows the hidden query.
+		p.command()
+		p.waitScreen("[cmd] query: " + hostile)
+		p.send("i")
+		p.waitScreen("open> " + hostile)
 		p.post("change-query()")
 		p.waitState("both lines", func(st fzfState) bool { return st.MatchCount == 2 })
 		p.send(keyEnter)
@@ -226,6 +254,87 @@ func TestPickHostileText(t *testing.T) {
 		}
 		if _, err := os.Stat(filepath.Join(dir, "X")); !os.IsNotExist(err) {
 			t.Errorf("hostile text ran: %v", err)
+		}
+	})
+}
+
+// The modes (pick-spec.md, Modes): in insert mode every key types; command
+// mode hides the query, keeps it filtering, ignores keys it doesn't bind,
+// even those that would edit the query, and has its own keys.
+func TestPickModes(t *testing.T) {
+	eachFzf(t, func(t *testing.T, fzfDir string) {
+		tr := pickTree(t)
+		p := startPick(t, fzfDir, tr.cmd("pick", "--fields", "id"))
+		p.loaded()
+		cursorOn := func(i int) {
+			t.Helper()
+			p.waitState(fmt.Sprintf("the cursor on line %d", i), func(st fzfState) bool { return st.Current != nil && st.Current.Index == i })
+		}
+
+		// Insert mode: command mode's keys type.
+		p.setQuery("jkgGq ?/i", 0)
+		p.send(keyCtrlU)
+		p.setQuery("s", 3)
+
+		p.command()
+		p.waitScreen("[cmd] query: s")
+		if strings.Contains(p.screen(), "open> ") {
+			t.Errorf("input line shown in command mode:\n%s", p.screen())
+		}
+		// Keys command mode doesn't bind, and those bound to edit the
+		// query, do nothing while it is hidden; k after them shows they
+		// were handled.
+		p.send("xz\x7f" + keyCtrlU + keyCtrlD + "\x17" + "k")
+		cursorOn(1)
+		if st := p.state(); st.Query != "s" || st.MatchCount != 3 {
+			t.Errorf("query %q matching %d", st.Query, st.MatchCount)
+		}
+		p.send("G")
+		cursorOn(2)
+		p.send("g")
+		cursorOn(0)
+		p.send("k")
+		cursorOn(1)
+		p.send("j")
+		cursorOn(0)
+
+		// Marks: space, and Tab.
+		p.send(" ")
+		p.waitState("a mark", func(st fzfState) bool { return len(st.Selected) == 1 })
+		p.send("k")
+		cursorOn(1)
+		p.send(keyTab)
+		p.waitState("two marks", func(st fzfState) bool { return len(st.Selected) == 2 })
+
+		// ? shows the keys in the preview until the cursor moves. Tab
+		// moved down after marking, to line 0, so k goes to 2's line.
+		p.send("?")
+		p.waitScreen("until the cursor moves")
+		p.send("k")
+		p.waitFor("the help gone", func() bool {
+			s := p.screen()
+			return !strings.Contains(s, "until the cursor moves") && strings.Contains(s, "#2 Renew passport")
+		})
+
+		// i back to insert mode: the query shows, and keys edit and type.
+		p.send("i")
+		p.waitFor("insert mode", func() bool {
+			s := p.screen()
+			return strings.Contains(s, "open> s") && !strings.Contains(s, "[cmd]")
+		})
+		p.send(keyCtrlU)
+		p.setQuery("j", 0)
+		// ctrl-space to command mode, / back.
+		p.send("\x00")
+		p.waitScreen("[cmd] query: j")
+		p.send("/")
+		p.waitScreen("open> j")
+		p.send(keyCtrlU)
+		p.waitState("the query cleared", func(st fzfState) bool { return st.Query == "" && st.MatchCount == 3 })
+
+		p.send(keyEnter)
+		if got := picked(t, p.result()); !slices.Equal(got, []int64{1, 2}) {
+			t.Errorf("picked %v", got)
 		}
 	})
 }
@@ -265,7 +374,7 @@ func TestPickPipelines(t *testing.T) {
 				if st.TotalCount != a.lines {
 					t.Fatalf("%d lines, want %d; screen:\n%s", st.TotalCount, a.lines, p.screen())
 				}
-				p.send(keyEsc)
+				p.quit()
 				if got := picked(t, p.result()); len(got) != 0 {
 					t.Errorf("picked %v", got)
 				}

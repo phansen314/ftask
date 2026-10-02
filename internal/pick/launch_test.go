@@ -28,13 +28,23 @@ func TestPickerArgs(t *testing.T) {
 		"--tiebreak", "index", "--tabstop", "1",
 		"--prompt", "open> ",
 		"--query", "renew pass",
-		"--header", "/\nenter: pick · tab: mark · ctrl-c: cancel",
+		"--header", "/\nenter: pick · tab: mark · esc: commands · ctrl-c: cancel",
 		"--preview", "'/opt/my ftask/ftask' __pick preview {1}",
 		"--bind", "enter:transform:'/opt/my ftask/ftask' __pick enter {+1}",
-		"--bind", "esc:transform:'/opt/my ftask/ftask' __pick quit",
+		"--bind", "esc:transform:'/opt/my ftask/ftask' __pick esc {q}",
+		"--bind", "ctrl-space:transform:'/opt/my ftask/ftask' __pick command {q}",
 		"--bind", "ctrl-d:delete-char",
 		"--bind", "ctrl-/:toggle-preview",
-		"--bind", "start:unbind(load)",
+		"--bind", "j:down",
+		"--bind", "k:up",
+		"--bind", "g:first",
+		"--bind", "G:last",
+		"--bind", "space:toggle+down",
+		"--bind", "q:transform:'/opt/my ftask/ftask' __pick quit",
+		"--bind", "i:transform:'/opt/my ftask/ftask' __pick insert",
+		"--bind", "/:transform:'/opt/my ftask/ftask' __pick insert",
+		"--bind", "?:preview:'/opt/my ftask/ftask' __pick help",
+		"--bind", "start:unbind(load,j,k,g,G,space,q,i,/,?)",
 		"--bind", "load:transform:'/opt/my ftask/ftask' __pick on-load",
 	}
 	if got := pk.args(); !slices.Equal(got, want) {
@@ -53,7 +63,7 @@ func TestPickerArgs(t *testing.T) {
 	}
 }
 
-func TestHeader(t *testing.T) {
+func TestScopeLine(t *testing.T) {
 	for _, tc := range []struct {
 		pk   picker
 		want string
@@ -64,8 +74,7 @@ func TestHeader(t *testing.T) {
 		{picker{scope: Scope{Folder: "/", Recursive: true, IDs: []model.ID{1, 2, 3}}, missing: 2}, "/ · 3 given IDs · 2 given IDs not found"},
 		{picker{scope: Scope{Folder: "/", Recursive: true, IDs: []model.ID{}}}, "/ · 0 given IDs"},
 	} {
-		got, _, _ := strings.Cut(tc.pk.header(), "\n")
-		if got != tc.want {
+		if got := tc.pk.scopeLine(); got != tc.want {
 			t.Errorf("got %q, want %q", got, tc.want)
 		}
 	}
@@ -229,6 +238,11 @@ func TestText(t *testing.T) {
 	s.Write(textPrefix+"footer", []byte("✗ x: )+execute-silent(touch X)+(\nnext\x1b[31m\u2028"))
 	if out, e := text(s, []string{"footer"}, Env{}); string(out) != "✗ x: )+execute-silent(touch X)+(\\nnext\\x1b[31m\\u2028" || e != nil {
 		t.Errorf("got %q, %v", out, e)
+	}
+	// The header keeps its lines, each escaped.
+	s.Write(textPrefix+"header", []byte("[cmd] query: a\x1bb\n/\nkeys"))
+	if out, _ := text(s, []string{"header"}, Env{}); string(out) != "[cmd] query: a\\x1bb\n/\nkeys" {
+		t.Errorf("header: %q", out)
 	}
 	for _, args := range [][]string{nil, {"other"}, {"footer", "x"}} {
 		if _, e := text(s, args, Env{}); e == nil || e.Kind != errs.KindUsage {

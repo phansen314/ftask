@@ -3,6 +3,7 @@ package pick
 import (
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/phansen314/ftask/internal/errs"
 )
@@ -20,6 +21,10 @@ type verb func(s *Session, args []string, env Env) ([]byte, *errs.Error)
 // verbs are the helper's verbs, by name.
 var verbs = map[string]verb{
 	"enter":   enter,
+	"esc":     escVerb,
+	"command": commandVerb,
+	"insert":  insertVerb,
+	"help":    helpVerb,
 	"on-load": onLoad,
 	"quit":    quit,
 	"preview": previewVerb,
@@ -84,7 +89,8 @@ func onLoad(s *Session, args []string, _ Env) ([]byte, *errs.Error) {
 
 // text prints one of the session's texts, which fzf shows as it is
 // (pick-spec.md, No data in action text): one line, its control characters
-// escaped as on the CLI's stderr line. A text never written is empty.
+// escaped as on the CLI's stderr line, except the header, whose lines the
+// helper composes, each escaped so. A text never written is empty.
 func text(s *Session, args []string, _ Env) ([]byte, *errs.Error) {
 	switch {
 	case len(args) == 0:
@@ -97,6 +103,13 @@ func text(s *Session, args []string, _ Env) ([]byte, *errs.Error) {
 	b, _, e := s.Read(textPrefix + args[0])
 	if e != nil {
 		return nil, e
+	}
+	if args[0] == "header" {
+		lines := strings.Split(string(b), "\n")
+		for i, l := range lines {
+			lines[i] = errs.OneLine(l)
+		}
+		return []byte(strings.Join(lines, "\n")), nil
 	}
 	return []byte(errs.OneLine(string(b))), nil
 }

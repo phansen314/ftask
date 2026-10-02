@@ -70,6 +70,9 @@ func Run(in *jsonio.Object, problems []errs.Problem, env Env) ops.Envelope {
 	if e := writePreviews(s, l); e != nil {
 		return ops.Envelope{Error: e, Warnings: l.Warnings}
 	}
+	if e := s.Write(scopeLineFile, []byte(pk.scopeLine())); e != nil {
+		return ops.Envelope{Error: e, Warnings: l.Warnings}
+	}
 	status, e := show(env, fzf, pk, lines, s)
 	if e != nil {
 		return ops.Envelope{Error: e, Warnings: l.Warnings}
