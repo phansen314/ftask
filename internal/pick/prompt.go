@@ -157,64 +157,73 @@ func applyPrompt(s *Session, value string, env Env) ([]byte, *errs.Error) {
 // task list, after the run r applied something: with query as the search
 // query, the list reloaded, and status in the status line.
 func backToTasks(s *Session, env Env, r *actionRun, query, status string) ([]byte, *errs.Error) {
-	leave, e := leaveMode(s, env, query)
+	leave, again, e := leaveMode(s, env, query)
 	if e != nil {
 		return nil, e
 	}
-	out, warnings, failed := reload(s, env)
+	// The session is in command mode now, so fzf must follow it whatever
+	// fails from here: a failure only shows in the status line.
+	out, warnings, failed := reload(s, env, r.nextScope)
 	if failed != nil {
 		var sh shown
 		if e := readJSON(s, shownFile, &sh); e != nil {
-			return nil, e
+			return leftWith(s, env, leave, again, e), nil
 		}
 		status = joinStatus(status, reloadFailed(failed))
 		warnings = sh.Warnings
 		// The same lines again: the reload's load event hides the input.
-		exe, err := env.Sys.Executable()
-		if err != nil {
-			return nil, errInternalExe(err)
-		}
-		out = "clear-selection+reload-sync(" + helperLine(exe, "lines") + ")"
-	} else if r.cursorTo != "" {
-		moved, e := armCursor(s, r.cursorTo)
+		out = again
+	} else {
+		status = joinStatus(status, r.ifReloaded)
+		var e *errs.Error
 		switch {
-		case e != nil:
-			return nil, e
-		case !moved:
-			status += " (not in this list)"
+		case r.cursorTo != "":
+			var moved bool
+			if moved, e = armCursor(s, r.cursorTo); e == nil && !moved {
+				status += " (not in this list)"
+			}
+		case r.returnTo != "":
+			_, e = armCursor(s, r.returnTo)
+		case r.nextScope != nil:
+			// A new scope's list, from its first line.
+			e = s.Write(cursorFile, []byte("1"))
 		}
-	} else if r.returnTo != "" {
-		if _, e := armCursor(s, r.returnTo); e != nil {
-			return nil, e
+		if e != nil {
+			return leftWith(s, env, leave, out, e), nil
 		}
 	}
 	footer, e := setStatus(s, env, warnings, status)
 	if e != nil {
-		return nil, e
+		return leftWith(s, env, leave, out, e), nil
 	}
 	// load is armed before the reload starts: a quick one can fire it
 	// before a rebind later in the chain takes effect (fzf 0.63.0).
-	b := leave + "+rebind(load)+" + out + "+" + string(footer)
-	if r.also != "" {
-		b += "+" + r.also
+	return []byte(leave + "+rebind(load)+" + out + "+" + string(footer)), nil
+}
+
+// leftWith is what backToTasks does when a session failure, e, follows
+// leaveMode's: leave, then out's reload, and e in the status line if it
+// can still be shown.
+func leftWith(s *Session, env Env, leave, out string, e *errs.Error) []byte {
+	b := leave + "+rebind(load)+" + out
+	var sh shown
+	readJSON(s, shownFile, &sh) // no load to count warnings from: none
+	if footer, e := setStatus(s, env, sh.Warnings, "✗ "+errText(e)); e == nil {
+		b += "+" + string(footer)
 	}
-	return []byte(b), nil
+	return []byte(b)
 }
 
 // cancelToTasks leaves a prompt or choose list for command mode with the
 // task list as it was, and query as the search query.
 func cancelToTasks(s *Session, env Env, query string) ([]byte, *errs.Error) {
-	leave, e := leaveMode(s, env, query)
+	leave, again, e := leaveMode(s, env, query)
 	if e != nil {
 		return nil, e
 	}
-	exe, err := env.Sys.Executable()
-	if err != nil {
-		return nil, errInternalExe(err)
-	}
 	// The task lines again: the reload's load event hides the input. load
 	// is armed before the reload starts, as in backToTasks.
-	return []byte(leave + "+rebind(load)+clear-selection+reload-sync(" + helperLine(exe, "lines") + ")"), nil
+	return []byte(leave + "+rebind(load)+" + again), nil
 }
 
 // armCursor records the position of the line with key in the last load,
@@ -260,37 +269,45 @@ func cancelPrompt(s *Session, env Env) ([]byte, *errs.Error) {
 // input: a query change and hide-input in one transform's output lose the
 // query change (fzf 0.63.0 to 0.74.4), so the input is hidden on the next
 // load event, which the caller brings about with a reload and
-// rebind(load). Tab, unbound in a single-choice list, comes back.
-func leaveMode(s *Session, env Env, query string) (string, *errs.Error) {
+// rebind(load). Tab, unbound in a single-choice list, comes back. again
+// is that reload with the task list's lines as they are.
+//
+// Writing the mode is the commit: a failure before it leaves the session
+// in the mode fzf still shows, and returns e; after it, nothing fails.
+func leaveMode(s *Session, env Env, query string) (leave, again string, e *errs.Error) {
 	var scope Scope
 	if e := readJSON(s, scopeFile, &scope); e != nil {
-		return "", e
+		return "", "", e
+	}
+	exe, err := env.Sys.Executable()
+	if err != nil {
+		return "", "", errInternalExe(err)
 	}
 	for _, step := range []func() *errs.Error{
-		func() *errs.Error { return s.Delete(promptFile) },
-		func() *errs.Error { return s.Delete(chooseFile) },
-		func() *errs.Error { return s.Write(modeFile, []byte(modeCommand)) },
 		func() *errs.Error { return s.Write(queryFile, []byte(query)) },
 		func() *errs.Error { return s.Write(textPrefix+"query", []byte(query)) },
 		func() *errs.Error { return s.Write(textPrefix+"prompt", []byte(promptOf(scope))) },
 		func() *errs.Error { return s.Write(hideFile, nil) },
 	} {
 		if e := step(); e != nil {
-			return "", e
+			return "", "", e
 		}
 	}
-	header, e := writeHeader(s, env)
+	header, e := writeHeaderAs(s, env, modeCommand)
 	if e != nil {
-		return "", e
+		return "", "", e
 	}
-	exe, err := env.Sys.Executable()
-	if err != nil {
-		return "", errInternalExe(err)
+	if e := s.Write(modeFile, []byte(modeCommand)); e != nil {
+		return "", "", e
 	}
-	return "enable-search" +
+	// Left behind, either is unused in command mode.
+	s.Delete(promptFile)
+	s.Delete(chooseFile)
+	leave = "enable-search" +
 		"+" + setQuery(exe, query) +
 		"+transform-prompt(" + helperLine(exe, "text", "prompt") + ")" +
-		"+rebind(" + strings.Join(commandKeys(), ",") + ",tab)+" + header, nil
+		"+rebind(" + strings.Join(commandKeys(), ",") + ",tab)+" + header
+	return leave, "clear-selection+reload-sync(" + helperLine(exe, "lines") + ")", nil
 }
 
 // setQuery is the action that sets the query to the session's text-query,

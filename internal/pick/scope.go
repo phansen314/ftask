@@ -26,19 +26,7 @@ func cycleScope(r *actionRun, _ []shownLine) {
 		return
 	}
 	scope.Readiness = nextScope[scope.Readiness]
-	if r.err = writeJSON(r.s, scopeFile, scope); r.err != nil {
-		return
-	}
-	if r.err = r.s.Write(textPrefix+"prompt", []byte(promptOf(scope))); r.err != nil {
-		return
-	}
-	exe, err := r.env.Sys.Executable()
-	if err != nil {
-		r.err = errInternalExe(err)
-		return
-	}
-	r.reload, r.status = true, "✓ scope: "+string(scope.Readiness)
-	r.also = "transform-prompt(" + helperLine(exe, "text", "prompt") + ")"
+	r.reload, r.nextScope, r.ifReloaded = true, &scope, "✓ scope: "+string(scope.Readiness)
 }
 
 // promptOf is the prompt for a scope: it names it.

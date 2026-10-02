@@ -115,9 +115,9 @@ const (
 // textNames are the texts the text verb shows.
 var textNames = []string{"footer", "header", "prompt", "query"}
 
-// onLoad runs on fzf's load event, when it is bound: it hides the input
-// and moves the cursor to the line recorded, as armed, and unbinds load
-// again. fzf may run it once, unarmed, for the first list, before start's
+// onLoad runs on fzf's load event, when it is bound: it hides the input,
+// if armed and still in command mode, and moves the cursor to the line
+// recorded, as armed, and unbinds load again. fzf may run it once, unarmed, for the first list, before start's
 // unbind takes effect.
 func onLoad(s *Session, args []string, _ Env) ([]byte, *errs.Error) {
 	if len(args) != 0 {
@@ -130,7 +130,16 @@ func onLoad(s *Session, args []string, _ Env) ([]byte, *errs.Error) {
 		if e := s.Delete(hideFile); e != nil {
 			return nil, e
 		}
-		out = "hide-input+"
+		// A key handled while the reload was in flight may have left
+		// command mode already: i, or an action's prompt or choose list,
+		// which show the input.
+		mode, _, e := s.Read(modeFile)
+		if e != nil {
+			return nil, e
+		}
+		if string(mode) == modeCommand {
+			out = "hide-input+"
+		}
 	}
 	b, ok, e := s.Read(cursorFile)
 	switch {

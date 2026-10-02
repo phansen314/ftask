@@ -137,16 +137,18 @@ func previewVerb(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 	case len(args) > 1:
 		return nil, errs.Usage([]errs.UsageProblem{{Argument: &args[1], Reason: "unexpected argument"}})
 	}
+	// A choose list's line is keyed as the task or folder it names.
+	key := strings.TrimPrefix(args[0], choiceMark)
 	// A folder's line, in a choose list of folders: its path.
-	if strings.HasPrefix(args[0], "/") {
-		return []byte(args[0] + "\n"), nil
+	if strings.HasPrefix(key, "/") {
+		return []byte(key + "\n"), nil
 	}
 	b, ok, e := s.Read(previewsFile)
 	var all map[string]previewEntry
 	if e != nil || !ok || json.Unmarshal(b, &all) != nil {
 		return []byte(loading + "\n"), nil
 	}
-	entry, ok := all[args[0]]
+	entry, ok := all[key]
 	if !ok {
 		return []byte(loading + "\n"), nil
 	}

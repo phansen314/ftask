@@ -175,7 +175,40 @@ func TestPickOutcomes(t *testing.T) {
 	}
 	eachFzf(t, func(t *testing.T, fzfDir string) {
 		full, empty := pickTree(t), newTree(t)
+		one := newTree(t)
+		if r := run(t, one.cmd("create", "Only")); r.code != 0 {
+			t.Fatal(r.stdout)
+		}
 		for _, opts := range []string{"", "--select-1 --exit-0 --expect=esc"} {
+			// One candidate: --select-1 would take it, without a
+			// callback, as soon as the list is in.
+			for _, key := range []string{"enter", "quit"} {
+				name := key + " on the only task"
+				if opts != "" {
+					name += ", FZF_DEFAULT_OPTS"
+				}
+				t.Run(name, func(t *testing.T) {
+					cmd := one.cmd("pick", "--fields", "id")
+					cmd.Env = append(cmd.Env, "FZF_DEFAULT_OPTS="+opts)
+					p := startPick(t, fzfDir, cmd)
+					if p.done() {
+						t.Fatalf("pick exited before the picker opened: %s", p.stdout.String())
+					}
+					if st := p.loaded(); st.TotalCount != 1 {
+						t.Fatalf("state %+v", st)
+					}
+					want := []int64{1}
+					if key == "quit" {
+						p.quit()
+						want = []int64{}
+					} else {
+						p.send(keyEnter)
+					}
+					if got := picked(t, p.result()); !slices.Equal(got, want) {
+						t.Errorf("picked %v, want %v", got, want)
+					}
+				})
+			}
 			for _, o := range outcomes {
 				name := o.name
 				if opts != "" {
@@ -527,7 +560,8 @@ func TestPickScopeAndReload(t *testing.T) {
 // n end to end: the prompt borrows the query line, starting with the
 // query, and the list stays put while the title is typed; Enter creates
 // the task, clears the query, and puts the cursor on the new task. A
-// refused title keeps the prompt open; Esc cancels it.
+// refused title keeps the prompt open; Esc cancels it, and the search
+// query comes back.
 func TestPickNew(t *testing.T) {
 	eachFzf(t, func(t *testing.T, fzfDir string) {
 		tr := pickTree(t)
@@ -549,7 +583,7 @@ func TestPickNew(t *testing.T) {
 			return st.Query == "" && st.TotalCount == 4 && lineKey(st.Current) == "4@/"
 		})
 		p.waitScreen("[cmd]")
-		inCommandMode := func() {
+		inCommandMode := func(query string) {
 			t.Helper()
 			// The input hides on the reload's load event, just after the
 			// prompt closes; then unbound keys type nothing, and ? after
@@ -557,17 +591,24 @@ func TestPickNew(t *testing.T) {
 			p.waitFor("the input hidden", func() bool { return !strings.Contains(p.screen(), "> ") })
 			p.send("zw?")
 			p.waitScreen("until the cursor moves")
-			if q := p.state().Query; q != "" {
-				t.Errorf("typed into the query in command mode: %q", q)
+			if q := p.state().Query; q != query {
+				t.Errorf("query %q in command mode, want %q", q, query)
 			}
 		}
-		inCommandMode()
+		inCommandMode("")
 
-		// A refused title: the prompt stays open; Esc cancels it. ctrl-d
-		// on the empty prompt first deletes nothing and keeps it open:
-		// fzf's default would end the session.
+		// A refused title: the prompt stays open; Esc cancels it, and the
+		// search query comes back. ctrl-d on the empty prompt first deletes
+		// nothing and keeps it open: fzf's default would end the session.
+		p.send("i")
+		p.waitFor("insert mode", func() bool { return !strings.Contains(p.screen(), "[cmd]") })
+		p.send("pa")
+		p.waitState("the query", func(st fzfState) bool { return st.Query == "pa" && st.MatchCount == 3 })
+		p.command()
 		p.send("n")
-		p.waitScreen("[new]")
+		p.waitScreen("new> pa")
+		p.send(keyCtrlU)
+		p.waitState("the prompt emptied", func(st fzfState) bool { return st.Query == "" })
 		p.send(keyCtrlD + "?")
 		p.waitState("ctrl-d handled", func(st fzfState) bool { return st.Query == "?" })
 		if p.done() || !strings.Contains(p.screen(), "new> ?") {
@@ -581,12 +622,13 @@ func TestPickNew(t *testing.T) {
 			t.Errorf("prompt closed:\n%s", p.screen())
 		}
 		p.send(keyEsc)
-		p.waitScreen("[cmd]")
-		inCommandMode()
-		p.send(keyEnter)
+		p.waitScreen("[cmd] query: pa")
+		p.waitState("the search query back", func(st fzfState) bool { return st.Query == "pa" && st.MatchCount == 3 })
+		inCommandMode("pa")
+		p.send(keyEsc)
 		r := p.result()
 		out := decode(t, r)
-		if r.code != 0 || len(out.Result.Actions) != 2 || len(out.Result.Tasks) != 1 || out.Result.Tasks[0].ID != 4 {
+		if r.code != 0 || len(out.Result.Actions) != 2 || len(out.Result.Tasks) != 0 {
 			t.Errorf("exit %d: %s", r.code, r.stdout)
 		}
 	})
@@ -776,7 +818,7 @@ func TestPickBlock(t *testing.T) {
 		p.waitScreen("blockers of 3> ")
 		p.waitScreen("[blockers of 3]")
 		st := p.waitState("the choose list", func(st fzfState) bool { return st.TotalCount == 2 && !st.Reading })
-		if len(st.Selected) != 0 || lineKey(st.Current) != "1@/trips" {
+		if len(st.Selected) != 0 || lineKey(st.Current) != "~1@/trips" {
 			t.Fatalf("choose list: %+v", st)
 		}
 		p.setQuery("pass", 1)
@@ -801,7 +843,7 @@ func TestPickBlock(t *testing.T) {
 		p.send("b")
 		p.waitScreen("blockers of 1> ")
 		p.waitState("2 alone", func(st fzfState) bool {
-			return st.TotalCount == 1 && !st.Reading && lineKey(st.Current) == "2@/trips"
+			return st.TotalCount == 1 && !st.Reading && lineKey(st.Current) == "~2@/trips"
 		})
 		p.send(keyEsc)
 		p.waitState("the task list, on 1", func(st fzfState) bool { return st.TotalCount == 3 && lineKey(st.Current) == "1@/trips" })
@@ -860,7 +902,7 @@ func TestPickUnblock(t *testing.T) {
 		p.send("u")
 		p.waitScreen("unblock 3> ")
 		p.waitState("its two blockers", func(st fzfState) bool {
-			return st.TotalCount == 2 && !st.Reading && lineKey(st.Current) == "1@/trips"
+			return st.TotalCount == 2 && !st.Reading && lineKey(st.Current) == "~1@/trips"
 		})
 		p.send(keyTab)
 		p.waitState("1 marked", func(st fzfState) bool { return len(st.Selected) == 1 })
@@ -871,7 +913,7 @@ func TestPickUnblock(t *testing.T) {
 		p.waitScreen("◐  3")
 		p.send("u")
 		p.waitState("one blocker left", func(st fzfState) bool {
-			return st.TotalCount == 1 && !st.Reading && lineKey(st.Current) == "2@/trips"
+			return st.TotalCount == 1 && !st.Reading && lineKey(st.Current) == "~2@/trips"
 		})
 		p.send(keyEnter)
 		p.waitScreen("●  3")
@@ -907,7 +949,7 @@ func TestPickMoveAndFolder(t *testing.T) {
 		p.send("m")
 		p.waitScreen("move to> ")
 		p.waitScreen("[move to]")
-		p.waitState("the folders", func(st fzfState) bool { return st.TotalCount == 4 && !st.Reading && lineKey(st.Current) == "/" })
+		p.waitState("the folders", func(st fzfState) bool { return st.TotalCount == 4 && !st.Reading && lineKey(st.Current) == "~/" })
 		p.send(keyTab)
 		p.setQuery("jap", 1)
 		if st := p.state(); len(st.Selected) != 0 {
@@ -936,6 +978,157 @@ func TestPickMoveAndFolder(t *testing.T) {
 		if r.code != 0 || len(out.Result.Actions) != 1 || !strings.Contains(r.stdout, `"input":{"id":3,"to":"/trips/japan"}`) {
 			t.Errorf("exit %d: %s", r.code, r.stdout)
 		}
+	})
+}
+
+// f to a folder deleted while its list is open: the reload fails, and the
+// header, like the list, stays in the scope folder it was, so the next
+// reload works (pick-spec.md, Errors: later loads' errors).
+func TestPickFolderGone(t *testing.T) {
+	eachFzf(t, func(t *testing.T, fzfDir string) {
+		tr := pickTree(t)
+		if r := run(t, tr.cmd("create-folder", "/gone")); r.code != 0 {
+			t.Fatal(r.stdout)
+		}
+		p := startPick(t, fzfDir, tr.cmd("pick", "--fields", "id"))
+		p.loaded()
+		p.command()
+		p.send("f")
+		p.waitState("the folders", func(st fzfState) bool { return st.TotalCount == 3 && !st.Reading && lineKey(st.Current) == "~/" })
+		p.send(keyUp)
+		p.waitState("on /gone", func(st fzfState) bool { return lineKey(st.Current) == "~/gone" })
+		if r := run(t, tr.cmd("delete-folder", "/gone")); r.code != 0 {
+			t.Fatal(r.stdout)
+		}
+		p.send(keyEnter)
+		p.waitScreen("✗ reload: not-found")
+		p.waitState("the task list", func(st fzfState) bool { return st.TotalCount == 3 && !st.Reading })
+		// The header's scope line: still /.
+		header := regexp.MustCompile(`(?m)^ +/ +│`)
+		p.waitFor("the header", func() bool { return header.MatchString(p.screen()) })
+		if strings.Contains(p.screen(), "folder: /gone") {
+			t.Errorf("status line:\n%s", p.screen())
+		}
+		p.waitFor("the input hidden", func() bool { return !strings.Contains(p.screen(), "> ") })
+		p.send("r")
+		p.waitScreen("✓ reloaded")
+		p.send(keyEsc)
+		if r := p.result(); r.code != 0 {
+			t.Errorf("exit %d: %s", r.code, r.stdout)
+		}
+	})
+}
+
+// Cancelling a prompt or a choose list, by Esc or ctrl-space, goes back to
+// command mode with the search query as it was, still filtering, and the
+// input hidden (pick-spec.md, Modes).
+func TestPickCancel(t *testing.T) {
+	eachFzf(t, func(t *testing.T, fzfDir string) {
+		tr := pickTree(t)
+		for _, c := range []struct{ name, key, opened, cancel string }{
+			{"esc, prompt", "p", "priority 2> ", keyEsc},
+			{"ctrl-space, prompt", "p", "priority 2> ", "\x00"},
+			{"esc, choose list", "b", "blockers of 2> ", keyEsc},
+			{"ctrl-space, choose list", "b", "blockers of 2> ", "\x00"},
+		} {
+			t.Run(c.name, func(t *testing.T) {
+				p := startPick(t, fzfDir, tr.cmd("pick", "--fields", "id"))
+				p.loaded()
+				p.setQuery("pa", 2)
+				p.command()
+				p.send(c.key)
+				p.waitScreen(c.opened)
+				if c.key == "b" {
+					p.waitState("the choose list", func(st fzfState) bool { return st.TotalCount == 2 && st.Query == "" && !st.Reading })
+				}
+				p.send(c.cancel)
+				p.waitScreen("[cmd] query: pa")
+				p.waitState("the search query back", func(st fzfState) bool {
+					return st.Query == "pa" && st.TotalCount == 3 && st.MatchCount == 2 && !st.Reading
+				})
+				p.waitFor("the input hidden", func() bool { return !strings.Contains(p.screen(), "> ") })
+				p.send(keyEsc)
+				if got := picked(t, p.result()); len(got) != 0 {
+					t.Errorf("picked %v", got)
+				}
+			})
+		}
+	})
+}
+
+// Keys typed ahead of the reload that leaving a prompt or choose list
+// starts: each acts in the mode the session is in, or, passing the keys
+// of the list fzf still shows, does nothing and says so. Each case sends
+// the next key in the same write, so it is handled before the reload is
+// in.
+func TestPickTypeahead(t *testing.T) {
+	eachFzf(t, func(t *testing.T, fzfDir string) {
+		tr := pickTree(t)
+		start := func(t *testing.T) *picker {
+			t.Helper()
+			p := startPick(t, fzfDir, tr.cmd("pick", "--fields", "id,priority"))
+			p.loaded()
+			p.command()
+			return p
+		}
+		// The reload's load event runs on-load just after the list is in:
+		// it must not hide the input that the typed-ahead key showed.
+		const settle = 500 * time.Millisecond
+
+		t.Run("i after a prompt", func(t *testing.T) {
+			p := start(t)
+			p.send("p")
+			p.waitScreen("priority 1> ")
+			p.send(keyCtrlU + "5" + keyEnter + "i")
+			p.waitScreen("✓ set priority 1")
+			p.waitScreen("p5")
+			p.holds("insert mode, input shown", settle, func() bool {
+				s := p.screen()
+				return strings.Contains(s, "open> ") && !strings.Contains(s, "[cmd]")
+			})
+			p.setQuery("zz", 0)
+			p.send(keyCtrlC)
+			p.wait()
+		})
+
+		t.Run("n after a choose list", func(t *testing.T) {
+			p := start(t)
+			p.send("f")
+			p.waitState("the folders", func(st fzfState) bool { return st.TotalCount == 2 && !st.Reading })
+			p.send(keyEnter + "n")
+			p.waitScreen("[new]")
+			p.waitState("the task list", func(st fzfState) bool { return st.TotalCount == 3 && !st.Reading })
+			p.holds("the prompt shown", settle, func() bool { return strings.Contains(p.screen(), "new> ") })
+			p.send("abc")
+			p.waitState("the title typed", func(st fzfState) bool { return st.Query == "abc" })
+			p.send(keyCtrlC)
+			p.wait()
+		})
+
+		t.Run("enter after a choose list", func(t *testing.T) {
+			p := start(t)
+			p.send("b")
+			p.waitState("the choose list", func(st fzfState) bool {
+				return st.TotalCount == 2 && !st.Reading && lineKey(st.Current) == "~2@/trips"
+			})
+			// The second Enter passes the choose list's 2, which it shows,
+			// not a task under the cursor: it picks nothing.
+			p.send(keyEnter + keyEnter)
+			p.waitScreen("list still loading")
+			p.waitState("the task list, on 1", func(st fzfState) bool {
+				return st.TotalCount == 3 && !st.Reading && lineKey(st.Current) == "1@/trips"
+			})
+			if p.done() {
+				t.Fatalf("pick exited: %s", p.stdout.String())
+			}
+			p.send(keyEnter)
+			r := p.result()
+			out := decode(t, r)
+			if r.code != 0 || len(out.Result.Tasks) != 1 || out.Result.Tasks[0].ID != 1 ||
+				len(out.Result.Actions) != 1 || !strings.Contains(r.stdout, `"input":{"id":1,"blockers":[2]}`) {
+				t.Errorf("exit %d: %s", r.code, r.stdout)
+			}
+		})
 	})
 }
 
@@ -1004,6 +1197,36 @@ func TestPickSource(t *testing.T) {
 			}
 			p.send(keyEsc)
 			p.result()
+		})
+
+		// A reload that fails on leaving a prompt keeps the list, and
+		// still takes fzf back to command mode, input hidden.
+		t.Run("fails after a prompt", func(t *testing.T) {
+			dir := t.TempDir()
+			script := filepath.Join(dir, "source")
+			body := "#!/bin/sh\nif [ -e ran ]; then\n\techo gone >&2\n\texit 1\nfi\ntouch ran\n'" + binary + "' list --fields id\n"
+			if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			cmd := tr.cmd("pick", "--fields", "id", "--source", script)
+			cmd.Dir = dir
+			cmd.Env = append(cmd.Env, "FTASK_PICK_OPTS=--preview-window=hidden")
+			p := startPick(t, fzfDir, cmd)
+			total := p.loaded().TotalCount
+			p.command()
+			p.send("p")
+			p.waitScreen("[priority 1]")
+			p.send(keyCtrlU + "4" + keyEnter)
+			p.waitScreen("✓ set priority 1 · ✗ source: gone")
+			p.waitScreen("[cmd]")
+			p.waitFor("the input hidden", func() bool { return !strings.Contains(p.screen(), "> ") })
+			if st := p.state(); st.TotalCount != total {
+				t.Errorf("list changed: %+v", st)
+			}
+			p.send(keyEsc)
+			if r := p.result(); r.code != 0 || !strings.Contains(r.stdout, `"input":{"id":1,"priority":4}`) {
+				t.Errorf("exit %d: %s", r.code, r.stdout)
+			}
 		})
 
 		// A later run that takes too long is killed with its process
@@ -1272,19 +1495,32 @@ func TestPickCtrlD(t *testing.T) {
 }
 
 // The first load: fzf may or may not run on-load for the first list, but
-// the picker always opens with the cursor on the first line.
+// the picker always opens with the cursor on the first line. The cursor is
+// checked once Esc's callback has run, after any on-load for the first
+// list, which fzf runs one action at a time; the helper's log says whether
+// it ran.
 func TestPickFirstLoadCursor(t *testing.T) {
 	eachFzf(t, func(t *testing.T, fzfDir string) {
 		tr := pickTree(t)
+		ran := 0
 		for i := range 20 {
-			p := startPick(t, fzfDir, tr.cmd("pick"))
-			st := p.loaded()
-			if st.Current.Index != 0 || lineKey(st.Current) != "1@/trips" {
+			log := filepath.Join(t.TempDir(), "helper.log")
+			cmd := tr.cmd("pick")
+			cmd.Env = append(cmd.Env, "FTASK_E2E_HELPER_LOG="+log)
+			p := startPick(t, fzfDir, cmd)
+			p.loaded()
+			p.command()
+			if st := p.state(); st.Current == nil || st.Current.Index != 0 || lineKey(st.Current) != "1@/trips" {
 				t.Fatalf("run %d: cursor on %+v", i, st.Current)
+			}
+			b, _ := os.ReadFile(log)
+			if slices.Contains(strings.Split(string(b), "\n"), "on-load") {
+				ran++
 			}
 			p.send(keyCtrlC)
 			p.wait()
 		}
+		t.Logf("on-load ran for the first list in %d of 20 runs", ran)
 	})
 }
 

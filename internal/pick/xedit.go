@@ -174,7 +174,7 @@ func afterX(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 		}
 		return clearMarks(setStatus(s, env, sh.Warnings, status))
 	}
-	return reloadWithStatus(s, env, status, "")
+	return reloadWithStatus(s, env, status, "", nil)
 }
 
 // applyX compares the edited file with what x wrote, and runs one update

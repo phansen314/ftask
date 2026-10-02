@@ -180,6 +180,10 @@ func act(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 			return nil, e
 		}
 	}
+	// fzf still showed a choose list being left: its keys aren't tasks.
+	if staleKeys(args[1:], false) {
+		return loadingStatus(s, env)
+	}
 	var sh shown
 	if e := readJSON(s, shownFile, &sh); e != nil {
 		return nil, e
@@ -216,19 +220,17 @@ func act(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 	} else {
 		// Reload after every action that ran an operation (pick-spec.md,
 		// Actions).
-		out, e = reloadWithStatus(s, env, status, r.ifReloaded)
+		out, e = reloadWithStatus(s, env, status, r.ifReloaded, r.nextScope)
 	}
-	if e != nil || r.also == "" {
-		return out, e
-	}
-	return []byte(string(out) + "+" + r.also), nil
+	return out, e
 }
 
-// reloadWithStatus reloads, then shows status in the status line, and
-// ifReloaded after it if the reload went through. A load that fails leaves
-// the list as it was, and the status line says why.
-func reloadWithStatus(s *Session, env Env, status, ifReloaded string) ([]byte, *errs.Error) {
-	out, warnings, failed := reload(s, env)
+// reloadWithStatus reloads, in next if not nil, then shows status in the
+// status line, and ifReloaded after it if the reload went through. A load
+// that fails leaves the list and the scope as they were, and the status
+// line says why.
+func reloadWithStatus(s *Session, env Env, status, ifReloaded string, next *Scope) ([]byte, *errs.Error) {
+	out, warnings, failed := reload(s, env, next)
 	if failed != nil {
 		var sh shown
 		if e := readJSON(s, shownFile, &sh); e != nil {
@@ -274,8 +276,9 @@ type actionRun struct {
 	// ifReloaded is said in the status line only if the reload goes
 	// through: r's ✓ reloaded.
 	ifReloaded string
-	// also is more for fzf to do, after the reload and status line.
-	also string
+	// nextScope, when set, is the scope to reload in: it becomes the
+	// session's only if the reload goes through.
+	nextScope *Scope
 	// clearQuery, after a prompt, clears the search query rather than
 	// restore it.
 	clearQuery bool
@@ -418,12 +421,17 @@ func loggedActions(s *Session) ([]any, *errs.Error) {
 	return out, nil
 }
 
-// reload runs a load in the session's scope and records it. It returns the
-// actions that show it, with the marks cleared, and the load's warnings; or the load's error, when
-// the list should stay as it was (pick-spec.md, Errors).
-func reload(s *Session, env Env) (string, int, *errs.Error) {
+// reload runs a load in the session's scope, or in next if not nil, and
+// records it. It returns the actions that show it, with the marks cleared,
+// and the load's warnings; or the load's error, when the list should stay
+// as it was (pick-spec.md, Errors). next becomes the session's scope only
+// once its load is in, so that a failed one leaves the header, the prompt
+// and later actions in the scope the list shows.
+func reload(s *Session, env Env, next *Scope) (string, int, *errs.Error) {
 	var scope Scope
-	if e := readJSON(s, scopeFile, &scope); e != nil {
+	if next != nil {
+		scope = *next
+	} else if e := readJSON(s, scopeFile, &scope); e != nil {
 		return "", 0, e
 	}
 	if scope.Source != "" {
@@ -449,6 +457,17 @@ func reload(s *Session, env Env) (string, int, *errs.Error) {
 	if err != nil {
 		return "", 0, errs.Internal("locating the ftask binary: " + err.Error())
 	}
+	var prompt string
+	if next != nil {
+		// Reloads run in command mode, whose prompt names the scope.
+		if e := writeJSON(s, scopeFile, *next); e != nil {
+			return "", 0, e
+		}
+		if e := s.Write(textPrefix+"prompt", []byte(promptOf(*next))); e != nil {
+			return "", 0, e
+		}
+		prompt = "+transform-prompt(" + helperLine(exe, "text", "prompt") + ")"
+	}
 	header, e := writeHeader(s, env)
 	if e != nil {
 		return "", 0, e
@@ -456,7 +475,7 @@ func reload(s *Session, env Env) (string, int, *errs.Error) {
 	// Marks are cleared explicitly, on every reload: fzf keeps them across
 	// one with --track --id-nth in the person's options (pick-spec.md,
 	// Modes).
-	return "clear-selection+reload-sync(" + helperLine(exe, "lines") + ")+" + header, len(l.Warnings), nil
+	return "clear-selection+reload-sync(" + helperLine(exe, "lines") + ")+" + header + prompt, len(l.Warnings), nil
 }
 
 // setStatus records the status line and returns the action that shows it,

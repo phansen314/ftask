@@ -248,6 +248,27 @@ func TestOnLoad(t *testing.T) {
 	if out, _ := onLoad(s, nil, Env{}); string(out) != "unbind(load)" {
 		t.Errorf("after: %q", out)
 	}
+	// Armed to hide the input, it hides it only in command mode: a key
+	// handled before the load may have left it.
+	s.Write(hideFile, nil)
+	s.Write(modeFile, []byte(modeCommand))
+	if out, _ := onLoad(s, nil, Env{}); string(out) != "hide-input+unbind(load)" {
+		t.Errorf("hide: %q", out)
+	}
+	for _, mode := range []string{"", modePrompt, modeChoose} {
+		s.Write(hideFile, nil)
+		if mode == "" {
+			s.Delete(modeFile)
+		} else {
+			s.Write(modeFile, []byte(mode))
+		}
+		if out, _ := onLoad(s, nil, Env{}); string(out) != "unbind(load)" {
+			t.Errorf("hide, left for %q mode: %q", mode, out)
+		}
+		if _, ok, _ := s.Read(hideFile); ok {
+			t.Errorf("hide, left for %q mode: still armed", mode)
+		}
+	}
 	s.Write(cursorFile, []byte("0"))
 	if _, e := onLoad(s, nil, Env{}); e == nil || e.Kind != errs.KindInternal {
 		t.Errorf("bad cursor: %v", e)

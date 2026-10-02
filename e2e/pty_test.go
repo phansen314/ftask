@@ -204,6 +204,18 @@ func (tm *term) waitFor(what string, cond func() bool) {
 	}
 }
 
+// holds checks that cond holds throughout d, failing the test, with the
+// screen, as soon as it doesn't: for a state that an event fzf has yet to
+// handle, such as a reload's load, could still undo.
+func (tm *term) holds(what string, d time.Duration, cond func() bool) {
+	tm.t.Helper()
+	for end := time.Now().Add(d); time.Now().Before(end); time.Sleep(20 * time.Millisecond) {
+		if !cond() {
+			tm.t.Fatalf("%s stopped holding; screen:\n%s", what, tm.screen())
+		}
+	}
+}
+
 // waitScreen waits until the screen contains s.
 func (tm *term) waitScreen(s string) {
 	tm.t.Helper()

@@ -2,6 +2,8 @@ package pick
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -72,12 +74,12 @@ func TestChoose(t *testing.T) {
 			t.Errorf("z printed\n%q\nwant\n%q", got, want)
 		}
 		if p, h, c := text("prompt"), text("header"), helper("choices"); p != "blockers of 1> " ||
-			h != "[blockers of 1]\n/\n"+chooseHint || c != "2@/\t2\n3@/\t3\n" {
+			h != "[blockers of 1]\n/\n"+chooseHint || c != "~2@/\t2\n~3@/\t3\n" {
 			t.Errorf("prompt %q, header %q, choices %q", p, h, c)
 		}
 		// Enter on two marked: the action applies, then back to the task
 		// list, in command mode, with the search query back.
-		got = helper("enter", "", "3@/", "2@/")
+		got = helper("enter", "", "~3@/", "~2@/")
 		for _, part := range []string{
 			"enable-search+transform-query('/bin/ftask' __pick text 'query')+transform-prompt(",
 			"+rebind(" + keys + ",tab)+",
@@ -121,7 +123,7 @@ func TestChoose(t *testing.T) {
 		if h := text("header"); h != "[move to]\n/\n"+pickOneHint {
 			t.Errorf("single header %q", h)
 		}
-		helper("enter", "", "/b")
+		helper("enter", "", "~/b")
 		if f := text("footer"); f != "✓ moved 3" {
 			t.Errorf("moved: %q", f)
 		}
@@ -136,4 +138,75 @@ func TestChoose(t *testing.T) {
 			t.Errorf("no %s in %s", want, res)
 		}
 	}
+}
+
+// A key pressed while fzf still shows the other list passes that list's
+// keys: it does nothing, and says so. Enter or an action just after a
+// choose list closes passes the choose list's; Enter just after one opens,
+// the task list's.
+func TestStaleKeys(t *testing.T) {
+	withAction(t, blocking)
+	tr := newTestTree(t)
+	for _, title := range []string{"one", "two", "three"} {
+		tr.run("create", map[string]any{"title": title})
+	}
+	_, line := tr.pick(map[string]any{}, fzfDoes{do: func(t *testing.T, helper func(...string) string) {
+		footer := "transform-footer('/bin/ftask' __pick text 'footer')"
+		helper("command", "")
+		helper("act", "z", "1@/")
+		// Enter with the task list's key: the choose list stays.
+		if got := helper("enter", "", "2@/"); got != footer {
+			t.Errorf("enter, task key, choosing: %q", got)
+		}
+		if f, h := helper("text", "footer"), helper("text", "header"); f != stillLoading || !strings.HasPrefix(h, "[blockers of 1]") {
+			t.Errorf("footer %q, header %q", f, h)
+		}
+		helper("enter", "", "~2@/")
+		// Back in command mode, with the choose list's keys.
+		for _, args := range [][]string{{"enter", "", "~3@/"}, {"act", "c", "~3@/"}} {
+			if got := helper(args...); got != footer {
+				t.Errorf("%q printed %q", args, got)
+			}
+			if f := helper("text", "footer"); f != stillLoading {
+				t.Errorf("%q: footer %q", args, f)
+			}
+		}
+		helper("enter", "", "1@/")
+	}})
+	res := string(line)
+	if !strings.Contains(res, `"tasks":[{"schema":1,"id":1,`) || strings.Count(res, `"operation"`) != 1 || !strings.Contains(res, `"input":{"id":1,"blockers":[2]}`) {
+		t.Errorf("%s", res)
+	}
+}
+
+// A session failure after leaving a choose list for command mode still
+// takes fzf there, with the failure in the status line: the session's mode
+// and fzf's agree.
+func TestLeaveFailsAfterCommit(t *testing.T) {
+	withAction(t, blocking)
+	tr := newTestTree(t)
+	for _, title := range []string{"one", "two"} {
+		tr.run("create", map[string]any{"title": title})
+	}
+	tr.pick(map[string]any{}, fzfDoes{do: func(t *testing.T, helper func(...string) string) {
+		helper("command", "")
+		helper("act", "z", "1@/")
+		// Arming the cursor, back on the target, fails.
+		helper("on-load")
+		if err := os.MkdirAll(filepath.Join(tr.session, cursorFile, "x"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		got := helper("enter", "", "~2@/")
+		if !strings.HasPrefix(got, "enable-search+") || !strings.Contains(got, "+rebind(load)+clear-selection+reload-sync(") ||
+			!strings.HasSuffix(got, "+transform-footer('/bin/ftask' __pick text 'footer')") {
+			t.Errorf("enter printed %q", got)
+		}
+		if f := helper("text", "footer"); !strings.HasPrefix(f, "✗ io: ") {
+			t.Errorf("footer %q", f)
+		}
+		if h := helper("text", "header"); !strings.HasPrefix(h, "[cmd]") {
+			t.Errorf("header %q", h)
+		}
+		helper("quit")
+	}})
 }

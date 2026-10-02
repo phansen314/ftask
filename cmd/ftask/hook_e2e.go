@@ -12,6 +12,7 @@ import (
 
 	"github.com/phansen314/ftask/internal/cli"
 	"github.com/phansen314/ftask/internal/fsys"
+	"github.com/phansen314/ftask/internal/pick"
 )
 
 // Test builds only (implementation-spec.md, Test hooks). Each variable is
@@ -28,8 +29,19 @@ import (
 //   - FTASK_E2E_SOURCE_LIMIT=<duration>: pick's live source is killed after
 //     this, not 10s, on a reload, so e2e can time it out quickly. The
 //     status line still names the real limit.
+//   - FTASK_E2E_HELPER_LOG=<file>: each run of pick's helper appends its
+//     verb and a newline to file as it starts, so e2e can tell which
+//     callbacks fzf ran.
 func init() {
 	envHook = func(env *cli.Env) {
+		if v := os.Getenv("FTASK_E2E_HELPER_LOG"); v != "" && len(os.Args) > 2 && os.Args[1] == pick.HelperCommand {
+			f, err := os.OpenFile(v, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o600)
+			if err != nil {
+				panic(fmt.Sprintf("FTASK_E2E_HELPER_LOG: %v", err))
+			}
+			f.WriteString(os.Args[2] + "\n")
+			f.Close()
+		}
 		if os.Getenv("FTASK_E2E_PANIC") != "" {
 			panic("forced by FTASK_E2E_PANIC")
 		}

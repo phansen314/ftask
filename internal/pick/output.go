@@ -20,7 +20,8 @@ const selectionFile = "selection"
 // enter is Enter: its arguments are the query, then the keys fzf passes
 // ({+1}: the marked lines', or the one under the cursor; none with an
 // empty list). In a prompt, it applies the query as the value. Otherwise
-// it records the selection and accepts.
+// it records the selection and accepts, unless fzf still showed a choose
+// list being left: then it does nothing, and says so.
 func enter(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 	if len(args) == 0 {
 		return nil, errs.Usage([]errs.UsageProblem{{Reason: "missing query"}})
@@ -31,6 +32,9 @@ func enter(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 		return applyPrompt(s, args[0], env)
 	} else if string(b) == modeChoose {
 		return applyChoose(s, args[1:], env)
+	}
+	if staleKeys(args[1:], false) {
+		return loadingStatus(s, env)
 	}
 	return record(s, args[1:])
 }

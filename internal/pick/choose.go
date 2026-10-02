@@ -26,6 +26,32 @@ const (
 	choicesFile = "choices"
 )
 
+// choiceMark begins every choose list line's key, which task keys (an ID)
+// and folder keys (a path) never do. fzf shows a reload's list only once
+// it is complete, while the session already has the mode it is for, so a
+// key pressed meanwhile passes the other list's keys; the mark tells them
+// apart, even where a choose list's lines are tasks.
+const choiceMark = "~"
+
+// stillLoading is the status line for a key that passed the other list's
+// keys: it did nothing, and works once fzf shows the list.
+const stillLoading = "✗ list still loading: nothing done"
+
+// staleKeys reports whether any of keys is from the list before the one
+// the session has: a task list's while choosing, or a choose list's.
+func staleKeys(keys []string, choosing bool) bool {
+	return slices.ContainsFunc(keys, func(k string) bool { return strings.HasPrefix(k, choiceMark) != choosing })
+}
+
+// loadingStatus shows stillLoading in the status line.
+func loadingStatus(s *Session, env Env) ([]byte, *errs.Error) {
+	var sh shown
+	if e := readJSON(s, shownFile, &sh); e != nil {
+		return nil, e
+	}
+	return setStatus(s, env, sh.Warnings, stillLoading)
+}
+
 // chooseState is an open choose list: the action choosing, its targets,
 // the search query it borrowed the line from, and whether one line only is
 // chosen.
@@ -39,7 +65,7 @@ type chooseState struct {
 
 // openChoose swaps in a choose list of lines for the running action,
 // labelled e.g. "blockers of 42> ". Each line starts with its key, then a
-// tab, as task lines do. The search query is saved, to come back
+// tab, as task lines do; fzf gets the key after choiceMark. The search query is saved, to come back
 // afterwards, and the choose list's query starts empty.
 func (r *actionRun) openChoose(key, label string, lines []string, single bool, targets []shownLine) {
 	saved, _, e := r.s.Read(queryFile)
@@ -53,7 +79,7 @@ func (r *actionRun) openChoose(key, label string, lines []string, single bool, t
 	}
 	var b strings.Builder
 	for _, l := range lines {
-		b.WriteString(l + "\n")
+		b.WriteString(choiceMark + l + "\n")
 	}
 	for _, step := range []func() *errs.Error{
 		func() *errs.Error { return writeJSON(r.s, chooseFile, st) },
@@ -100,8 +126,12 @@ func choicesVerb(s *Session, args []string, _ Env) ([]byte, *errs.Error) {
 
 // applyChoose is Enter in choose mode: the action applies to keys, the
 // chosen lines' keys; none chosen, from an empty list, is no change. Then
-// back to the task list.
+// back to the task list. Keys from the task list, which fzf still showed,
+// do nothing, and the choose list stays.
 func applyChoose(s *Session, keys []string, env Env) ([]byte, *errs.Error) {
+	if staleKeys(keys, true) {
+		return loadingStatus(s, env)
+	}
 	var st chooseState
 	if e := readJSON(s, chooseFile, &st); e != nil {
 		return nil, e
@@ -138,7 +168,8 @@ func applyChoose(s *Session, keys []string, env Env) ([]byte, *errs.Error) {
 }
 
 // inChoiceOrder is keys in the choose list's order, not the order fzf
-// passes marks in, which is the order marked; once each.
+// passes marks in, which is the order marked; once each; without
+// choiceMark.
 func inChoiceOrder(s *Session, keys []string) ([]string, *errs.Error) {
 	b, _, e := s.Read(choicesFile)
 	if e != nil {
@@ -150,6 +181,9 @@ func inChoiceOrder(s *Session, keys []string) ([]string, *errs.Error) {
 		if k != "" && slices.Contains(keys, k) && !slices.Contains(out, k) {
 			out = append(out, k)
 		}
+	}
+	for i, k := range out {
+		out[i] = strings.TrimPrefix(k, choiceMark)
 	}
 	return out, nil
 }

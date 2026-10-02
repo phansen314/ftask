@@ -170,7 +170,7 @@ func afterEdit(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 	if len(failed) > 0 {
 		status = joinStatus(status, "✗ "+string(failed))
 	}
-	return reloadWithStatus(s, env, status, "")
+	return reloadWithStatus(s, env, status, "", nil)
 }
 
 // readNotesEdited is notes_edited so far: IDs in the order first edited.

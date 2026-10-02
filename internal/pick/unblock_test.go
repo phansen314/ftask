@@ -71,10 +71,10 @@ func TestUnblockAction(t *testing.T) {
 			t.Errorf("two: %q", f)
 		}
 		helper("act", "u", "3@/")
-		if p, c := helper("text", "prompt"), helper("choices"); p != "unblock 3> " || !strings.HasPrefix(c, "1@/\t") || strings.Count(c, "\n") != 2 {
+		if p, c := helper("text", "prompt"), helper("choices"); p != "unblock 3> " || !strings.HasPrefix(c, "~1@/\t") || strings.Count(c, "\n") != 2 {
 			t.Errorf("prompt %q, choices %q", p, c)
 		}
-		helper("enter", "", "2@/", "1@/")
+		helper("enter", "", "~2@/", "~1@/")
 		if f := helper("text", "footer"); f != "✓ unblocked 3" {
 			t.Errorf("footer %q", f)
 		}
@@ -97,10 +97,10 @@ func TestUnblockMoved(t *testing.T) {
 		helper("command", "")
 		tr.run("move", map[string]any{"id": 2, "to": "/b"})
 		helper("act", "u", "2@/")
-		if p, c := helper("text", "prompt"), helper("choices"); p != "unblock 2> " || !strings.HasPrefix(c, "1@/\t") {
+		if p, c := helper("text", "prompt"), helper("choices"); p != "unblock 2> " || !strings.HasPrefix(c, "~1@/\t") {
 			t.Errorf("moved: prompt %q, choices %q", p, c)
 		}
-		helper("enter", "", "1@/")
+		helper("enter", "", "~1@/")
 		if f := helper("text", "footer"); f != "✓ unblocked 2" {
 			t.Errorf("moved: footer %q", f)
 		}

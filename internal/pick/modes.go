@@ -182,6 +182,16 @@ func switchMode(s *Session, command bool, env Env) ([]byte, *errs.Error) {
 // writeHeader writes the header for the session's mode, scope and last
 // load, and returns the action that shows it.
 func writeHeader(s *Session, env Env) (string, *errs.Error) {
+	mode, _, e := s.Read(modeFile)
+	if e != nil {
+		return "", e
+	}
+	return writeHeaderAs(s, env, string(mode))
+}
+
+// writeHeaderAs is writeHeader for mode, which the session may not be in
+// yet.
+func writeHeaderAs(s *Session, env Env, mode string) (string, *errs.Error) {
 	var scope Scope
 	var sh shown
 	if e := readJSON(s, scopeFile, &scope); e != nil {
@@ -190,17 +200,13 @@ func writeHeader(s *Session, env Env) (string, *errs.Error) {
 	if e := readJSON(s, shownFile, &sh); e != nil {
 		return "", e
 	}
-	mode, _, e := s.Read(modeFile)
-	if e != nil {
-		return "", e
-	}
 	query, _, e := s.Read(queryFile)
 	if e != nil {
 		return "", e
 	}
 	var label string
 	var single bool
-	switch string(mode) {
+	switch mode {
 	case modePrompt:
 		if label, e = promptLabel(s); e != nil {
 			return "", e
@@ -210,7 +216,7 @@ func writeHeader(s *Session, env Env) (string, *errs.Error) {
 			return "", e
 		}
 	}
-	h := header(string(mode), string(query), label, single, scope.Folders, scopeLine(scope, sh.Missing))
+	h := header(mode, string(query), label, single, scope.Folders, scopeLine(scope, sh.Missing))
 	if e := s.Write(textPrefix+"header", []byte(h)); e != nil {
 		return "", e
 	}

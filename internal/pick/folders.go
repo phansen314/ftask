@@ -76,19 +76,13 @@ func openFolder(r *actionRun, _ []shownLine) {
 	}
 }
 
-// setFolder makes the chosen folder the scope folder. No operation runs;
-// the reload going back to the task list shows it, from its first line.
+// setFolder makes the chosen folder the scope folder, once the reload going
+// back to the task list shows it, from its first line. No operation runs.
 func setFolder(r *actionRun, chosen []string, _ []shownLine) {
 	var scope Scope
 	if r.err = readJSON(r.s, scopeFile, &scope); r.err != nil {
 		return
 	}
 	scope.Folder = model.FolderPath(chosen[0])
-	if r.err = writeJSON(r.s, scopeFile, scope); r.err != nil {
-		return
-	}
-	if r.err = r.s.Write(cursorFile, []byte("1")); r.err != nil {
-		return
-	}
-	r.status = "✓ folder: " + chosen[0]
+	r.nextScope, r.ifReloaded = &scope, "✓ folder: "+chosen[0]
 }

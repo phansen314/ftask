@@ -53,16 +53,16 @@ func TestBlockAction(t *testing.T) {
 	_, line := tr.pick(map[string]any{}, fzfDoes{do: func(t *testing.T, helper func(...string) string) {
 		helper("command", "")
 		helper("act", "b", "3@/")
-		if p, c := helper("text", "prompt"), helper("choices"); p != "blockers of 3> " || !strings.HasPrefix(c, "1@/\t") || strings.Count(c, "\n") != 2 {
+		if p, c := helper("text", "prompt"), helper("choices"); p != "blockers of 3> " || !strings.HasPrefix(c, "~1@/\t") || strings.Count(c, "\n") != 2 {
 			t.Errorf("prompt %q, choices %q", p, c)
 		}
-		helper("enter", "", "2@/", "1@/")
+		helper("enter", "", "~2@/", "~1@/")
 		if f := helper("text", "footer"); f != "✓ blocked 3" {
 			t.Errorf("footer %q", f)
 		}
 		// 3 is blocked by 1 and 2, so 3 can't block 1; 2 can.
 		helper("act", "b", "1@/")
-		if c := helper("choices"); !strings.HasPrefix(c, "2@/\t") || strings.Count(c, "\n") != 1 {
+		if c := helper("choices"); !strings.HasPrefix(c, "~2@/\t") || strings.Count(c, "\n") != 1 {
 			t.Errorf("1's choices %q", c)
 		}
 		helper("esc", "")
@@ -73,7 +73,7 @@ func TestBlockAction(t *testing.T) {
 		helper("act", "r")
 		helper("act", "b", "4@/")
 		tr.run("block", map[string]any{"id": 1, "blockers": []int{4}})
-		helper("enter", "", "3@/")
+		helper("enter", "", "~3@/")
 		if f := helper("text", "footer"); !strings.HasPrefix(f, "✗ block 4 ← 3: conflict (acyclic): ") {
 			t.Errorf("cycle: footer %q", f)
 		}
