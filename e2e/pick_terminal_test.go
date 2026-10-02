@@ -812,6 +812,35 @@ func TestPickBlock(t *testing.T) {
 	})
 }
 
+// A cycle made while b's list is open: the candidate offered when it
+// opened is refused by block, which the status line says, and the failed
+// call is in the output's actions.
+func TestPickBlockRefused(t *testing.T) {
+	eachFzf(t, func(t *testing.T, fzfDir string) {
+		tr := pickTree(t)
+		p := startPick(t, fzfDir, tr.cmd("pick", "--fields", "id"))
+		p.loaded()
+		p.command()
+		p.send("b")
+		p.waitScreen("blockers of 1> ")
+		p.waitState("the choose list", func(st fzfState) bool { return st.TotalCount == 2 && !st.Reading })
+		if r := run(t, tr.cmd("block", "2", "--blockers", "1")); r.code != 0 {
+			t.Fatal(r.stdout)
+		}
+		p.setQuery("pass", 1)
+		p.send(keyEnter)
+		p.waitScreen("✗ block 1 ← 2: conflict (acyclic)")
+		p.waitFor("the input hidden", func() bool { return !strings.Contains(p.screen(), "> ") })
+		p.send(keyEsc)
+		r := p.result()
+		out := decode(t, r)
+		if r.code != 0 || len(out.Result.Actions) != 1 ||
+			!strings.Contains(r.stdout, `"input":{"id":1,"blockers":[2]},"output":{"ok":false,"error":{"kind":"conflict"`) {
+			t.Errorf("exit %d: %s", r.code, r.stdout)
+		}
+	})
+}
+
 // u end to end: a choose list of the target's blockers; the marked one is
 // removed, then the last, under the cursor, and the task is ready again.
 func TestPickUnblock(t *testing.T) {
