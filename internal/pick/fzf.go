@@ -40,6 +40,11 @@ type System struct {
 	// stderr to this process's, and returns its stdout and exit status; err
 	// only when fzf could not be started or did not exit normally.
 	Filter func(path string, args, env []string, stdin []byte) (stdout []byte, status int, err error)
+	// RunEditor runs argv with env, with this process's stdin, stdout and
+	// stderr, the terminal fzf gives execute; it returns the exit status,
+	// 128+n if a signal n killed it, err only when it could not be
+	// started.
+	RunEditor func(argv, env []string) (status int, err error)
 	// CatchInterrupts catches SIGINT and SIGQUIT and discards them, until
 	// the function it returns restores default handling (pick-spec.md,
 	// Signals).
@@ -56,6 +61,7 @@ func OSSystem() System {
 		OpenTTY:    openTTY,
 		RunFzf:     runFzf,
 		Filter:     filter,
+		RunEditor:  runEditor,
 
 		CatchInterrupts: catchInterrupts,
 	}
@@ -110,6 +116,21 @@ func runFzf(path string, args, env []string, stdin []byte) (int, error) {
 	err := cmd.Run()
 	var exit *exec.ExitError
 	if errors.As(err, &exit) && exit.Exited() {
+		return exit.ExitCode(), nil
+	}
+	return 0, err
+}
+
+func runEditor(argv, env []string) (int, error) {
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Env, cmd.Stdin, cmd.Stdout, cmd.Stderr = env, os.Stdin, os.Stdout, os.Stderr
+	err := cmd.Run()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		// Killed by a signal, e.g. ctrl-c: 128+n, as a shell reports it.
+		if ws, ok := exit.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+			return 128 + int(ws.Signal()), nil
+		}
 		return exit.ExitCode(), nil
 	}
 	return 0, err

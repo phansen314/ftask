@@ -392,6 +392,97 @@ func TestPickComplete(t *testing.T) {
 	})
 }
 
+// e end to end: the editor gets the terminal, its keys and its screen,
+// while fzf is suspended; fzf comes back with the status line, and the
+// output names the notes edited. ctrl-c in the editor ends only the editor:
+// Enter after it gives the envelope, with the session's actions
+// (pick-spec.md, Testing: Interrupts).
+func TestPickEdit(t *testing.T) {
+	eachFzf(t, func(t *testing.T, fzfDir string) {
+		tr := pickTree(t)
+		ed := filepath.Join(t.TempDir(), "ed")
+		// It asks on the terminal, and appends the answer to each note.
+		script := "#!/bin/sh\nprintf 'EDITOR> '\nread line\nfor f; do echo \"$line\" >> \"$f\"; done\n"
+		if err := os.WriteFile(ed, []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		pick := func(t *testing.T, env ...string) *picker {
+			cmd := tr.cmd("pick", "--fields", "id")
+			cmd.Env = append(append(cmd.Env, "VISUAL="+ed), env...)
+			p := startPick(t, fzfDir, cmd)
+			p.loaded()
+			p.command()
+			return p
+		}
+		notesOf := func(id string) string {
+			b, _ := os.ReadFile(filepath.Join(tr.root(), "trips", id+".md"))
+			return string(b)
+		}
+
+		t.Run("edit", func(t *testing.T) {
+			p := pick(t)
+			p.send("G ") // mark 3
+			p.waitState("3 marked", func(st fzfState) bool { return len(st.Selected) == 1 })
+			p.send("j ") // and 1
+			p.waitState("1 marked", func(st fzfState) bool { return len(st.Selected) == 2 })
+			p.send("e")
+			p.waitScreen("EDITOR>")
+			p.send("hello\r")
+			p.waitScreen("✓ edited notes 2: 1, 3")
+			if notesOf("1") != "hello\n" || notesOf("3") != "hello\n" {
+				t.Errorf("notes %q %q", notesOf("1"), notesOf("3"))
+			}
+			p.waitScreen("hello") // the preview, reloaded
+			p.send(keyEnter)
+			r := p.result()
+			if out := decode(t, r); r.code != 0 || !slices.Equal(out.Result.NotesEdited, []int64{1, 3}) {
+				t.Errorf("exit %d: %s", r.code, r.stdout)
+			}
+		})
+
+		t.Run("ctrl-c in the editor", func(t *testing.T) {
+			// No preview, so the status line has the width.
+			p := pick(t, "FTASK_PICK_OPTS=--preview-window=hidden")
+			p.send("c") // complete 1, an action to report
+			p.waitScreen("✓ completed 1")
+			p.waitState("the reload", func(st fzfState) bool { return st.TotalCount == 2 && !st.Reading })
+			p.send("e")
+			p.waitScreen("EDITOR>")
+			p.send(keyCtrlC)
+			p.waitScreen("✗ e: editor exited with status 130")
+			if p.done() {
+				t.Fatal("ctrl-c in the editor ended pick")
+			}
+			p.send(keyEnter)
+			r := p.result()
+			out := decode(t, r)
+			if r.code != 0 || len(out.Result.Actions) != 1 || len(out.Result.NotesEdited) != 0 {
+				t.Errorf("exit %d: %s", r.code, r.stdout)
+			}
+		})
+
+		t.Run("vi", func(t *testing.T) {
+			if _, err := exec.LookPath("vi"); err != nil {
+				t.Skip("no vi")
+			}
+			cmd := tr.cmd("pick", "--fields", "id")
+			cmd.Env = append(cmd.Env, "EDITOR=vi")
+			p := startPick(t, fzfDir, cmd)
+			p.loaded()
+			p.command()
+			p.send("e")
+			p.waitFor("vi", func() bool { return !strings.Contains(p.screen(), "[cmd]") })
+			p.send("ofrom vi\x1b")
+			p.send(":wq\r")
+			p.waitScreen("✓ edited notes 2")
+			p.send(keyEsc)
+			if r := p.result(); r.code != 0 || !strings.Contains(r.stdout, `"notes_edited":[2]`) {
+				t.Errorf("exit %d: %s", r.code, r.stdout)
+			}
+		})
+	})
+}
+
 // pick in a pipeline: --from reads an upstream envelope, of each accepted
 // shape, while the picker draws on the terminal; stdout goes downstream.
 // The rejections end pick before the picker opens (pick-spec.md, Accepted

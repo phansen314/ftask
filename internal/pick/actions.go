@@ -38,7 +38,7 @@ type action struct {
 }
 
 // actions are the actions, in the order their keys are bound.
-var actions = []action{completeAction}
+var actions = []action{completeAction, editAction}
 
 func lookupAction(key string) (action, bool) {
 	i := slices.IndexFunc(actions, func(a action) bool { return a.key == key })
@@ -68,7 +68,12 @@ const (
 // shown is what the last load shows: its lines, in line order, and what the
 // header and status line count.
 type shown struct {
-	Lines    []shownLine `json:"lines"`
+	Lines []shownLine `json:"lines"`
+	// Before holds the lines of the load before that this one dropped.
+	// fzf shows a reload's list only once it is complete, while the
+	// session already has it: a key pressed meanwhile passes a line
+	// fzf still shows, which the person sees and means.
+	Before   []shownLine `json:"before"`
 	Missing  int         `json:"missing"`  // snapshot IDs the load lacks
 	Warnings int         `json:"warnings"` // the load's
 }
@@ -78,14 +83,28 @@ type shownLine struct {
 	Key       string          `json:"key"`
 	ID        model.ID        `json:"id"`
 	Readiness model.Readiness `json:"readiness"`
+	Notes     string          `json:"notes"` // notes_path
 }
 
 // writeLoaded records a load in the session: its lines, what they show, and
 // the previews.
 func writeLoaded(s *Session, l *Load, views []model.TaskView, lines []string, missing int) *errs.Error {
-	sh := shown{Lines: make([]shownLine, len(views)), Missing: missing, Warnings: len(l.Warnings)}
+	sh := shown{Lines: make([]shownLine, len(views)), Before: []shownLine{}, Missing: missing, Warnings: len(l.Warnings)}
 	for i, v := range views {
-		sh.Lines[i] = shownLine{Key: key(v), ID: v.ID, Readiness: v.Readiness}
+		sh.Lines[i] = shownLine{Key: key(v), ID: v.ID, Readiness: v.Readiness, Notes: v.NotesPath}
+	}
+	var prev shown
+	if _, ok, e := s.Read(shownFile); e != nil {
+		return e
+	} else if ok {
+		if e := readJSON(s, shownFile, &prev); e != nil {
+			return e
+		}
+	}
+	for _, l := range prev.Lines {
+		if !slices.ContainsFunc(sh.Lines, func(n shownLine) bool { return n.Key == l.Key }) {
+			sh.Before = append(sh.Before, l)
+		}
 	}
 	if e := writeJSON(s, shownFile, sh); e != nil {
 		return e
@@ -145,7 +164,7 @@ func act(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 	if e := readJSON(s, shownFile, &sh); e != nil {
 		return nil, e
 	}
-	targets := inLineOrder(sh.Lines, args[1:])
+	targets := inLineOrder(sh, args[1:])
 	switch {
 	case a.arity == noTargets:
 		targets = nil
@@ -159,6 +178,9 @@ func act(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 	if r.err != nil {
 		return nil, r.err
 	}
+	if r.next != "" {
+		return []byte(r.next), nil
+	}
 	status := r.status
 	if status == "" {
 		status = statusLine(r.outcomes)
@@ -167,9 +189,19 @@ func act(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 		return setStatus(s, env, sh.Warnings, status)
 	}
 	// Reload after every action that ran an operation (pick-spec.md,
-	// Actions); a load that fails leaves the list as it was.
+	// Actions).
+	return reloadWithStatus(s, env, status)
+}
+
+// reloadWithStatus reloads, then shows status in the status line. A load
+// that fails leaves the list as it was, and the status line says why.
+func reloadWithStatus(s *Session, env Env, status string) ([]byte, *errs.Error) {
 	out, warnings, failed := reload(s, env)
 	if failed != nil {
+		var sh shown
+		if e := readJSON(s, shownFile, &sh); e != nil {
+			return nil, e
+		}
 		return setStatus(s, env, sh.Warnings, joinStatus(status, "✗ reload: "+errText(failed)))
 	}
 	footer, e := setStatus(s, env, warnings, status)
@@ -180,10 +212,11 @@ func act(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 }
 
 // inLineOrder is the shown lines with the given keys, in line order, once
-// each. A key not shown, which fzf never passes, is left out.
-func inLineOrder(lines []shownLine, keys []string) []shownLine {
+// each, then any the last load dropped, as the load before showed them. A
+// key in neither, which fzf never passes, is left out.
+func inLineOrder(sh shown, keys []string) []shownLine {
 	var out []shownLine
-	for _, l := range lines {
+	for _, l := range append(slices.Clone(sh.Lines), sh.Before...) {
 		if slices.Contains(keys, l.Key) {
 			out = append(out, l)
 		}
@@ -199,6 +232,9 @@ type actionRun struct {
 	outcomes []outcome
 	// status replaces the status line the outcomes make, when set.
 	status string
+	// next, when set, is what fzf does next instead of the reload: e.g.
+	// run an editor.
+	next string
 	// err is a session failure, which ends the action.
 	err *errs.Error
 }

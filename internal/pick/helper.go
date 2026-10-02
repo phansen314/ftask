@@ -20,17 +20,19 @@ type verb func(s *Session, args []string, env Env) ([]byte, *errs.Error)
 
 // verbs are the helper's verbs, by name.
 var verbs = map[string]verb{
-	"enter":   enter,
-	"act":     act,
-	"lines":   linesVerb,
-	"esc":     escVerb,
-	"command": commandVerb,
-	"insert":  insertVerb,
-	"help":    helpVerb,
-	"on-load": onLoad,
-	"quit":    quit,
-	"preview": previewVerb,
-	"text":    text,
+	"enter":      enter,
+	"act":        act,
+	"edit":       editVerb,
+	"after-edit": afterEdit,
+	"lines":      linesVerb,
+	"esc":        escVerb,
+	"command":    commandVerb,
+	"insert":     insertVerb,
+	"help":       helpVerb,
+	"on-load":    onLoad,
+	"quit":       quit,
+	"preview":    previewVerb,
+	"text":       text,
 }
 
 // Helper runs ftask __pick with args, the words after it, and returns what

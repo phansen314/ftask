@@ -185,6 +185,26 @@ func TestAct(t *testing.T) {
 	}
 }
 
+// A key pressed before fzf shows a reload's list names a line the session's
+// load has dropped: it is still the target, as the load before showed it.
+func TestActBeforeReloadShows(t *testing.T) {
+	withAction(t, completing("z", anyTargets))
+	tr := newTestTree(t)
+	for _, title := range []string{"one", "two", "three"} {
+		tr.run("create", map[string]any{"title": title})
+	}
+	tr.pick(map[string]any{}, fzfDoes{do: func(t *testing.T, helper func(...string) string) {
+		helper("act", "z", "1@/") // 1 leaves the open list
+		// Pressed while fzf still shows 1: dropped lines come after the
+		// shown ones.
+		helper("act", "c", "1@/", "3@/")
+		if got := helper("text", "footer"); got != "✓ completed 1: 3 · ✓ already complete 1: 1" {
+			t.Errorf("footer %q", got)
+		}
+		helper("quit")
+	}})
+}
+
 // A load that fails after an action leaves the list as it was: the status
 // line says so, and the marks stay.
 func TestActReloadFails(t *testing.T) {
@@ -252,7 +272,7 @@ func TestActionBindings(t *testing.T) {
 	if !slices.Contains(args, "z:transform:'/f' __pick act 'z' {+1}") {
 		t.Errorf("no binding: %q", args)
 	}
-	if !slices.Contains(args, "start:unbind(load,j,k,g,G,space,q,i,/,?,c,z)") {
+	if !slices.Contains(args, "start:unbind(load,"+strings.Join(commandKeys(), ",")+")") || !strings.HasSuffix(strings.Join(commandKeys(), ","), ",z") {
 		t.Errorf("not unbound at start: %q", args)
 	}
 	if keys := commandKeys(); keys[len(keys)-1] != "z" {

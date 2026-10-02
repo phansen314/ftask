@@ -56,6 +56,7 @@ var help = [][2]string{
 	{"enter", "pick the marked tasks, or the one under the cursor"},
 	{"tab space", "mark or unmark"},
 	{"c", "complete; or reopen, when every one is complete"},
+	{"e", "edit notes, in $VISUAL, else $EDITOR, else vi"},
 	{"j k", "down, up"},
 	{"g G", "first, last line"},
 	{"i /", "search: back to insert mode, with the query"},

@@ -7,6 +7,7 @@ package pick
 import (
 	"github.com/phansen314/ftask/internal/errs"
 	"github.com/phansen314/ftask/internal/jsonio"
+	"github.com/phansen314/ftask/internal/model"
 	"github.com/phansen314/ftask/internal/ops"
 )
 
@@ -59,7 +60,7 @@ func Run(in *jsonio.Object, problems []errs.Problem, env Env) ops.Envelope {
 			return ops.Envelope{Error: e, Warnings: l.Warnings}
 		}
 		if keys, done := decideAtOnce(matched, pin.SelectOne, pin.ExitZero); done {
-			return emit(env, keys, pin.Fields, []any{})
+			return emit(env, keys, pin.Fields, []any{}, []model.ID{})
 		}
 	}
 	s, e := newSession(env.Ops.FS, sessionBase(environ))

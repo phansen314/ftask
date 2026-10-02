@@ -8,6 +8,13 @@ import (
 	"github.com/phansen314/ftask/internal/fsys"
 )
 
+// The command keys: moving and marking, then each action's.
+func TestCommandKeys(t *testing.T) {
+	if got := strings.Join(commandKeys(), ","); !strings.HasPrefix(got, "j,k,g,G,space,q,i,/,?,c,e") {
+		t.Errorf("got %s", got)
+	}
+}
+
 func TestHeaderByMode(t *testing.T) {
 	if got := header(false, "renew", "/trips"); got != "/trips\n"+insertHint {
 		t.Errorf("insert: %q", got)
@@ -36,8 +43,9 @@ func TestModeVerbs(t *testing.T) {
 	writeJSON(s, shownFile, shown{})
 	env := Env{Sys: System{Executable: func() (string, error) { return "/bin/ft ask", nil }}}
 	toHeader := "+transform-header('/bin/ft ask' __pick text 'header')"
-	toCommand := "hide-input+rebind(j,k,g,G,space,q,i,/,?,c)" + toHeader
-	toInsert := "show-input+unbind(j,k,g,G,space,q,i,/,?,c)" + toHeader
+	keys := strings.Join(commandKeys(), ",")
+	toCommand := "hide-input+rebind(" + keys + ")" + toHeader
+	toInsert := "show-input+unbind(" + keys + ")" + toHeader
 	headerNow := func() string {
 		b, _, _ := s.Read(textPrefix + "header")
 		return string(b)
