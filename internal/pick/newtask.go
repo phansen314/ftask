@@ -39,7 +39,7 @@ func createTask(r *actionRun, title string, _ []shownLine) bool {
 	out := r.call(0, "create", in, "created", "create")
 	task, ok := out.Result.(model.Task)
 	if !out.OK || !ok {
-		return true // the prompt stays open, with the title
+		return r.refused() // a refused title stays, to be fixed
 	}
 	r.outcomes[len(r.outcomes)-1].id = task.ID
 	r.clearQuery = true

@@ -93,6 +93,8 @@ type shownLine struct {
 	ID        model.ID        `json:"id"`
 	Readiness model.Readiness `json:"readiness"`
 	Notes     string          `json:"notes"` // notes_path
+	Priority  *int64          `json:"priority"`
+	Tags      []model.Tag     `json:"tags"`
 }
 
 // writeLoaded records a load in the session: its lines, what they show, and
@@ -100,7 +102,7 @@ type shownLine struct {
 func writeLoaded(s *Session, l *Load, views []model.TaskView, lines []string, missing int) *errs.Error {
 	sh := shown{Lines: make([]shownLine, len(views)), Before: []shownLine{}, Missing: missing, Warnings: len(l.Warnings)}
 	for i, v := range views {
-		sh.Lines[i] = shownLine{Key: key(v), ID: v.ID, Readiness: v.Readiness, Notes: v.NotesPath}
+		sh.Lines[i] = shownLine{Key: key(v), ID: v.ID, Readiness: v.Readiness, Notes: v.NotesPath, Priority: v.Priority, Tags: v.Tags}
 	}
 	var prev shown
 	if _, ok, e := s.Read(shownFile); e != nil {

@@ -68,9 +68,58 @@ func (r *actionRun) openPrompt(key, label, value string, targets []shownLine) {
 		"+" + setQuery(exe, value) + "+" + header
 }
 
-// applyPrompt is Enter in prompt mode: the action applies value. If it
-// succeeded, the prompt closes; if not, it stays open with the value, and
-// the status line says why.
+// targetLabel is the label of a prompt for name on targets: "priority
+// 42> " for one, "priority 3 tasks> " for several.
+func targetLabel(name string, targets []shownLine) string {
+	if len(targets) == 1 {
+		return name + " " + string(idNumber(targets[0].ID)) + "> "
+	}
+	return name + " " + plural(len(targets), "task") + "> "
+}
+
+// promptStart is what a prompt on targets starts with: the one target's
+// current value, or nothing for several (pick-spec.md, Actions: Several
+// targets).
+func promptStart(targets []shownLine, value func(shownLine) string) string {
+	if len(targets) == 1 {
+		return value(targets[0])
+	}
+	return ""
+}
+
+// applyEach applies a prompt's value to each target, one call each through
+// call, in line order. With several targets, an empty value does nothing:
+// it never clears them all, which takes an explicit value. It reports
+// whether the prompt stays open: when the operation refused the value.
+func (r *actionRun) applyEach(value string, targets []shownLine, call func(t shownLine)) bool {
+	if value == "" && len(targets) > 1 {
+		r.status = "no change"
+		return false
+	}
+	for _, t := range targets {
+		if r.err != nil {
+			return false
+		}
+		call(t)
+	}
+	return r.refused()
+}
+
+// refused reports whether an operation the run called refused its input:
+// invalid-input, a value to be fixed in the prompt, which stays open with
+// it. Other failures close the prompt, reported in the status line.
+func (r *actionRun) refused() bool {
+	for _, o := range r.outcomes {
+		if o.err != nil && o.err.Kind == errs.KindInvalidInput {
+			return true
+		}
+	}
+	return false
+}
+
+// applyPrompt is Enter in prompt mode: the action applies value. The
+// prompt closes, unless the action keeps it open for the value to be fixed;
+// either way, the status line says what happened.
 func applyPrompt(s *Session, value string, env Env) ([]byte, *errs.Error) {
 	var st promptState
 	if e := readJSON(s, promptFile, &st); e != nil {
