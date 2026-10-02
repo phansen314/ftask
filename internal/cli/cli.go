@@ -62,8 +62,23 @@ func ProcessEnv() Env {
 // exit code. It writes exactly one envelope line, or help text, to stdout,
 // and at most one line to stderr.
 func Run(args []string, env Env) int {
+	if len(args) > 0 && args[0] == pick.HelperCommand {
+		out, code, note := helper(args[1:], env)
+		return deliver(env, out, code, note)
+	}
 	out, code, note := execute(commands, args, env)
 	return deliver(env, out, code, note)
+}
+
+// helper runs pick's hidden helper, which fzf's callbacks run. It is no
+// command of the table, so that help, completion and suggestions never show
+// it. It prints what fzf reads, not an envelope, unless it fails.
+func helper(args []string, env Env) ([]byte, int, string) {
+	out, e := pick.Helper(args, pick.Env{Ops: env.Ops, Sys: env.Pick})
+	if e != nil {
+		return envelopeLine(ops.Failed(e))
+	}
+	return out, ExitOK, ""
 }
 
 // execute runs args against cmds and returns what to write, the exit code,

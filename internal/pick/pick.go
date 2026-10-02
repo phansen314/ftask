@@ -29,5 +29,10 @@ func Run(in *jsonio.Object, problems []errs.Problem, env Env) ops.Envelope {
 	if _, e := findFzf(env.Sys); e != nil {
 		return ops.Failed(e)
 	}
+	s, e := newSession(env.Ops.FS, sessionBase(env.Sys.Environ()))
+	if e != nil {
+		return ops.Failed(e)
+	}
+	defer s.Remove()
 	return ops.Failed(errs.Internal("pick is not implemented yet"))
 }

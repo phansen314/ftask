@@ -30,9 +30,14 @@ func TestPickFzfCheck(t *testing.T) {
 		t.Helper()
 		cmd := ftask(t, "pick")
 		cmd.Env = slices.DeleteFunc(cmd.Env, func(kv string) bool { return strings.HasPrefix(kv, "PATH=") })
-		cmd.Env = append(cmd.Env, append([]string{"PATH=" + path}, env...)...)
+		runtime := t.TempDir()
+		cmd.Env = append(cmd.Env, append([]string{"PATH=" + path, "XDG_RUNTIME_DIR=" + runtime}, env...)...)
 		r := run(t, cmd)
 		envelope(t, r)
+		// The session, if pick made one, went when it exited.
+		if des, err := os.ReadDir(runtime); err != nil || len(des) != 0 {
+			t.Errorf("runtime dir after pick: %v, %v", des, err)
+		}
 		var got struct {
 			Error struct {
 				Kind    string `json:"kind"`
@@ -79,4 +84,79 @@ func TestPickFzfCheck(t *testing.T) {
 		}
 		check(t, filepath.Dir(real), []string{"FZF_DEFAULT_OPTS=--bogus"}, passed)
 	})
+}
+
+// pick makes its session under $XDG_RUNTIME_DIR, else the temp directory,
+// and removes it as it exits (pick-spec.md, Session).
+func TestPickSession(t *testing.T) {
+	fzf := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fzf, "fzf"), []byte("#!/bin/sh\necho 0.63.0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pick := func(env ...string) result {
+		cmd := ftask(t, "pick")
+		cmd.Env = slices.DeleteFunc(cmd.Env, func(kv string) bool { return strings.HasPrefix(kv, "PATH=") })
+		cmd.Env = append(cmd.Env, append([]string{"PATH=" + fzf}, env...)...)
+		r := run(t, cmd)
+		envelope(t, r)
+		return r
+	}
+	kind := func(r result) string {
+		var got struct {
+			Error struct {
+				Kind string `json:"kind"`
+			} `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(r.stdout), &got); err != nil {
+			t.Fatal(err)
+		}
+		return got.Error.Kind
+	}
+	// A runtime directory that doesn't exist is where pick tried.
+	missing := filepath.Join(t.TempDir(), "missing")
+	if r := pick("XDG_RUNTIME_DIR="+missing, "TMPDIR="+t.TempDir()); kind(r) != "io" || !strings.Contains(r.stdout, missing) {
+		t.Errorf("missing runtime dir: %s", r.stdout)
+	}
+	if r := pick("XDG_RUNTIME_DIR=", "TMPDIR="+missing); kind(r) != "io" || !strings.Contains(r.stdout, missing) {
+		t.Errorf("empty runtime dir, missing temp dir: %s", r.stdout)
+	}
+	tmp := t.TempDir()
+	if r := pick("TMPDIR=" + tmp); kind(r) != "internal" {
+		t.Errorf("temp dir: %s", r.stdout)
+	}
+	if des, _ := os.ReadDir(tmp); len(des) != 0 {
+		t.Errorf("temp dir after pick: %v", des)
+	}
+}
+
+// ftask __pick is pick's hidden helper: outside a session it is a usage
+// error, and help never shows it.
+func TestPickHelper(t *testing.T) {
+	helper := func(env []string, args ...string) result {
+		cmd := ftask(t, append([]string{"__pick"}, args...)...)
+		cmd.Env = append(cmd.Env, env...)
+		r := run(t, cmd)
+		envelope(t, r)
+		if r.code != 2 || !strings.Contains(r.stdout, `"kind":"usage"`) {
+			t.Errorf("%q %q: exit %d: %s", env, args, r.code, r.stdout)
+		}
+		return r
+	}
+	helper(nil, "text", "footer")
+	helper([]string{"FTASK_PICK_SESSION=" + t.TempDir()}, "text", "footer")
+	// A session pick made, as pick makes it: the verb is what's wrong.
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "session"), []byte("ftask pick session 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if r := helper([]string{"FTASK_PICK_SESSION=" + dir}, "nope"); !strings.Contains(r.stdout, `"argument":"nope"`) {
+		t.Errorf("unknown verb: %s", r.stdout)
+	}
+
+	for _, args := range [][]string{{"--help"}, {"help"}, {"__pik"}} {
+		r := run(t, ftask(t, args...))
+		if strings.Contains(r.stdout, "__pick") {
+			t.Errorf("%q shows the helper: %s", args, r.stdout)
+		}
+	}
 }
