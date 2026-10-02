@@ -43,10 +43,11 @@ func commandKeys() []string {
 	return keys
 }
 
-// Key hints, the header's last line in each mode.
+// Key hints, the header's last line in each mode: short enough for the
+// list beside the preview in a terminal 100 wide. ? shows every key.
 const (
-	insertHint  = "enter: pick · tab: mark · esc: commands · ctrl-c: cancel"
-	commandHint = "enter: pick · tab/space: mark · j/k/g/G: move · i or /: search · ?: help · q: quit"
+	insertHint  = "enter: pick · tab: mark · esc: commands"
+	commandHint = "c: complete · i: search · ?: keys · q: quit"
 )
 
 // help is command mode's keys, which ? shows in the preview until the
@@ -54,6 +55,7 @@ const (
 var help = [][2]string{
 	{"enter", "pick the marked tasks, or the one under the cursor"},
 	{"tab space", "mark or unmark"},
+	{"c", "complete; or reopen, when every one is complete"},
 	{"j k", "down, up"},
 	{"g G", "first, last line"},
 	{"i /", "search: back to insert mode, with the query"},

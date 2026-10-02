@@ -252,7 +252,7 @@ func TestActionBindings(t *testing.T) {
 	if !slices.Contains(args, "z:transform:'/f' __pick act 'z' {+1}") {
 		t.Errorf("no binding: %q", args)
 	}
-	if !slices.Contains(args, "start:unbind(load,j,k,g,G,space,q,i,/,?,z)") {
+	if !slices.Contains(args, "start:unbind(load,j,k,g,G,space,q,i,/,?,c,z)") {
 		t.Errorf("not unbound at start: %q", args)
 	}
 	if keys := commandKeys(); keys[len(keys)-1] != "z" {

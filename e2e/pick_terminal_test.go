@@ -339,6 +339,59 @@ func TestPickModes(t *testing.T) {
 	})
 }
 
+// c, the first action, end to end: marked lines completed in line order,
+// the list reloaded without them and with the marks cleared, the status
+// line, command mode kept, and every call in the output's actions; then,
+// with every target shown complete, c reopens.
+func TestPickComplete(t *testing.T) {
+	eachFzf(t, func(t *testing.T, fzfDir string) {
+		tr := pickTree(t)
+		p := startPick(t, fzfDir, tr.cmd("pick", "--fields", "id"))
+		p.loaded()
+		p.command()
+		// Mark 3, then 1: space marks and moves down.
+		p.send("G ")
+		p.waitState("3 marked", func(st fzfState) bool { return len(st.Selected) == 1 })
+		p.send("j ")
+		p.waitState("1 marked", func(st fzfState) bool { return len(st.Selected) == 2 })
+		p.send("c")
+		p.waitScreen("✓ completed 2: 1, 3")
+		st := p.waitState("the reload", func(st fzfState) bool { return st.TotalCount == 1 })
+		if len(st.Selected) != 0 || lineKey(st.Current) != "2@/trips" {
+			t.Errorf("after c: %+v", st)
+		}
+		if !strings.Contains(p.screen(), "[cmd]") {
+			t.Errorf("left command mode:\n%s", p.screen())
+		}
+		p.send(keyEnter)
+		r := p.result()
+		out := decode(t, r)
+		var ops []string
+		for _, a := range out.Result.Actions {
+			b, _ := json.Marshal(a)
+			ops = append(ops, string(b))
+		}
+		if r.code != 0 || len(ops) != 2 || !strings.HasPrefix(ops[0], `{"input":{"id":1},"operation":"complete","output":{"ok":true,`) ||
+			!strings.HasPrefix(ops[1], `{"input":{"id":3},"operation":"complete","output":{"ok":true,`) {
+			t.Errorf("exit %d: %s", r.code, r.stdout)
+		}
+
+		// Every target shown complete: c reopens.
+		p = startPick(t, fzfDir, tr.cmd("pick", "--fields", "id", "--scope", "all"))
+		p.loaded()
+		p.command()
+		p.send("G")
+		// Ready first, then complete: 1 and 3, completed together, by ID.
+		p.waitState("the cursor on the last line", func(st fzfState) bool { return lineKey(st.Current) == "3@/trips" })
+		p.send("c")
+		p.waitScreen("✓ reopened 3")
+		p.send(keyEsc) // quits, in command mode
+		if r := p.result(); r.code != 0 || !strings.Contains(r.stdout, `"operation":"reopen"`) {
+			t.Errorf("exit %d: %s", r.code, r.stdout)
+		}
+	})
+}
+
 // pick in a pipeline: --from reads an upstream envelope, of each accepted
 // shape, while the picker draws on the terminal; stdout goes downstream.
 // The rejections end pick before the picker opens (pick-spec.md, Accepted

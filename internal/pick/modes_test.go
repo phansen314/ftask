@@ -36,8 +36,8 @@ func TestModeVerbs(t *testing.T) {
 	writeJSON(s, shownFile, shown{})
 	env := Env{Sys: System{Executable: func() (string, error) { return "/bin/ft ask", nil }}}
 	toHeader := "+transform-header('/bin/ft ask' __pick text 'header')"
-	toCommand := "hide-input+rebind(j,k,g,G,space,q,i,/,?)" + toHeader
-	toInsert := "show-input+unbind(j,k,g,G,space,q,i,/,?)" + toHeader
+	toCommand := "hide-input+rebind(j,k,g,G,space,q,i,/,?,c)" + toHeader
+	toInsert := "show-input+unbind(j,k,g,G,space,q,i,/,?,c)" + toHeader
 	headerNow := func() string {
 		b, _, _ := s.Read(textPrefix + "header")
 		return string(b)

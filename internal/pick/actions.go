@@ -38,7 +38,7 @@ type action struct {
 }
 
 // actions are the actions, in the order their keys are bound.
-var actions []action
+var actions = []action{completeAction}
 
 func lookupAction(key string) (action, bool) {
 	i := slices.IndexFunc(actions, func(a action) bool { return a.key == key })
