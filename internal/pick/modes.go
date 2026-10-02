@@ -60,6 +60,7 @@ var help = [][2]string{
 	{"e", "edit notes, in $VISUAL, else $EDITOR, else vi"},
 	{"n", "new task, titled in a prompt that starts with the query"},
 	{"p", "priority: a number, or null for none"},
+	{"t", "tags: a b to set, +a -b to change, - for none"},
 	{"s", "scope: ready, open, all"},
 	{"r", "reload"},
 	{"j k", "down, up"},

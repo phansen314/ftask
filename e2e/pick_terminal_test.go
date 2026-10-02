@@ -683,6 +683,39 @@ func TestPickPriority(t *testing.T) {
 	})
 }
 
+// t end to end: it starts with the target's tags; a mix of bare and
+// prefixed tags is refused with the prompt kept, as is a tag update
+// refuses; bare tags then replace them, shown on the line.
+func TestPickTags(t *testing.T) {
+	eachFzf(t, func(t *testing.T, fzfDir string) {
+		tr := pickTree(t)
+		if r := run(t, tr.cmd("update", "1", "--tags-add", "travel")); r.code != 0 {
+			t.Fatal(r.stdout)
+		}
+		p := startPick(t, fzfDir, tr.cmd("pick", "--fields", "id,tags", "--query", "book"))
+		p.loaded()
+		p.command()
+		p.send("t")
+		p.waitScreen("tags 1> travel")
+		p.send(" +urgent" + keyEnter)
+		p.waitScreen("✗ tags: a mix of bare and +/- tags")
+		p.waitScreen("tags 1> travel +urgent")
+		p.send(keyCtrlU + "Urgent" + keyEnter)
+		p.waitScreen("✗ tags 1: invalid-input")
+		p.send(keyCtrlU + "travel,urgent" + keyEnter)
+		p.waitScreen("✓ set tags 1")
+		p.waitScreen("#travel #urgent")
+		// The search query came back, and still filters.
+		if st := p.state(); st.Query != "book" || st.MatchCount != 1 {
+			t.Errorf("query after the prompt: %+v", st)
+		}
+		p.send(keyEnter)
+		if r := p.result(); r.code != 0 || !strings.Contains(r.stdout, `"tasks":[{"id":1,"tags":["travel","urgent"]}]`) {
+			t.Errorf("exit %d: %s", r.code, r.stdout)
+		}
+	})
+}
+
 // pick in a pipeline: --from reads an upstream envelope, of each accepted
 // shape, while the picker draws on the terminal; stdout goes downstream.
 // The rejections end pick before the picker opens (pick-spec.md, Accepted
