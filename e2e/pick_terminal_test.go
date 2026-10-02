@@ -811,6 +811,48 @@ func TestPickBlock(t *testing.T) {
 	})
 }
 
+// u end to end: a choose list of the target's blockers; the marked one is
+// removed, then the last, under the cursor, and the task is ready again.
+func TestPickUnblock(t *testing.T) {
+	eachFzf(t, func(t *testing.T, fzfDir string) {
+		tr := pickTree(t)
+		if r := run(t, tr.cmd("block", "3", "--blockers", "1,2")); r.code != 0 {
+			t.Fatal(r.stdout)
+		}
+		p := startPick(t, fzfDir, tr.cmd("pick", "--fields", "id,blocked_by"))
+		p.loaded()
+		p.command()
+		p.send("G")
+		p.waitState("the cursor on 3", func(st fzfState) bool { return lineKey(st.Current) == "3@/trips" })
+		p.send("u")
+		p.waitScreen("unblock 3> ")
+		p.waitState("its two blockers", func(st fzfState) bool {
+			return st.TotalCount == 2 && !st.Reading && lineKey(st.Current) == "1@/trips"
+		})
+		p.send(keyTab)
+		p.waitState("1 marked", func(st fzfState) bool { return len(st.Selected) == 1 })
+		p.send(keyEnter)
+		p.waitScreen("✓ unblocked 3")
+		p.waitState("back on 3", func(st fzfState) bool { return st.TotalCount == 3 && lineKey(st.Current) == "3@/trips" })
+		p.waitFor("the input hidden", func() bool { return !strings.Contains(p.screen(), "> ") })
+		p.waitScreen("◐  3")
+		p.send("u")
+		p.waitState("one blocker left", func(st fzfState) bool {
+			return st.TotalCount == 1 && !st.Reading && lineKey(st.Current) == "2@/trips"
+		})
+		p.send(keyEnter)
+		p.waitScreen("●  3")
+		p.waitFor("the input hidden", func() bool { return !strings.Contains(p.screen(), "> ") })
+		p.send(keyEsc)
+		r := p.result()
+		out := decode(t, r)
+		if r.code != 0 || len(out.Result.Actions) != 2 || !strings.Contains(r.stdout, `"input":{"id":3,"blockers":[1]}`) ||
+			!strings.Contains(r.stdout, `"input":{"id":3,"blockers":[2]}`) {
+			t.Errorf("exit %d: %s", r.code, r.stdout)
+		}
+	})
+}
+
 // pick in a pipeline: --from reads an upstream envelope, of each accepted
 // shape, while the picker draws on the terminal; stdout goes downstream.
 // The rejections end pick before the picker opens (pick-spec.md, Accepted
