@@ -17,6 +17,7 @@ import (
 	"github.com/phansen314/ftask/internal/errs"
 	"github.com/phansen314/ftask/internal/jsonio"
 	"github.com/phansen314/ftask/internal/ops"
+	"github.com/phansen314/ftask/internal/pick"
 )
 
 // Env is what one invocation reads and writes besides the operation's own
@@ -27,6 +28,7 @@ type Env struct {
 	Stdout io.Writer              // closed after the one write, if it is an io.Closer
 	Stderr io.Writer              // only for one line after the result, or the notice when it is not delivered
 	Getwd  func() (string, error) // the working directory, for a relative path
+	Pick   pick.System            // finding and running fzf, for pick only
 }
 
 // Exit codes (cli-spec.md, Exit codes).
@@ -52,6 +54,7 @@ func ProcessEnv() Env {
 		Stdout: os.Stdout,
 		Stderr: os.Stderr,
 		Getwd:  os.Getwd, // $PWD when it names the working directory: as the shell reports it
+		Pick:   pick.OSSystem(),
 	}
 }
 

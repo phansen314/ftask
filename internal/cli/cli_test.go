@@ -16,6 +16,7 @@ import (
 	"github.com/phansen314/ftask/internal/fsys"
 	"github.com/phansen314/ftask/internal/jsonio"
 	"github.com/phansen314/ftask/internal/ops"
+	"github.com/phansen314/ftask/internal/pick"
 	"github.com/phansen314/ftask/internal/schematest"
 	"github.com/phansen314/ftask/internal/store"
 )
@@ -812,7 +813,7 @@ func TestPickInput(t *testing.T) {
 	t.Cleanup(func() { runPick = saved })
 	var got string
 	var problems []errs.Problem
-	runPick = func(in *jsonio.Object, ps []errs.Problem, _ ops.Env) ops.Envelope {
+	runPick = func(in *jsonio.Object, ps []errs.Problem, _ pick.Env) ops.Envelope {
 		b, _ := json.Marshal(in)
 		got, problems = string(b), ps
 		return ops.Envelope{OK: true, Result: struct{}{}, Warnings: []errs.Warning{}}

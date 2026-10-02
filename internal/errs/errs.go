@@ -30,6 +30,12 @@ const (
 
 	// KindUsage is raised by the CLI only; no operation raises it.
 	KindUsage Kind = "usage"
+
+	// pick's own kinds (pick-spec.md, Errors), raised by no operation. Their
+	// details are pick's.
+	KindUnavailable Kind = "unavailable"
+	KindCancelled   Kind = "cancelled"
+	KindIncomplete  Kind = "incomplete"
 )
 
 // Error is the error object of the output envelope. Kind and Details are the

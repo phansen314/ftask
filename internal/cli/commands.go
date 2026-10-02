@@ -262,7 +262,7 @@ var commands = []Command{
   ftask pick --source 'ftask frontier --tags-any today'       # kept live
   ftask pick --folders | jq -r '.result.folders[0]'           # a folder path`,
 		Run: func(in *jsonio.Object, problems []errs.Problem, env Env) ops.Envelope {
-			return runPick(in, problems, env.Ops)
+			return runPick(in, problems, pick.Env{Ops: env.Ops, Sys: env.Pick})
 		},
 	},
 }
