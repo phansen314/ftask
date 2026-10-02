@@ -28,7 +28,7 @@ func TestPickFzfCheck(t *testing.T) {
 	}
 	check := func(t *testing.T, path string, env []string, w want) {
 		t.Helper()
-		cmd := ftask(t, "pick")
+		cmd := newTree(t).cmd("pick")
 		cmd.Env = slices.DeleteFunc(cmd.Env, func(kv string) bool { return strings.HasPrefix(kv, "PATH=") })
 		runtime := t.TempDir()
 		cmd.Env = append(cmd.Env, append([]string{"PATH=" + path, "XDG_RUNTIME_DIR=" + runtime}, env...)...)
@@ -55,7 +55,8 @@ func TestPickFzfCheck(t *testing.T) {
 			t.Errorf("exit %d: %s", r.code, r.stdout)
 		}
 	}
-	// Past the check, pick stops for now: the picker isn't written yet.
+	// Past the check and the first load, pick stops for now: the picker
+	// isn't written yet.
 	passed := want{kind: "internal"}
 
 	t.Run("missing", func(t *testing.T) { check(t, fake(""), nil, want{"unavailable", "fzf-missing", ""}) })
@@ -94,7 +95,7 @@ func TestPickSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	pick := func(env ...string) result {
-		cmd := ftask(t, "pick")
+		cmd := newTree(t).cmd("pick")
 		cmd.Env = slices.DeleteFunc(cmd.Env, func(kv string) bool { return strings.HasPrefix(kv, "PATH=") })
 		cmd.Env = append(cmd.Env, append([]string{"PATH=" + fzf}, env...)...)
 		r := run(t, cmd)
@@ -157,6 +158,68 @@ func TestPickHelper(t *testing.T) {
 		r := run(t, ftask(t, args...))
 		if strings.Contains(r.stdout, "__pick") {
 			t.Errorf("%q shows the helper: %s", args, r.stdout)
+		}
+	}
+}
+
+// The first load's errors pass through, with list's own kind and details,
+// and the picker never opens (pick-spec.md, Errors).
+func TestPickFirstLoad(t *testing.T) {
+	fzf := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fzf, "fzf"), []byte("#!/bin/sh\necho 0.63.0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	withFzf := func(cmd *exec.Cmd) *exec.Cmd {
+		cmd.Env = slices.DeleteFunc(cmd.Env, func(kv string) bool { return strings.HasPrefix(kv, "PATH=") })
+		cmd.Env = append(cmd.Env, "PATH="+fzf, "XDG_RUNTIME_DIR="+t.TempDir())
+		return cmd
+	}
+	tr := newTree(t)
+	if r := run(t, tr.cmd("create-folder", "-p", "/a/b")); r.code != 0 {
+		t.Fatal(r.stdout)
+	}
+	for _, tc := range []struct {
+		cmd  *exec.Cmd
+		want string
+	}{
+		{ftask(t, "pick"), `"kind":"not-initialized"`},
+		{tr.cmd("pick", "--folder", "/a/x/y"), `"kind":"not-found","message":"not found: folder /a/x","details":{"folders":["/a/x"]`},
+		{tr.cmd("pick", "--folders", "--folder", "/nope"), `"folders":["/nope"]`},
+		{tr.cmd("pick", "--folder", "/a/b"), `"kind":"internal"`},
+	} {
+		r := run(t, withFzf(tc.cmd))
+		envelope(t, r)
+		if r.code != 1 || !strings.Contains(r.stdout, tc.want) {
+			t.Errorf("%q: exit %d: %s, want %s", tc.cmd.Args[1:], r.code, r.stdout, tc.want)
+		}
+	}
+}
+
+// A scope folder that doesn't exist is list's own not-found, exactly.
+func TestPickFolderNotFoundIsLists(t *testing.T) {
+	fzf := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fzf, "fzf"), []byte("#!/bin/sh\necho 0.63.0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tr := newTree(t)
+	if r := run(t, tr.cmd("create-folder", "-p", "/a/b")); r.code != 0 {
+		t.Fatal(r.stdout)
+	}
+	errorOf := func(r result) string {
+		var env struct {
+			Error json.RawMessage `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(r.stdout), &env); err != nil {
+			t.Fatal(err)
+		}
+		return string(env.Error)
+	}
+	for _, f := range []string{"/x", "/a/x", "/a/b/c/d", "/a/x/b"} {
+		pick := tr.cmd("pick", "--folder", f)
+		pick.Env = append(slices.DeleteFunc(pick.Env, func(kv string) bool { return strings.HasPrefix(kv, "PATH=") }), "PATH="+fzf)
+		got, want := errorOf(run(t, pick)), errorOf(run(t, tr.cmd("list", "--folder", f)))
+		if got != want {
+			t.Errorf("%s: pick %s, list %s", f, got, want)
 		}
 	}
 }

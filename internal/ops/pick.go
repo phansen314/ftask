@@ -1,10 +1,12 @@
 package ops
 
 import (
+	"cmp"
 	"slices"
 	"strings"
 
 	"github.com/phansen314/ftask/internal/model"
+	"github.com/phansen314/ftask/internal/store"
 )
 
 // PickScope is which tasks pick shows at first (pick-spec.md, Command).
@@ -95,3 +97,23 @@ func decodePick(f *model.Fields, p *model.Problems) any {
 	}
 	return in
 }
+
+// PickOrder is the order of pick's lines (pick-spec.md, Lines): ready
+// tasks, then blocked ones, each in frontier order; then complete ones,
+// completed_at newest first, then ID, then, for copies of a duplicated ID,
+// tree order. It is a total order.
+func PickOrder(a, b model.TaskView) int {
+	if c := cmp.Compare(readinessRank[a.Readiness], readinessRank[b.Readiness]); c != 0 {
+		return c
+	}
+	if a.Readiness != model.Complete {
+		return frontierOrder(a, b)
+	}
+	return cmp.Or(
+		cmp.Compare(*b.CompletedAt, *a.CompletedAt), // fixed-width UTC: text order is time order
+		cmp.Compare(a.ID, b.ID),
+		store.CompareFolders(a.Folder, b.Folder),
+	)
+}
+
+var readinessRank = map[model.Readiness]int{model.Ready: 0, model.Blocked: 1, model.Complete: 2}
