@@ -82,6 +82,43 @@ ftask frontier --limit 10 --fields id,title                       # the next rea
 ftask complete 1
 ```
 
+## Picking tasks yourself
+
+`ftask pick` is for working with the tree by hand. It's a [fzf](https://github.com/junegunn/fzf) picker that fuzzy-searches tasks by title and tags, with details and notes in a preview, lets you act on them in place, and prints the ones you choose as one JSON envelope. It needs a terminal and fzf 0.63.0 or later on `PATH`. If `glow` or `bat` is installed, it renders notes in the preview. Agents never run it: run it yourself and hand them the output.
+
+Type to search. Esc switches to command mode, where single keys act on the marked tasks (Tab, or space in command mode, marks one), or else on the one under the cursor:
+
+| Key | Does |
+|---|---|
+| Enter | Emits the selection and exits, in any mode. |
+| `c` | Completes, or reopens if every target is complete. |
+| `e` | Edits notes in `$VISUAL` or `$EDITOR`. |
+| `n` | Creates a task in the scope folder, titled with the query. |
+| `b` / `u` | Blocks on, or unblocks from, tasks chosen from a list. |
+| `m` | Moves to a folder chosen from a list. |
+| `p` / `t` | Sets the priority (`null` clears it) or the tags (`a b` replaces them, `+a -b` adds and removes). |
+| `x` | Edits the title, priority, tags and `extra` as JSON. |
+| `s` / `f` | Cycles the scope (ready, open, all), or changes the folder. |
+| `j` `k` `g` `G` | Moves down, up, to the first line, to the last. |
+| `?` | Shows every key. |
+| `i` or `/` | Goes back to searching. |
+| Esc or `q` | Quits with nothing selected. |
+| ctrl-c | Cancels, in any mode. |
+
+Every change made in the picker is in the output, under `result.actions`, so whatever reads it learns what you did:
+
+```sh
+ftask pick | jq -r '.result.tasks[].id'                            # the IDs picked
+ftask pick --folder /work --scope ready                            # what's ready under /work
+ftask list --readiness blocked --fields id | ftask pick --from -   # choose among the blocked ones
+ftask pick --source 'ftask frontier --tags-any today'              # the same idea, reloaded after each action
+ftask complete "$(ftask pick --query 'renew pass' --select-one | jq -r '.result.tasks[0].id')"   # no picker if only one matches
+ftask pick --folders | jq -r '.result.folders[0]'                  # a folder path instead
+ftask pick > picked.json; jq '.result.actions' picked.json         # what the session changed
+```
+
+`FZF_DEFAULT_OPTS` applies as usual, and `FTASK_PICK_OPTS` is passed after `pick`'s own options, e.g. `FTASK_PICK_OPTS='--height 60% --layout reverse'`. See [pick-spec.md](pick-spec.md) for the whole keymap and every option.
+
 ## Checking and repairing the tree
 
 A crash, a git merge, or a hand edit can leave the tree damaged: a leftover temp file, a blocker that no longer exists, two tasks with one ID. Other commands report damage as warnings, or refuse to act on it; `doctor` finds all of it, and `repair` fixes what is safe to fix:
@@ -113,7 +150,7 @@ Restore only the removed paths, never the whole tree: `ftask.json` holds the las
 - [operations.md](operations.md): every operation's input, output, errors, and retry safety.
 - [cli-spec.md](cli-spec.md): how commands and options map to operations.
 - [implementation-spec.md](implementation-spec.md): how it is built and tested.
-- [pick-spec.md](pick-spec.md): `ftask pick`, an interactive fzf picker for people. Planned, not yet implemented.
+- [pick-spec.md](pick-spec.md): `ftask pick`, the interactive fzf picker for people.
 
 ## Development
 
