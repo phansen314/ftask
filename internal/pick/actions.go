@@ -46,7 +46,7 @@ var actions []action
 // init fills actions, which some actions' own code reads (the command
 // keys, for a prompt).
 func init() {
-	actions = []action{completeAction, editAction, newAction, scopeAction, reloadAction}
+	actions = []action{completeAction, editAction, newAction, priorityAction, scopeAction, reloadAction}
 }
 
 func lookupAction(key string) (action, bool) {

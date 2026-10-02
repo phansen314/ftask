@@ -643,6 +643,46 @@ func TestPickHostileStatus(t *testing.T) {
 	})
 }
 
+// p end to end, the first prompt on targets: it starts with the target's
+// priority, a refused value keeps it open, and the line shows the new one;
+// on several targets it starts empty, and null clears them all.
+func TestPickPriority(t *testing.T) {
+	eachFzf(t, func(t *testing.T, fzfDir string) {
+		tr := pickTree(t)
+		if r := run(t, tr.cmd("update", "1", "--priority", "2")); r.code != 0 {
+			t.Fatal(r.stdout)
+		}
+		p := startPick(t, fzfDir, tr.cmd("pick", "--fields", "id,priority"))
+		p.loaded()
+		p.command()
+		p.send("p")
+		p.waitScreen("priority 1> 2")
+		p.send(keyCtrlU + "high" + keyEnter)
+		p.waitScreen("✗ priority 1: invalid-input")
+		p.waitScreen("priority 1> high")
+		p.send(keyCtrlU + "5" + keyEnter)
+		p.waitScreen("✓ set priority 1")
+		p.waitScreen("p5")
+
+		// Every line marked: several, empty to start; null clears. Marks
+		// wait for the reload: fzf drops those made before its list is in.
+		p.waitFor("the input hidden", func() bool { return !strings.Contains(p.screen(), "> ") })
+		p.post("select-all")
+		p.waitState("three marked", func(st fzfState) bool { return len(st.Selected) == 3 })
+		p.send("p")
+		p.waitScreen("priority 3 tasks> ")
+		p.send("null" + keyEnter)
+		p.waitScreen("✓ set priority 3: 1, 2, 3")
+		p.waitFor("p5 gone", func() bool { return !strings.Contains(p.screen(), "p5") })
+		p.send(keyEnter)
+		r := p.result()
+		out := decode(t, r)
+		if r.code != 0 || len(out.Result.Actions) != 5 || !strings.Contains(r.stdout, `"tasks":[{"id":1,"priority":null}]`) {
+			t.Errorf("exit %d: %s", r.code, r.stdout)
+		}
+	})
+}
+
 // pick in a pipeline: --from reads an upstream envelope, of each accepted
 // shape, while the picker draws on the terminal; stdout goes downstream.
 // The rejections end pick before the picker opens (pick-spec.md, Accepted

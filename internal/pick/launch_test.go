@@ -47,9 +47,10 @@ func TestPickerArgs(t *testing.T) {
 		"--bind", "c:transform:'/opt/my ftask/ftask' __pick act 'c' {+1}",
 		"--bind", "e:transform:'/opt/my ftask/ftask' __pick act 'e' {+1}",
 		"--bind", "n:transform:'/opt/my ftask/ftask' __pick act 'n'",
+		"--bind", "p:transform:'/opt/my ftask/ftask' __pick act 'p' {+1}",
 		"--bind", "s:transform:'/opt/my ftask/ftask' __pick act 's'",
 		"--bind", "r:transform:'/opt/my ftask/ftask' __pick act 'r'",
-		"--bind", "start:unbind(load,j,k,g,G,space,q,i,/,?,c,e,n,s,r)",
+		"--bind", "start:unbind(load,j,k,g,G,space,q,i,/,?,c,e,n,p,s,r)",
 		"--bind", "load:transform:'/opt/my ftask/ftask' __pick on-load",
 	}
 	if got := pk.args(); !slices.Equal(got, want) {

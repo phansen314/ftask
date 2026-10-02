@@ -1,47 +1,14 @@
 package pick
 
 import (
-	"encoding/json"
-	"strconv"
 	"strings"
 	"testing"
-
-	"github.com/phansen314/ftask/internal/jsonio"
 )
 
-// prioritizing is a test action with a prompt on its targets: priority,
-// set through update, one call per target.
-var prioritizing = action{key: "w", arity: anyTargets,
-	run: func(r *actionRun, targets []shownLine) {
-		start := promptStart(targets, func(t shownLine) string {
-			if t.Priority == nil {
-				return ""
-			}
-			return strconv.FormatInt(*t.Priority, 10)
-		})
-		r.openPrompt("w", targetLabel("priority", targets), start, targets)
-	},
-	apply: func(r *actionRun, value string, targets []shownLine) bool {
-		return r.applyEach(value, targets, func(t shownLine) {
-			in := &jsonio.Object{}
-			in.Set("id", idNumber(t.ID))
-			switch _, err := strconv.ParseInt(value, 10, 64); {
-			case value == "":
-				in.Set("priority", nil)
-			case err == nil:
-				in.Set("priority", json.Number(value))
-			default:
-				in.Set("priority", value) // for update to refuse
-			}
-			r.call(t.ID, "update", in, "set priority", "priority "+string(idNumber(t.ID)))
-		})
-	}}
-
-// A prompt on targets: it starts with the one target's value, or empty
-// for several; a refused value keeps it open; with several, an empty value
-// does nothing; any other failure closes it.
+// A prompt on targets, through p: it starts with the one target's value,
+// or empty for several; a refused value keeps it open; with several, an
+// empty value does nothing; any other failure closes it.
 func TestPromptOnTargets(t *testing.T) {
-	withAction(t, prioritizing)
 	tr := newTestTree(t)
 	tr.run("create", map[string]any{"title": "one", "priority": 5})
 	tr.run("create", map[string]any{"title": "two"})
@@ -52,7 +19,7 @@ func TestPromptOnTargets(t *testing.T) {
 		helper("command", "")
 
 		// One target: its value, and its ID in the label.
-		helper("act", "w", "1@/")
+		helper("act", "p", "1@/")
 		if p, q := text("prompt"), text("query"); p != "priority 1> " || q != "5" {
 			t.Errorf("one: prompt %q, query %q", p, q)
 		}
@@ -70,7 +37,7 @@ func TestPromptOnTargets(t *testing.T) {
 		}
 
 		// Several: empty, counted in the label; empty does nothing.
-		helper("act", "w", "2@/", "1@/")
+		helper("act", "p", "2@/", "1@/")
 		if p, q := text("prompt"), text("query"); p != "priority 2 tasks> " || q != "" {
 			t.Errorf("several: prompt %q, query %q", p, q)
 		}
@@ -80,14 +47,26 @@ func TestPromptOnTargets(t *testing.T) {
 		if f := text("footer"); f != "no change" {
 			t.Errorf("no change: footer %q", f)
 		}
-		helper("act", "w", "3@/", "2@/")
+		helper("act", "p", "3@/", "2@/")
 		helper("enter", "3")
 		if f := text("footer"); f != "✓ set priority 2: 2, 3" {
 			t.Errorf("several: footer %q", f)
 		}
 
+		// null clears; with one target, so does an empty value.
+		helper("act", "p", "1@/")
+		helper("enter", " null ")
+		helper("act", "p", "2@/")
+		if q := text("query"); q != "3" {
+			t.Errorf("2's priority %q", q)
+		}
+		helper("enter", "")
+		if f := text("footer"); f != "✓ set priority 2" {
+			t.Errorf("cleared: footer %q", f)
+		}
+
 		// A failure that isn't the value closes the prompt.
-		helper("act", "w", "3@/")
+		helper("act", "p", "3@/")
 		tr.run("delete", map[string]any{"id": 3})
 		if got := helper("enter", "1"); !strings.Contains(got, "reload-sync(") {
 			t.Errorf("not found printed %q", got)
@@ -98,7 +77,8 @@ func TestPromptOnTargets(t *testing.T) {
 		helper("quit")
 	}})
 	// Every call, the refused one included; none for no change.
-	if n := strings.Count(string(line), `"operation":"update"`); n != 5 {
+	if n := strings.Count(string(line), `"operation":"update"`); n != 7 ||
+		!strings.Contains(string(line), `"input":{"id":1,"priority":null}`) || !strings.Contains(string(line), `"input":{"id":2,"priority":null}`) {
 		t.Errorf("%d updates: %s", n, line)
 	}
 }
