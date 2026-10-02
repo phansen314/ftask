@@ -255,9 +255,10 @@ func TestPickOptsUnsplittable(t *testing.T) {
 // apply (pick-spec.md, Selecting at once). No terminal is needed unless the
 // picker opens.
 func TestPickAtOnce(t *testing.T) {
-	if _, err := exec.LookPath("fzf"); err != nil {
-		t.Skip("no fzf installed")
-	}
+	eachFzf(t, func(t *testing.T, fzfDir string) { testPickAtOnce(t, fzfDir) })
+}
+
+func testPickAtOnce(t *testing.T, fzfDir string) {
 	tr := newTree(t)
 	for _, c := range [][]string{
 		{"create-folder", "-p", "/trips/japan"},
@@ -286,6 +287,11 @@ func TestPickAtOnce(t *testing.T) {
 		{[]string{"--exit-zero"}, "FZF_DEFAULT_OPTS=--bogus", `"details":{"reason":"fzf-failed","status":2,"actions":[]}`},
 	} {
 		cmd := noTTY(tr.cmd(append([]string{"pick", "--fields", "id,title"}, tc.args...)...))
+		for i, kv := range cmd.Env {
+			if path, ok := strings.CutPrefix(kv, "PATH="); ok {
+				cmd.Env[i] = "PATH=" + fzfDir + string(filepath.ListSeparator) + path
+			}
+		}
 		cmd.Env = append(cmd.Env, "XDG_RUNTIME_DIR="+t.TempDir())
 		if tc.env != "" {
 			cmd.Env = append(cmd.Env, tc.env)

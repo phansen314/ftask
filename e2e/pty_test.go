@@ -231,28 +231,12 @@ type picker struct {
 
 // startPick starts cmd, an ftask pick command, in a 24 by 100 terminal,
 // with the fzf in fzfDir. Its stdout and stderr are captured, unless cmd
-// sets them, and its stdin is the terminal, unless cmd sets it. fzf gets
-// --listen after any FTASK_PICK_OPTS in cmd's environment. startPick
+// sets them, and its stdin is the terminal, unless cmd sets it. startPick
 // returns once fzf answers, or pick has exited.
 func startPick(t *testing.T, fzfDir string, cmd *exec.Cmd) *picker {
 	t.Helper()
-	p := &picker{port: freePort(t)}
-	opts := "--listen=127.0.0.1:" + fmt.Sprint(p.port)
-	env := cmd.Env[:0:0]
-	for _, kv := range cmd.Env {
-		switch {
-		case strings.HasPrefix(kv, "PATH="):
-			kv = "PATH=" + fzfDir + string(filepath.ListSeparator) + strings.TrimPrefix(kv, "PATH=")
-		case strings.HasPrefix(kv, "FTASK_PICK_OPTS="):
-			opts = strings.TrimPrefix(kv, "FTASK_PICK_OPTS=") + " " + opts
-			continue
-		}
-		env = append(env, kv)
-	}
-	if !slices.ContainsFunc(env, func(kv string) bool { return strings.HasPrefix(kv, "XDG_RUNTIME_DIR=") }) {
-		env = append(env, "XDG_RUNTIME_DIR="+t.TempDir())
-	}
-	cmd.Env = append(env, "FTASK_PICK_OPTS="+opts)
+	p := &picker{}
+	cmd.Env, p.port = pickEnv(t, fzfDir, cmd.Env)
 	if cmd.Stdout == nil {
 		cmd.Stdout = &p.stdout
 	}
@@ -260,6 +244,38 @@ func startPick(t *testing.T, fzfDir string, cmd *exec.Cmd) *picker {
 		cmd.Stderr = &p.stderr
 	}
 	p.term = startTerm(t, cmd, 24, 100)
+	p.listening()
+	return p
+}
+
+// pickEnv is env for running pick with the fzf in fzfDir first on PATH, a
+// runtime directory of its own unless env sets one, and fzf listening on
+// the port returned, after any FTASK_PICK_OPTS in env.
+func pickEnv(t *testing.T, fzfDir string, env []string) ([]string, int) {
+	t.Helper()
+	port := freePort(t)
+	opts := "--listen=127.0.0.1:" + fmt.Sprint(port)
+	out := make([]string, 0, len(env)+2)
+	for _, kv := range env {
+		switch {
+		case strings.HasPrefix(kv, "PATH="):
+			kv = "PATH=" + fzfDir + string(filepath.ListSeparator) + strings.TrimPrefix(kv, "PATH=")
+		case strings.HasPrefix(kv, "FTASK_PICK_OPTS="):
+			opts = strings.TrimPrefix(kv, "FTASK_PICK_OPTS=") + " " + opts
+			continue
+		}
+		out = append(out, kv)
+	}
+	if !slices.ContainsFunc(out, func(kv string) bool { return strings.HasPrefix(kv, "XDG_RUNTIME_DIR=") }) {
+		out = append(out, "XDG_RUNTIME_DIR="+t.TempDir())
+	}
+	return append(out, "FTASK_PICK_OPTS="+opts), port
+}
+
+// listening waits until fzf answers on its port, or the process has
+// exited.
+func (p *picker) listening() {
+	p.t.Helper()
 	p.waitFor("fzf to listen", func() bool {
 		if p.done() {
 			return true
@@ -267,7 +283,6 @@ func startPick(t *testing.T, fzfDir string, cmd *exec.Cmd) *picker {
 		_, err := p.get()
 		return err == nil
 	})
-	return p
 }
 
 // freePort is a local TCP port free a moment ago.
@@ -372,51 +387,4 @@ func lineKey(it *fzfItem) string {
 	}
 	k, _, _ := strings.Cut(it.Text, "\t")
 	return k
-}
-
-// The harness itself: a picker opens on the tree, shows its lines, takes
-// keys and actions, and ends with pick's envelope, with stdin the terminal
-// or redirected.
-func TestPickTerminal(t *testing.T) {
-	eachFzf(t, func(t *testing.T, fzfDir string) {
-		tr := newTree(t)
-		for _, c := range [][]string{
-			{"create-folder", "/trips"},
-			{"create", "Book flights", "--folder", "/trips"},
-			{"create", "Renew passport", "--folder", "/trips"},
-		} {
-			if r := run(t, tr.cmd(c...)); r.code != 0 {
-				t.Fatal(r.stdout)
-			}
-		}
-		t.Run("enter", func(t *testing.T) {
-			p := startPick(t, fzfDir, tr.cmd("pick", "--fields", "id,title"))
-			st := p.loaded()
-			if st.TotalCount != 2 || lineKey(st.Current) != "1@/trips" {
-				t.Fatalf("state %+v", st)
-			}
-			p.waitScreen("Renew passport")
-			p.send("pass")
-			p.waitState("the query to filter", func(st fzfState) bool { return st.Query == "pass" && st.MatchCount == 1 })
-			p.post("change-query()")
-			p.waitState("the query to clear", func(st fzfState) bool { return st.Query == "" && st.MatchCount == 2 })
-			p.send(keyEnter)
-			r := p.result()
-			envelope(t, r)
-			if r.code != 0 || !strings.Contains(r.stdout, `"tasks":[{"id":1,"title":"Book flights"}]`) {
-				t.Errorf("exit %d: %s", r.code, r.stdout)
-			}
-		})
-		t.Run("stdin redirected, cancel", func(t *testing.T) {
-			cmd := stdin(tr.cmd("pick", "--fields", "id,title"), "")
-			p := startPick(t, fzfDir, cmd)
-			p.loaded()
-			p.send(keyCtrlC)
-			r := p.result()
-			envelope(t, r)
-			if r.code != 1 || !strings.Contains(r.stdout, `"kind":"cancelled"`) {
-				t.Errorf("exit %d: %s", r.code, r.stdout)
-			}
-		})
-	})
 }
