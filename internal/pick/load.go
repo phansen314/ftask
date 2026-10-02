@@ -19,24 +19,29 @@ type Load struct {
 	Warnings []errs.Warning
 }
 
-// load runs list over the whole tree. On failure, the envelope is list's
-// own, which the first load passes through (pick-spec.md, Errors).
-func load(env ops.Env) (*Load, *ops.Envelope) {
+// load runs list over the whole tree, with the folders for a load, without
+// for the final read (pick-spec.md, Output). On failure, the envelope is
+// list's own, which the first load passes through (pick-spec.md, Errors).
+func load(env ops.Env, folders bool) (*Load, *ops.Envelope) {
 	in := &jsonio.Object{}
 	in.Set("folder", string(model.RootFolder))
 	in.Set("recursive", true)
 	in.Set("readiness", []any{string(model.Ready), string(model.Blocked), string(model.Complete)})
-	in.Set("include_folders", true)
+	in.Set("include_folders", folders)
 	out := ops.Run("list", in, nil, env)
 	if !out.OK {
 		return nil, &out
 	}
 	r, ok := out.Result.(ops.ListOutput)
-	if !ok || r.Folders == nil {
+	if !ok || (r.Folders == nil) == folders {
 		e := ops.Failed(errs.Internal("list returned an unexpected result"))
 		return nil, &e
 	}
-	return &Load{Folders: *r.Folders, Tasks: r.Tasks.Views, Warnings: out.Warnings}, nil
+	l := &Load{Tasks: r.Tasks.Views, Warnings: out.Warnings}
+	if folders {
+		l.Folders = *r.Folders
+	}
+	return l, nil
 }
 
 // Scope is what decides the candidates: the scope folder, recursion,

@@ -30,6 +30,8 @@ func TestPickerArgs(t *testing.T) {
 		"--query", "renew pass",
 		"--header", "/\nenter: pick · tab: mark · ctrl-c: cancel",
 		"--preview", "'/opt/my ftask/ftask' __pick preview {1}",
+		"--bind", "enter:transform:'/opt/my ftask/ftask' __pick enter {+1}",
+		"--bind", "esc:transform:'/opt/my ftask/ftask' __pick quit",
 		"--bind", "ctrl-d:delete-char",
 		"--bind", "ctrl-/:toggle-preview",
 		"--bind", "start:unbind(load)",
@@ -152,9 +154,9 @@ func TestShow(t *testing.T) {
 	}
 
 	f := &fakeRun{status: 130}
-	e = show(Env{Sys: f.system()}, "/bin/fzf", pk, []string{"a\tx", "b\ty"}, s)
-	if e == nil || e.Kind != errs.KindInternal {
-		t.Errorf("130: %v", e)
+	status, e := show(Env{Sys: f.system()}, "/bin/fzf", pk, []string{"a\tx", "b\ty"}, s)
+	if status != 130 || e != nil {
+		t.Errorf("130: %d, %v", status, e)
 	}
 	if f.path != "/bin/fzf" || !slices.Equal(f.args, pk.args()) || string(f.stdin) != "a\tx\nb\ty\n" ||
 		!slices.Equal(f.env, []string{"HOME=/h", SessionVar + "=" + s.Dir}) {
@@ -168,19 +170,13 @@ func TestShow(t *testing.T) {
 	}
 
 	f = &fakeRun{ttyErr: errors.New("ENXIO")}
-	e = show(Env{Sys: f.system()}, "/bin/fzf", pk, nil, s)
+	_, e = show(Env{Sys: f.system()}, "/bin/fzf", pk, nil, s)
 	if e == nil || e.Kind != errs.KindUnavailable || details(e) != `{"reason":"no-terminal"}` || f.ran {
 		t.Errorf("no terminal: %v %s, ran %v", e, details(e), f.ran)
 	}
 
-	f = &fakeRun{status: 2}
-	e = show(Env{Sys: f.system()}, "/bin/fzf", pk, nil, s)
-	if e == nil || details(e) != `{"reason":"fzf-failed","status":2,"actions":[]}` {
-		t.Errorf("status 2: %v %s", e, details(e))
-	}
-
 	f = &fakeRun{err: errors.New("signal: killed")}
-	e = show(Env{Sys: f.system()}, "/bin/fzf", pk, nil, s)
+	_, e = show(Env{Sys: f.system()}, "/bin/fzf", pk, nil, s)
 	if e == nil || details(e) != `{"reason":"fzf-failed","actions":[]}` {
 		t.Errorf("killed: %v %s", e, details(e))
 	}

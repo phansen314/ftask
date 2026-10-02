@@ -19,7 +19,9 @@ type verb func(s *Session, args []string, env Env) ([]byte, *errs.Error)
 
 // verbs are the helper's verbs, by name.
 var verbs = map[string]verb{
+	"enter":   enter,
 	"on-load": onLoad,
+	"quit":    quit,
 	"preview": previewVerb,
 	"text":    text,
 }

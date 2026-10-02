@@ -30,7 +30,7 @@ func Run(in *jsonio.Object, problems []errs.Problem, env Env) ops.Envelope {
 	if e != nil {
 		return ops.Failed(e)
 	}
-	l, failed := load(env.Ops)
+	l, failed := load(env.Ops, true)
 	if failed != nil {
 		return *failed
 	}
@@ -61,7 +61,11 @@ func Run(in *jsonio.Object, problems []errs.Problem, env Env) ops.Envelope {
 	if e := writePreviews(s, l); e != nil {
 		return ops.Envelope{Error: e, Warnings: l.Warnings}
 	}
-	return ops.Envelope{Error: show(env, fzf, pk, lines, s), Warnings: l.Warnings}
+	status, e := show(env, fzf, pk, lines, s)
+	if e != nil {
+		return ops.Envelope{Error: e, Warnings: l.Warnings}
+	}
+	return finish(env, s, status, pin.Fields)
 }
 
 // noColor reports whether lines carry no color: NO_COLOR set, and not

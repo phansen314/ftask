@@ -60,6 +60,9 @@ func (pk picker) args() []string {
 		"--query", pk.query,
 		"--header", pk.header(),
 		"--preview", pk.helper("preview")+" {1}",
+		"--bind", "enter:transform:"+pk.helper("enter")+" {+1}",
+		// Until command mode (#19), Esc quits, as it will in command mode.
+		"--bind", "esc:transform:"+pk.helper("quit"),
 		"--bind", "ctrl-d:delete-char",
 		"--bind", "ctrl-/:toggle-preview",
 		// load is bound from the start, so that a callback can rebind it
@@ -136,22 +139,20 @@ func fzfEnv(environ []string, s *Session) []string {
 	return append(env, SessionVar+"="+s.Dir)
 }
 
-// show runs the picker on lines and returns how it ended. The terminal is
-// checked first, as the picker is about to be shown (pick-spec.md, Errors).
-func show(env Env, fzf string, pk picker, lines []string, s *Session) *errs.Error {
+// show runs the picker on lines and returns fzf's exit status. The terminal
+// is checked first, as the picker is about to be shown (pick-spec.md,
+// Errors).
+func show(env Env, fzf string, pk picker, lines []string, s *Session) (int, *errs.Error) {
 	if err := env.Sys.OpenTTY(); err != nil {
-		return unavailable("no terminal: /dev/tty does not open; pick is for a person at a terminal", UnavailableDetails{Reason: NoTerminal})
+		return 0, unavailable("no terminal: /dev/tty does not open; pick is for a person at a terminal", UnavailableDetails{Reason: NoTerminal})
 	}
 	var stdin []byte
 	if len(lines) > 0 {
 		stdin = []byte(strings.Join(lines, "\n") + "\n")
 	}
 	status, err := env.Sys.RunFzf(fzf, pk.args(), fzfEnv(env.Sys.Environ(), s), stdin)
-	switch {
-	case err != nil:
-		return unavailable(fmt.Sprintf("fzf failed: %v", err), UnavailableDetails{Reason: FzfFailed, Actions: []any{}})
-	case status == 2:
-		return unavailable("fzf exited with status 2; its message is above, on the terminal", UnavailableDetails{Reason: FzfFailed, Status: &status, Actions: []any{}})
+	if err != nil {
+		return 0, unavailable(fmt.Sprintf("fzf failed: %v", err), UnavailableDetails{Reason: FzfFailed, Actions: []any{}})
 	}
-	return errs.Internal(fmt.Sprintf("pick does not record a selection yet: fzf exited with status %d", status))
+	return status, nil
 }
