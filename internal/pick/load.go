@@ -57,6 +57,9 @@ type Scope struct {
 	// Source is a live source's command, run again on every reload; ""
 	// when there is none.
 	Source string
+	// Folders is the folder picker's: it lists folders, not tasks, and has
+	// no actions.
+	Folders bool
 }
 
 // scopeOf is the scope pick's input starts with.
@@ -72,6 +75,7 @@ func scopeOf(in ops.PickInput) Scope {
 	if in.Source != nil {
 		s.Source = *in.Source
 	}
+	s.Folders = in.Folders
 	return s
 }
 

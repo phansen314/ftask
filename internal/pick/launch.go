@@ -58,7 +58,7 @@ func (pk picker) args() []string {
 		"--tabstop", "1",
 		"--prompt", promptOf(pk.scope),
 		"--query", pk.query,
-		"--header", header("", "", "", false, pk.scopeLine()),
+		"--header", header("", "", "", false, false, pk.scopeLine()),
 		"--preview", pk.helper("preview")+" {1}",
 		"--bind", "enter:transform:"+pk.helper("enter")+" {q} {+1}",
 		"--bind", "esc:transform:"+pk.helper("esc")+" {q}",
@@ -77,6 +77,9 @@ func (pk picker) args() []string {
 		"--bind", "?:preview:"+pk.helper("help"),
 	)
 	for _, ac := range actions {
+		if pk.scope.Folders {
+			break // the folder picker has no actions
+		}
 		bind := ac.key + ":transform:" + pk.helper("act", ac.key)
 		if ac.arity != noTargets {
 			bind += " {+1}"

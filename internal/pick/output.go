@@ -79,7 +79,7 @@ type IncompleteDetails struct {
 // fzf's exit status (pick-spec.md, fzf contract), and writes the envelope.
 // A recorded selection is Enter or quit, whatever the status; without one,
 // 130 is cancel, and any other status is fzf-failed.
-func finish(env Env, s *Session, status int, fields []string) ops.Envelope {
+func finish(env Env, s *Session, status int, fields []string, folders bool) ops.Envelope {
 	actions, e := loggedActions(s)
 	if e != nil {
 		return ops.Failed(e)
@@ -94,11 +94,52 @@ func finish(env Env, s *Session, status int, fields []string) ops.Envelope {
 		return ops.Failed(unavailable(fmt.Sprintf("fzf exited with status %d without a selection; any message from fzf is above, on the terminal", status),
 			UnavailableDetails{Reason: FzfFailed, Status: &status, Actions: actions}))
 	}
+	if folders {
+		return emitFolders(env, strings.Fields(string(b)), actions)
+	}
 	notesEdited, e := readNotesEdited(s)
 	if e != nil {
 		return ops.Failed(e)
 	}
 	return emit(env, strings.Fields(string(b)), fields, actions, notesEdited)
+}
+
+// FoldersOutput is the folder picker's result (pick-output).
+type FoldersOutput struct {
+	Folders []model.FolderPath `json:"folders"`
+	Missing []model.FolderPath `json:"missing"`
+	Actions []any              `json:"actions"`
+}
+
+// emitFolders runs the final read and writes the selected folders, keys,
+// as Enter does in the folder picker (pick-spec.md, Folder picker): those
+// the read finds, in tree order, and the rest, moved or deleted meanwhile,
+// in missing.
+func emitFolders(env Env, keys []string, actions []any) ops.Envelope {
+	l, failed := load(env.Ops, true)
+	if failed != nil {
+		e := &errs.Error{
+			Kind:    errs.KindIncomplete,
+			Message: "the session ended, but its result could not be read: " + failed.Error.Message,
+			Details: IncompleteDetails{Actions: actions, Error: failed.Error},
+		}
+		return ops.Envelope{Error: e, Warnings: failed.Warnings}
+	}
+	folders := []model.FolderPath{}
+	for _, f := range l.Folders {
+		if slices.Contains(keys, string(f)) {
+			folders = append(folders, f)
+		}
+	}
+	missing := []model.FolderPath{}
+	for _, k := range keys {
+		f := model.FolderPath(k)
+		if !slices.Contains(l.Folders, f) && !slices.Contains(missing, f) {
+			missing = append(missing, f)
+		}
+	}
+	slices.Sort(missing)
+	return ops.Envelope{OK: true, Result: FoldersOutput{Folders: folders, Missing: missing, Actions: actions}, Warnings: l.Warnings}
 }
 
 // emit runs the final read and writes the selection of keys, as Enter does

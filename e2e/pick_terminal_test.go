@@ -1014,6 +1014,74 @@ func TestPickSource(t *testing.T) {
 	})
 }
 
+// --folders end to end: the folders, / first; typing filters them; marks
+// emit in tree order; there are no actions; q quits; --select-one finishes
+// without the picker.
+func TestPickFolders(t *testing.T) {
+	eachFzf(t, func(t *testing.T, fzfDir string) {
+		tr := pickTree(t)
+		for _, f := range []string{"/trips/japan", "/home"} {
+			if r := run(t, tr.cmd("create-folder", f)); r.code != 0 {
+				t.Fatal(r.stdout)
+			}
+		}
+		folders := func(r result) string {
+			t.Helper()
+			out := decode(t, r)
+			var res struct {
+				Result json.RawMessage `json:"result"`
+			}
+			json.Unmarshal([]byte(r.stdout), &res)
+			if r.code != 0 || !out.OK {
+				t.Errorf("exit %d: %s", r.code, r.stdout)
+			}
+			return string(res.Result)
+		}
+
+		p := startPick(t, fzfDir, tr.cmd("pick", "--folders"))
+		if st := p.loaded(); st.TotalCount != 4 || lineKey(st.Current) != "/" {
+			t.Fatalf("folders: %+v", st)
+		}
+		p.setQuery("jap", 1)
+		p.send(keyEnter)
+		if got := folders(p.result()); got != `{"folders":["/trips/japan"],"missing":[],"actions":[]}` {
+			t.Errorf("enter: %s", got)
+		}
+
+		// Marked /trips then /home; c is no action here.
+		p = startPick(t, fzfDir, tr.cmd("pick", "--folders"))
+		p.loaded()
+		p.command()
+		p.send("k")
+		p.waitState("on /home", func(st fzfState) bool { return lineKey(st.Current) == "/home" })
+		p.send("k")
+		p.waitState("on /trips", func(st fzfState) bool { return lineKey(st.Current) == "/trips" })
+		// Space marks, and moves down to /home.
+		p.send(" ")
+		p.waitState("/trips marked", func(st fzfState) bool { return len(st.Selected) == 1 && lineKey(st.Current) == "/home" })
+		p.send("c")
+		p.send(keyTab)
+		p.waitState("/home marked", func(st fzfState) bool { return len(st.Selected) == 2 })
+		p.send(keyEnter)
+		if got := folders(p.result()); got != `{"folders":["/home","/trips"],"missing":[],"actions":[]}` {
+			t.Errorf("marks: %s", got)
+		}
+
+		p = startPick(t, fzfDir, tr.cmd("pick", "--folders"))
+		p.loaded()
+		p.command()
+		p.send("q")
+		if got := folders(p.result()); got != `{"folders":[],"missing":[],"actions":[]}` {
+			t.Errorf("q: %s", got)
+		}
+
+		p = startPick(t, fzfDir, tr.cmd("pick", "--folders", "--select-one", "--query", "japan"))
+		if got := folders(p.result()); got != `{"folders":["/trips/japan"],"missing":[],"actions":[]}` {
+			t.Errorf("select-one: %s", got)
+		}
+	})
+}
+
 // pick in a pipeline: --from reads an upstream envelope, of each accepted
 // shape, while the picker draws on the terminal; stdout goes downstream.
 // The rejections end pick before the picker opens (pick-spec.md, Accepted

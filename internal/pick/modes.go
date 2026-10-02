@@ -48,6 +48,9 @@ func commandKeys() []string {
 const (
 	insertHint  = "enter: pick · tab: mark · esc: commands"
 	commandHint = "c: complete · i: search · ?: keys · q: quit"
+	// folderHint is command mode's in the folder picker, which has no
+	// actions.
+	folderHint  = "i: search · ?: keys · q: quit"
 	promptHint  = "enter: apply · esc: cancel"
 	chooseHint  = "enter: choose · tab: mark · esc: cancel"
 	pickOneHint = "enter: choose · esc: cancel"
@@ -82,14 +85,18 @@ var help = [][2]string{
 // header is the header in a mode: in command mode, the mode and the
 // query, which is hidden; in prompt mode, what the prompt asks for; then
 // the scope line; then the mode's keys.
-func header(mode, query, label string, single bool, scopeLine string) string {
+func header(mode, query, label string, single, folders bool, scopeLine string) string {
 	switch mode {
 	case modeCommand:
 		line := "[cmd]"
 		if query != "" {
 			line += " query: " + errs.OneLine(query)
 		}
-		return line + "\n" + scopeLine + "\n" + commandHint
+		hint := commandHint
+		if folders {
+			hint = folderHint
+		}
+		return line + "\n" + scopeLine + "\n" + hint
 	case modePrompt:
 		return "[" + strings.TrimSuffix(label, "> ") + "]\n" + scopeLine + "\n" + promptHint
 	case modeChoose:
@@ -203,7 +210,7 @@ func writeHeader(s *Session, env Env) (string, *errs.Error) {
 			return "", e
 		}
 	}
-	h := header(string(mode), string(query), label, single, scopeLine(scope, sh.Missing))
+	h := header(string(mode), string(query), label, single, scope.Folders, scopeLine(scope, sh.Missing))
 	if e := s.Write(textPrefix+"header", []byte(h)); e != nil {
 		return "", e
 	}
@@ -215,13 +222,23 @@ func writeHeader(s *Session, env Env) (string, *errs.Error) {
 }
 
 // helpVerb prints command mode's keys, for the preview.
-func helpVerb(_ *Session, args []string, _ Env) ([]byte, *errs.Error) {
+func helpVerb(s *Session, args []string, _ Env) ([]byte, *errs.Error) {
 	if len(args) != 0 {
 		return nil, errs.Usage([]errs.UsageProblem{{Argument: &args[0], Reason: "unexpected argument"}})
+	}
+	// The folder picker has no actions.
+	var scope Scope
+	if s != nil {
+		if _, ok, _ := s.Read(scopeFile); ok {
+			readJSON(s, scopeFile, &scope)
+		}
 	}
 	var b strings.Builder
 	b.WriteString("command mode\n\n")
 	for _, row := range help {
+		if _, isAction := lookupAction(row[0]); isAction && scope.Folders {
+			continue
+		}
 		b.WriteString(row[0] + strings.Repeat(" ", 11-len(row[0])) + row[1] + "\n")
 	}
 	return []byte(b.String()), nil

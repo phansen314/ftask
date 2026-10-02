@@ -24,11 +24,34 @@ func folderLines(r *actionRun, what string) []string {
 		r.status = "✗ " + what + ": " + errText(failed.Error)
 		return nil
 	}
-	lines := make([]string, len(l.Folders))
-	for i, f := range l.Folders {
+	return folderLinesOf(l.Folders)
+}
+
+// folderLinesOf are folders' lines, as folderLines makes them.
+func folderLinesOf(folders []model.FolderPath) []string {
+	lines := make([]string, len(folders))
+	for i, f := range folders {
 		lines[i] = string(f) + "\t\t" + string(f)
 	}
 	return lines
+}
+
+// foldersIn are the load's folders in s, as list has them (pick-spec.md,
+// Folder picker): the scope folder, then every folder under it, or, not
+// recursive, its immediate subfolders; in tree order.
+func (l *Load) foldersIn(s Scope) []model.FolderPath {
+	var out []model.FolderPath
+	for _, f := range l.Folders {
+		switch {
+		case f == s.Folder:
+		case s.Recursive && inFolder(f, s.Folder, true):
+		case !s.Recursive && inFolder(f, s.Folder, true) && len(f.Segments()) == len(s.Folder.Segments())+1:
+		default:
+			continue
+		}
+		out = append(out, f)
+	}
+	return out
 }
 
 func openMove(r *actionRun, targets []shownLine) {

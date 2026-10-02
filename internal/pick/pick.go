@@ -48,12 +48,16 @@ func Run(in *jsonio.Object, problems []errs.Problem, env Env) ops.Envelope {
 	if e := l.checkFolder(scope.Folder); e != nil {
 		return ops.Envelope{Error: e, Warnings: l.Warnings}
 	}
-	if pin.Folders {
-		return ops.Envelope{Error: errs.Internal("the folder picker is not implemented yet"), Warnings: l.Warnings}
-	}
 	environ := env.Sys.Environ()
-	views, missing := l.candidates(scope)
-	lines := renderLines(views, !noColor(environ))
+	var views []model.TaskView
+	var missing int
+	var lines []string
+	if scope.Folders {
+		lines = folderLinesOf(l.foldersIn(scope))
+	} else {
+		views, missing = l.candidates(scope)
+		lines = renderLines(views, !noColor(environ))
+	}
 	opts, e := userOpts(environ)
 	if e != nil {
 		return ops.Envelope{Error: e, Warnings: l.Warnings}
@@ -69,6 +73,9 @@ func Run(in *jsonio.Object, problems []errs.Problem, env Env) ops.Envelope {
 			return ops.Envelope{Error: e, Warnings: l.Warnings}
 		}
 		if keys, done := decideAtOnce(matched, pin.SelectOne, pin.ExitZero); done {
+			if scope.Folders {
+				return emitFolders(env, keys, []any{})
+			}
 			return emit(env, keys, pin.Fields, []any{}, []model.ID{})
 		}
 	}
@@ -87,7 +94,7 @@ func Run(in *jsonio.Object, problems []errs.Problem, env Env) ops.Envelope {
 	if e != nil {
 		return ops.Envelope{Error: e, Warnings: l.Warnings}
 	}
-	return finish(env, s, status, pin.Fields)
+	return finish(env, s, status, pin.Fields, scope.Folders)
 }
 
 // noColor reports whether lines carry no color: NO_COLOR set, and not
