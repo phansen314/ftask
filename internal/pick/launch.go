@@ -150,7 +150,12 @@ func show(env Env, fzf string, pk picker, lines []string, s *Session) (int, *err
 	if len(lines) > 0 {
 		stdin = []byte(strings.Join(lines, "\n") + "\n")
 	}
+	// In the picker, ctrl-c is a key. Outside it, while fzf is suspended
+	// for an editor, it is SIGINT to the whole foreground process group,
+	// pick included, which carries on.
+	restore := env.Sys.CatchInterrupts()
 	status, err := env.Sys.RunFzf(fzf, pk.args(), fzfEnv(env.Sys.Environ(), s), stdin)
+	restore()
 	if err != nil {
 		return 0, unavailable(fmt.Sprintf("fzf failed: %v", err), UnavailableDetails{Reason: FzfFailed, Actions: []any{}})
 	}

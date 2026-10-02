@@ -121,19 +121,25 @@ func TestFzfEnv(t *testing.T) {
 
 // fakeRun is a System whose terminal and fzf are fakes.
 type fakeRun struct {
-	ttyErr    error
-	status    int
-	err       error
-	ran       bool
-	path      string
-	args, env []string
-	stdin     []byte
+	ttyErr error
+	status int
+	err    error
+	ran    bool
+	// caught is set while fzf runs; restored, once restored after it ran.
+	caught, restored bool
+	path             string
+	args, env        []string
+	stdin            []byte
 }
 
 func (f *fakeRun) system() System {
 	return System{
 		Environ: func() []string { return []string{"HOME=/h"} },
 		OpenTTY: func() error { return f.ttyErr },
+		CatchInterrupts: func() func() {
+			f.caught = !f.ran
+			return func() { f.restored = f.ran }
+		},
 		RunFzf: func(path string, args, env []string, stdin []byte) (int, error) {
 			f.ran, f.path, f.args, f.env, f.stdin = true, path, args, env, stdin
 			return f.status, f.err
@@ -157,6 +163,9 @@ func TestShow(t *testing.T) {
 	status, e := show(Env{Sys: f.system()}, "/bin/fzf", pk, []string{"a\tx", "b\ty"}, s)
 	if status != 130 || e != nil {
 		t.Errorf("130: %d, %v", status, e)
+	}
+	if !f.caught || !f.restored {
+		t.Errorf("interrupts caught %v before fzf, restored %v after", f.caught, f.restored)
 	}
 	if f.path != "/bin/fzf" || !slices.Equal(f.args, pk.args()) || string(f.stdin) != "a\tx\nb\ty\n" ||
 		!slices.Equal(f.env, []string{"HOME=/h", SessionVar + "=" + s.Dir}) {

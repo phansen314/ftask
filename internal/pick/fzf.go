@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/phansen314/ftask/internal/errs"
 )
@@ -34,6 +36,10 @@ type System struct {
 	// its own problems. It returns fzf's exit status; err only when fzf
 	// could not be started or did not exit normally.
 	RunFzf func(path string, args, env []string, stdin []byte) (status int, err error)
+	// CatchInterrupts catches SIGINT and SIGQUIT and discards them, until
+	// the function it returns restores default handling (pick-spec.md,
+	// Signals).
+	CatchInterrupts func() (restore func())
 }
 
 // OSSystem is the process's own.
@@ -45,6 +51,30 @@ func OSSystem() System {
 		Executable: os.Executable,
 		OpenTTY:    openTTY,
 		RunFzf:     runFzf,
+
+		CatchInterrupts: catchInterrupts,
+	}
+}
+
+// catchInterrupts catches the signals rather than ignoring them: an ignored
+// signal stays ignored in every program fzf starts (the editor, a source
+// command), while a caught one is reset to default by exec.
+func catchInterrupts() func() {
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGINT, syscall.SIGQUIT)
+	done := make(chan struct{})
+	go func() {
+		for {
+			select {
+			case <-c:
+			case <-done:
+				return
+			}
+		}
+	}()
+	return func() {
+		signal.Reset(syscall.SIGINT, syscall.SIGQUIT)
+		close(done)
 	}
 }
 

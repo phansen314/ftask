@@ -100,6 +100,8 @@ func (tr *tree) pick(in map[string]any, fzf fzfDoes) (ops.Envelope, []byte) {
 		Environ:    func() []string { return []string{"XDG_RUNTIME_DIR=" + runtimeDir} },
 		Executable: func() (string, error) { return "/bin/ftask", nil },
 		OpenTTY:    func() error { return nil },
+
+		CatchInterrupts: func() func() { return func() {} },
 	}
 	sys.RunFzf = func(_ string, _ []string, env []string, _ []byte) (int, error) {
 		helper := func(args ...string) string {
