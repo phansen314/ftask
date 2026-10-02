@@ -489,7 +489,7 @@ Where `pick` differs from the [CLI spec](cli-spec.md)'s global rules, and why:
 - **The helper is the unit.** Every action, mode switch and callback is a call to `ftask __pick` with a session directory, so it is tested without fzf: given a session and a key's arguments, check the fzf actions printed, the session after, and the operations run.
 - **fzf end to end.** A smoke test drives a real fzf in a pseudo-terminal, with a scripted key sequence through fzf's `--listen` (or by writing keys to the pty). It covers each mode switch, one action of each kind, Enter, quit and cancel, and checks the envelope. It also covers:
   - **Outcomes.** Enter on an empty list, and quit with a query that matches nothing, each give `ok: true` with an empty selection. `FZF_DEFAULT_OPTS='--select-1 --exit-0 --expect=esc'` changes nothing.
-  - **Hostile text.** A task title, a `--source` stderr line and an error message containing `)+execute-silent(touch X)+(` and a newline are shown literally, and `X` is never created.
+  - **Hostile text.** A task title, a `--source` stderr line and an error message containing `)+execute-silent(touch X)+change-footer(` and a newline are shown literally, and `X` is never created. The text must make an action chain fzf would run if it were injected: `)+execute-silent(touch X)+(` does not, since fzf refuses a chain with the bare `(` it leaves, so a test with it passes even when the text is injected.
   - **Interrupts.** ctrl-c inside the `e` editor, followed by Enter, gives an envelope with the session's actions.
   - **A failed final read** gives `incomplete`, with the read's error and the actions.
   - **ctrl-d** on an empty prompt deletes nothing and keeps the session.

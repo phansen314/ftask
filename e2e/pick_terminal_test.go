@@ -218,9 +218,11 @@ func TestPickOutcomes(t *testing.T) {
 // (pick-spec.md, fzf contract: No data in action text).
 func TestPickHostileText(t *testing.T) {
 	eachFzf(t, func(t *testing.T, fzfDir string) {
-		// X is relative: callbacks run where pick does.
+		// X is relative: callbacks run where pick does. Not the spec's
+		// )+execute-silent(touch X)+(, whose last ( leaves a chain fzf
+		// would refuse whole, but one fzf would run if it were injected.
 		dir := t.TempDir()
-		hostile := ")+execute-silent(touch X)+("
+		hostile := ")+execute-silent(touch X)+change-footer("
 		tr := newTree(t)
 		if r := run(t, tr.cmd("create", hostile, "--notes", "first\n"+hostile+"\nlast")); r.code != 0 {
 			t.Fatal(r.stdout)
@@ -242,7 +244,8 @@ func TestPickHostileText(t *testing.T) {
 		})
 		// Command mode's header shows the hidden query.
 		p.command()
-		p.waitScreen("[cmd] query: " + hostile)
+		// As much of it as fits the list beside the preview.
+		p.waitScreen("[cmd] query: " + hostile[:27])
 		p.send("i")
 		p.waitScreen("open> " + hostile)
 		p.post("change-query()")
@@ -556,9 +559,18 @@ func TestPickNew(t *testing.T) {
 		}
 		inCommandMode()
 
-		// A refused title: the prompt stays open; Esc cancels it.
+		// A refused title: the prompt stays open; Esc cancels it. ctrl-d
+		// on the empty prompt first deletes nothing and keeps it open:
+		// fzf's default would end the session.
 		p.send("n")
-		p.waitScreen("new> ")
+		p.waitScreen("[new]")
+		p.send(keyCtrlD + "?")
+		p.waitState("ctrl-d handled", func(st fzfState) bool { return st.Query == "?" })
+		if p.done() || !strings.Contains(p.screen(), "new> ?") {
+			t.Fatalf("ctrl-d ended the prompt:\n%s", p.screen())
+		}
+		p.send(keyCtrlU)
+		p.waitState("the prompt cleared", func(st fzfState) bool { return st.Query == "" })
 		p.send(keyEnter)
 		p.waitScreen("✗ create: invalid-input")
 		if !strings.Contains(p.screen(), "new> ") {
@@ -571,6 +583,61 @@ func TestPickNew(t *testing.T) {
 		r := p.result()
 		out := decode(t, r)
 		if r.code != 0 || len(out.Result.Actions) != 2 || len(out.Result.Tasks) != 1 || out.Result.Tasks[0].ID != 4 {
+			t.Errorf("exit %d: %s", r.code, r.stdout)
+		}
+	})
+}
+
+// Text from data in the status line is shown literally and never run: here
+// an error whose message holds the root path, which holds fzf action syntax
+// and a newline (pick-spec.md, Testing: Hostile text).
+func TestPickHostileStatus(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads unreadable files")
+	}
+	eachFzf(t, func(t *testing.T, fzfDir string) {
+		// A short home, so the message fits the status line.
+		home, err := os.MkdirTemp("", "h")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.Chmod(filepath.Join(home, "r"), 0o755); os.RemoveAll(home) })
+		// The spec's )+execute-silent(touch X)+( leaves a ( that the rest
+		// of the message can't close into an action, so fzf would refuse
+		// the whole chain; this one makes a chain fzf would run.
+		hostile := ")+execute-silent(touch X)+change-footer("
+		init := ftask(t, "init", filepath.Join(home, hostile+"\nr"))
+		init.Env = []string{"HOME=" + home, "XDG_CONFIG_HOME=" + filepath.Join(home, ".config"), "PATH=" + os.Getenv("PATH")}
+		if r := run(t, init); r.code != 0 {
+			t.Fatal(r.stdout)
+		}
+		tr := &tree{t: t, env: init.Env, home: home}
+		if r := run(t, tr.cmd("create", "one", "--notes", "secret")); r.code != 0 {
+			t.Fatal(r.stdout)
+		}
+		notes := filepath.Join(home, hostile+"\nr", "1.md")
+		if err := os.Chmod(notes, 0); err != nil {
+			t.Fatal(err)
+		}
+		dir := t.TempDir()
+		cmd := tr.cmd("pick")
+		cmd.Dir = dir
+		cmd.Env = append(cmd.Env, "FTASK_PICK_OPTS=--preview-window=hidden")
+		// Checked however the test ends.
+		t.Cleanup(func() {
+			for _, d := range []string{dir, home} {
+				if _, err := os.Stat(filepath.Join(d, "X")); !os.IsNotExist(err) {
+					t.Errorf("hostile text ran, in %s: %v", d, err)
+				}
+			}
+		})
+		p := startPick(t, fzfDir, cmd)
+		p.loaded()
+		p.command()
+		p.send("e")
+		p.waitScreen("✗ e: open " + home + "/" + hostile + `\nr/1.md: permission denied`)
+		p.send(keyEsc)
+		if r := p.result(); r.code != 0 {
 			t.Errorf("exit %d: %s", r.code, r.stdout)
 		}
 	})
