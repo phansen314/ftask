@@ -7,8 +7,16 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 )
+
+// noTTY runs cmd in a session of its own, with no controlling terminal, so
+// /dev/tty doesn't open however the tests are run.
+func noTTY(cmd *exec.Cmd) *exec.Cmd {
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	return cmd
+}
 
 // pick finds fzf on PATH and checks its version before anything else
 // (pick-spec.md, Requirements). Fake fzfs stand in for real ones; the real
@@ -28,7 +36,7 @@ func TestPickFzfCheck(t *testing.T) {
 	}
 	check := func(t *testing.T, path string, env []string, w want) {
 		t.Helper()
-		cmd := newTree(t).cmd("pick")
+		cmd := noTTY(newTree(t).cmd("pick"))
 		cmd.Env = slices.DeleteFunc(cmd.Env, func(kv string) bool { return strings.HasPrefix(kv, "PATH=") })
 		runtime := t.TempDir()
 		cmd.Env = append(cmd.Env, append([]string{"PATH=" + path, "XDG_RUNTIME_DIR=" + runtime}, env...)...)
@@ -55,9 +63,9 @@ func TestPickFzfCheck(t *testing.T) {
 			t.Errorf("exit %d: %s", r.code, r.stdout)
 		}
 	}
-	// Past the check and the first load, pick stops for now: the picker
-	// isn't written yet.
-	passed := want{kind: "internal"}
+	// Past the check and the first load, pick needs a terminal, which
+	// these runs don't have.
+	passed := want{"unavailable", "no-terminal", ""}
 
 	t.Run("missing", func(t *testing.T) { check(t, fake(""), nil, want{"unavailable", "fzf-missing", ""}) })
 	t.Run("too old", func(t *testing.T) {
@@ -95,7 +103,7 @@ func TestPickSession(t *testing.T) {
 		t.Fatal(err)
 	}
 	pick := func(env ...string) result {
-		cmd := newTree(t).cmd("pick")
+		cmd := noTTY(newTree(t).cmd("pick"))
 		cmd.Env = slices.DeleteFunc(cmd.Env, func(kv string) bool { return strings.HasPrefix(kv, "PATH=") })
 		cmd.Env = append(cmd.Env, append([]string{"PATH=" + fzf}, env...)...)
 		r := run(t, cmd)
@@ -122,7 +130,7 @@ func TestPickSession(t *testing.T) {
 		t.Errorf("empty runtime dir, missing temp dir: %s", r.stdout)
 	}
 	tmp := t.TempDir()
-	if r := pick("TMPDIR=" + tmp); kind(r) != "internal" {
+	if r := pick("TMPDIR=" + tmp); kind(r) != "unavailable" {
 		t.Errorf("temp dir: %s", r.stdout)
 	}
 	if des, _ := os.ReadDir(tmp); len(des) != 0 {
@@ -170,6 +178,7 @@ func TestPickFirstLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	withFzf := func(cmd *exec.Cmd) *exec.Cmd {
+		noTTY(cmd)
 		cmd.Env = slices.DeleteFunc(cmd.Env, func(kv string) bool { return strings.HasPrefix(kv, "PATH=") })
 		cmd.Env = append(cmd.Env, "PATH="+fzf, "XDG_RUNTIME_DIR="+t.TempDir())
 		return cmd
@@ -185,7 +194,7 @@ func TestPickFirstLoad(t *testing.T) {
 		{ftask(t, "pick"), `"kind":"not-initialized"`},
 		{tr.cmd("pick", "--folder", "/a/x/y"), `"kind":"not-found","message":"not found: folder /a/x","details":{"folders":["/a/x"]`},
 		{tr.cmd("pick", "--folders", "--folder", "/nope"), `"folders":["/nope"]`},
-		{tr.cmd("pick", "--folder", "/a/b"), `"kind":"internal"`},
+		{tr.cmd("pick", "--folder", "/a/b"), `"reason":"no-terminal"`},
 	} {
 		r := run(t, withFzf(tc.cmd))
 		envelope(t, r)
@@ -215,11 +224,28 @@ func TestPickFolderNotFoundIsLists(t *testing.T) {
 		return string(env.Error)
 	}
 	for _, f := range []string{"/x", "/a/x", "/a/b/c/d", "/a/x/b"} {
-		pick := tr.cmd("pick", "--folder", f)
+		pick := noTTY(tr.cmd("pick", "--folder", f))
 		pick.Env = append(slices.DeleteFunc(pick.Env, func(kv string) bool { return strings.HasPrefix(kv, "PATH=") }), "PATH="+fzf)
 		got, want := errorOf(run(t, pick)), errorOf(run(t, tr.cmd("list", "--folder", f)))
 		if got != want {
 			t.Errorf("%s: pick %s, list %s", f, got, want)
 		}
+	}
+}
+
+// FTASK_PICK_OPTS is split as fzf splits FZF_DEFAULT_OPTS; one that doesn't
+// split is fzf-failed, with no status or actions, since fzf never ran.
+func TestPickOptsUnsplittable(t *testing.T) {
+	fzf := t.TempDir()
+	if err := os.WriteFile(filepath.Join(fzf, "fzf"), []byte("#!/bin/sh\necho 0.63.0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := noTTY(newTree(t).cmd("pick"))
+	cmd.Env = append(slices.DeleteFunc(cmd.Env, func(kv string) bool { return strings.HasPrefix(kv, "PATH=") }),
+		"PATH="+fzf, "FTASK_PICK_OPTS=--prompt 'x")
+	r := run(t, cmd)
+	envelope(t, r)
+	if r.code != 1 || !strings.Contains(r.stdout, `"details":{"reason":"fzf-failed"}`) || !strings.Contains(r.stdout, "FTASK_PICK_OPTS") {
+		t.Errorf("exit %d: %s", r.code, r.stdout)
 	}
 }

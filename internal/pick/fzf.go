@@ -24,11 +24,48 @@ type System struct {
 	// not be started or did not exit normally.
 	Output  func(path string, args, env []string) (stdout, stderr []byte, status int, err error)
 	Environ func() []string
+	// Executable is the absolute path of this ftask binary, which fzf's
+	// callbacks run.
+	Executable func() (string, error)
+	// OpenTTY checks that /dev/tty opens for reading and writing.
+	OpenTTY func() error
+	// RunFzf runs the picker: path with args and env, stdin from stdin,
+	// stdout to /dev/null, and stderr to this process's, where fzf reports
+	// its own problems. It returns fzf's exit status; err only when fzf
+	// could not be started or did not exit normally.
+	RunFzf func(path string, args, env []string, stdin []byte) (status int, err error)
 }
 
 // OSSystem is the process's own.
 func OSSystem() System {
-	return System{LookPath: exec.LookPath, Output: output, Environ: os.Environ}
+	return System{
+		LookPath:   exec.LookPath,
+		Output:     output,
+		Environ:    os.Environ,
+		Executable: os.Executable,
+		OpenTTY:    openTTY,
+		RunFzf:     runFzf,
+	}
+}
+
+func openTTY() error {
+	f, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	return f.Close()
+}
+
+func runFzf(path string, args, env []string, stdin []byte) (int, error) {
+	cmd := exec.Command(path, args...)
+	cmd.Env, cmd.Stdin, cmd.Stderr = env, bytes.NewReader(stdin), os.Stderr
+	// Stdout nil is /dev/null: the selection never comes from fzf's output.
+	err := cmd.Run()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.Exited() {
+		return exit.ExitCode(), nil
+	}
+	return 0, err
 }
 
 func output(path string, args, env []string) ([]byte, []byte, int, error) {
@@ -59,7 +96,7 @@ type UnavailableDetails struct {
 	Found    *string           `json:"found,omitempty"`
 	Required string            `json:"required,omitempty"`
 	Status   *int              `json:"status,omitempty"`
-	Actions  []any             `json:"actions,omitempty"`
+	Actions  []any             `json:"actions,omitzero"` // [] when fzf ran: present, if empty
 }
 
 func unavailable(msg string, d UnavailableDetails) *errs.Error {

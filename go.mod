@@ -16,5 +16,6 @@ require (
 require (
 	github.com/clipperhouse/uax29/v2 v2.2.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/junegunn/go-shellwords v0.0.0-20250127100254-2aa3b3277741 // indirect
 	golang.org/x/text v0.14.0 // indirect
 )

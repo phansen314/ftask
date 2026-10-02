@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/phansen314/ftask/internal/errs"
@@ -106,6 +107,10 @@ func TestFindFzf(t *testing.T) {
 			}
 			if ok, f := schematest.Check(t, "pick-error-details#/$defs/unavailable", b); !ok {
 				t.Errorf("details rejected at %s: %s", f, b)
+			}
+			// actions is in the JSON exactly when fzf ran, empty or not.
+			if (tc.reason == FzfFailed) != strings.Contains(string(b), `"actions":[]`) {
+				t.Errorf("details %s", b)
 			}
 			d := e.Details.(UnavailableDetails)
 			if d.Reason != tc.reason {

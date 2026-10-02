@@ -160,6 +160,14 @@ func (s *Session) Read(name string) (data []byte, ok bool, e *errs.Error) {
 	return b, true, nil
 }
 
+// Delete removes the session file name; one already gone is not an error.
+func (s *Session) Delete(name string) *errs.Error {
+	if err := s.root.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return errs.FromOS(path.Join(s.Dir, name), err)
+	}
+	return nil
+}
+
 // Close closes the session without removing it: the helper's.
 func (s *Session) Close() {
 	s.root.Close()

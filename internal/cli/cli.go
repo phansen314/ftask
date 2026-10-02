@@ -7,9 +7,7 @@ import (
 	"io"
 	"os"
 	"runtime"
-	"strconv"
 	"strings"
-	"unicode"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -314,28 +312,10 @@ func warningsNote(n int) string {
 	return fmt.Sprintf("ftask: %d warnings (see .warnings in the output)", n)
 }
 
-// oneLine writes each control character in s as a Go escape (\n, \x1b,
-// \u2028), so that none, e.g. a newline in a root path, can split the line or
-// drive a terminal. Everything else is left as it is.
-func oneLine(s string) string {
-	if !strings.ContainsFunc(s, isLineControl) {
-		return s
-	}
-	var b strings.Builder
-	for _, r := range s {
-		if isLineControl(r) {
-			q := strconv.QuoteRune(r)
-			b.WriteString(q[1 : len(q)-1])
-		} else {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
+// oneLine is the one-line form of the stderr line (errs.OneLine).
+func oneLine(s string) string { return errs.OneLine(s) }
 
-func isLineControl(r rune) bool {
-	return unicode.IsControl(r) || r == '\u2028' || r == '\u2029'
-}
+func isLineControl(r rune) bool { return errs.IsLineControl(r) }
 
 // deliver writes out in one write and closes stdout; exit codes 0-2 are
 // reported only once both succeed (implementation-spec.md, Writing the

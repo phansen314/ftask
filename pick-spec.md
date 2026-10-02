@@ -376,7 +376,7 @@ In every case, the envelope reports the actions taken.
 
 | Kind | When | `details` |
 |---|---|---|
-| `unavailable` | The picker cannot run: no terminal, or no usable fzf. fzf is checked after `invalid-input` and before anything is read from the tree. The terminal is checked when the picker is about to be shown, after the first load (see [Selecting at once](#selecting-at-once)). | `reason`: `no-terminal` (`/dev/tty` doesn't open), `fzf-missing` (not on `PATH`), `fzf-too-old`, or `fzf-failed` (fzf exited with an error, e.g. a bad option in `FZF_DEFAULT_OPTS`, or `fzf --version` did). For `fzf-too-old`: `found` and `required`, the versions. For `fzf-failed`: `status`, fzf's exit status, and `actions`, since fzf can fail after actions have run. |
+| `unavailable` | The picker cannot run: no terminal, or no usable fzf. fzf is checked after `invalid-input` and before anything is read from the tree. The terminal is checked when the picker is about to be shown, after the first load (see [Selecting at once](#selecting-at-once)). | `reason`: `no-terminal` (`/dev/tty` doesn't open), `fzf-missing` (not on `PATH`), `fzf-too-old`, or `fzf-failed` (fzf exited with an error, e.g. a bad option in `FZF_DEFAULT_OPTS`, or `fzf --version` did, or `FTASK_PICK_OPTS` doesn't split into options, then without `status` or `actions`, as fzf never ran). For `fzf-too-old`: `found` and `required`, the versions. For `fzf-failed`: `status`, fzf's exit status, and `actions`, since fzf can fail after actions have run. |
 | `cancelled` | The person cancelled with ctrl-c or another fzf abort key. | `actions`: as in the output, the operations already run. |
 | `incomplete` | The session ended, but its result could not be read: the final read failed. | `actions`, and `error`: the final read's own error, whole, with its kind and details. |
 
@@ -451,7 +451,7 @@ How `pick` drives fzf. This section is normative for behavior. The option spelli
 
 - **`FZF_DEFAULT_OPTS`** (and `FZF_DEFAULT_OPTS_FILE`) are honored, as fzf honors them: colors, layout, borders, history.
 - **Options `pick` undoes.** After `FZF_DEFAULT_OPTS` and before `FTASK_PICK_OPTS`, `pick` passes `--no-select-1 --no-exit-0 --no-expect --no-tmux`. The first three would end fzf without running a callback, so no selection would be recorded. `--tmux` (in 0.74 an alias of `--popup`) would run fzf in a tmux or Zellij popup, a separate process that `pick`'s terminal check, environment and signal handling were not designed or tested for. `--select-1` and `--exit-0` are `pick`'s own `--select-one` and `--exit-zero`, decided by `pick` (see [Selecting at once](#selecting-at-once)).
-- **`FTASK_PICK_OPTS`** is appended after `pick`'s own options, so it wins: e.g. `FTASK_PICK_OPTS='--height 60% --layout reverse'`.
+- **`FTASK_PICK_OPTS`** is appended after `pick`'s own options, so it wins: e.g. `FTASK_PICK_OPTS='--height 60% --layout reverse'`. It is split as fzf splits `FZF_DEFAULT_OPTS`, comments included.
 - **Rebinding is at your own risk.** An option that rebinds a key `pick` uses (or `--disabled`, `--no-multi`, `--with-shell`) can break the modes. `pick` does not detect that.
 - **`FZF_DEFAULT_COMMAND`** is never used: `pick` supplies every list.
 

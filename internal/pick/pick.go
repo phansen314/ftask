@@ -26,7 +26,8 @@ func Run(in *jsonio.Object, problems []errs.Problem, env Env) ops.Envelope {
 		return ops.Failed(e)
 	}
 	pin := v.(ops.PickInput)
-	if _, e := findFzf(env.Sys); e != nil {
+	fzf, e := findFzf(env.Sys)
+	if e != nil {
 		return ops.Failed(e)
 	}
 	l, failed := load(env.Ops)
@@ -37,16 +38,27 @@ func Run(in *jsonio.Object, problems []errs.Problem, env Env) ops.Envelope {
 	if e := l.checkFolder(scope.Folder); e != nil {
 		return ops.Envelope{Error: e, Warnings: l.Warnings}
 	}
-	if !pin.Folders {
-		views, _ := l.candidates(scope)
-		_ = renderLines(views, !noColor(env.Sys.Environ()))
+	if pin.Folders {
+		return ops.Envelope{Error: errs.Internal("the folder picker is not implemented yet"), Warnings: l.Warnings}
 	}
-	s, e := newSession(env.Ops.FS, sessionBase(env.Sys.Environ()))
+	environ := env.Sys.Environ()
+	views, missing := l.candidates(scope)
+	lines := renderLines(views, !noColor(environ))
+	opts, e := userOpts(environ)
 	if e != nil {
-		return ops.Failed(e)
+		return ops.Envelope{Error: e, Warnings: l.Warnings}
+	}
+	exe, err := env.Sys.Executable()
+	if err != nil {
+		return ops.Envelope{Error: errs.Internal("locating the ftask binary: " + err.Error()), Warnings: l.Warnings}
+	}
+	pk := picker{exe: exe, scope: scope, query: pin.Query, missing: missing, warnings: len(l.Warnings), userOpts: opts}
+	s, e := newSession(env.Ops.FS, sessionBase(environ))
+	if e != nil {
+		return ops.Envelope{Error: e, Warnings: l.Warnings}
 	}
 	defer s.Remove()
-	return ops.Envelope{Error: errs.Internal("pick is not implemented yet"), Warnings: l.Warnings}
+	return ops.Envelope{Error: show(env, fzf, pk, lines, s), Warnings: l.Warnings}
 }
 
 // noColor reports whether lines carry no color: NO_COLOR set, and not
