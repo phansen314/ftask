@@ -53,6 +53,8 @@ func TestSelected(t *testing.T) {
 type tree struct {
 	t   *testing.T
 	env ops.Env
+	// filter is fzf --filter's fake, for --select-one and --exit-zero.
+	filter func(path string, args, env []string, stdin []byte) ([]byte, int, error)
 }
 
 func newTestTree(t *testing.T) *tree {
@@ -102,6 +104,7 @@ func (tr *tree) pick(in map[string]any, fzf fzfDoes) (ops.Envelope, []byte) {
 		OpenTTY:    func() error { return nil },
 
 		CatchInterrupts: func() func() { return func() {} },
+		Filter:          tr.filter,
 	}
 	sys.RunFzf = func(_ string, _ []string, env []string, _ []byte) (int, error) {
 		helper := func(args ...string) string {
@@ -234,5 +237,90 @@ func TestRunIncomplete(t *testing.T) {
 	}
 	if !strings.Contains(string(d), `"actions":[],"error":{"kind":"not-initialized"`) {
 		t.Errorf("details %s", d)
+	}
+}
+
+// --select-one and --exit-zero decide without the picker when they can
+// (pick-spec.md, Selecting at once); otherwise the picker opens with the
+// query typed.
+func TestRunAtOnce(t *testing.T) {
+	tr := newTestTree(t)
+	for _, title := range []string{"one", "two"} {
+		tr.run("create", map[string]any{"title": title})
+	}
+	type fake struct {
+		out    string
+		status int
+	}
+	run := func(in map[string]any, f fake) (ops.Envelope, []byte, []string, bool) {
+		t.Helper()
+		var filterArgs []string
+		picked := false
+		tr.filter = func(_ string, args, _ []string, stdin []byte) ([]byte, int, error) {
+			filterArgs = args
+			if got := string(stdin); !strings.HasPrefix(got, "1@/\t") || strings.Count(got, "\n") != 2 {
+				t.Errorf("filter stdin %q", got)
+			}
+			return []byte(f.out), f.status, nil
+		}
+		out, line := tr.pick(in, fzfDoes{status: 130, do: func(*testing.T, func(...string) string) { picked = true }})
+		tr.filter = nil
+		return out, line, filterArgs, picked
+	}
+
+	_, line, args, picked := run(map[string]any{"select_one": true, "query": "on", "fields": []string{"title"}}, fake{out: "1@/\t●  1 …\tone\n"})
+	if got := string(result(t, line)); got != `{"tasks":[{"id":1,"title":"one"}],"missing":[],"actions":[],"notes_edited":[]}` || picked {
+		t.Errorf("select-one, one match: %s, picker %v", got, picked)
+	}
+	if n := len(args); n < 2 || args[n-2] != "--filter" || args[n-1] != "on" || !slices.Contains(args, "--nth") {
+		t.Errorf("filter args %q", args)
+	}
+
+	_, line, _, picked = run(map[string]any{"exit_zero": true, "query": "zz"}, fake{status: 1})
+	if got := string(result(t, line)); got != `{"tasks":[],"missing":[],"actions":[],"notes_edited":[]}` || picked {
+		t.Errorf("exit-zero, no match: %s, picker %v", got, picked)
+	}
+
+	for _, tc := range []struct {
+		name string
+		in   map[string]any
+		f    fake
+	}{
+		{"select-one, two matches", map[string]any{"select_one": true}, fake{out: "1@/\ta\tone\n2@/\tb\ttwo\n"}},
+		{"select-one, no match", map[string]any{"select_one": true}, fake{status: 1}},
+		{"exit-zero, a match", map[string]any{"exit_zero": true}, fake{out: "1@/\ta\tone\n"}},
+	} {
+		out, line, _, picked := run(tc.in, tc.f)
+		if !picked || out.OK || out.Error.Kind != errs.KindCancelled {
+			t.Errorf("%s: picker %v, %s", tc.name, picked, line)
+		}
+	}
+
+	out, line, _, picked := run(map[string]any{"exit_zero": true}, fake{status: 2})
+	if out.OK || picked || !strings.Contains(string(line), `"details":{"reason":"fzf-failed","status":2,"actions":[]}`) {
+		t.Errorf("filter fails: %s", line)
+	}
+}
+
+func TestDecideAtOnce(t *testing.T) {
+	one, two, none := []string{"1@/"}, []string{"1@/", "2@/"}, []string{}
+	for _, tc := range []struct {
+		matched             []string
+		selectOne, exitZero bool
+		keys                []string
+		done                bool
+	}{
+		{one, true, false, one, true},
+		{one, true, true, one, true},
+		{two, true, true, nil, false},
+		{none, true, false, nil, false},
+		{none, false, true, none, true},
+		{none, true, true, none, true},
+		{one, false, true, nil, false},
+	} {
+		keys, done := decideAtOnce(tc.matched, tc.selectOne, tc.exitZero)
+		if done != tc.done || !slices.Equal(keys, tc.keys) {
+			t.Errorf("%v select %v exit %v: %v %v", tc.matched, tc.selectOne, tc.exitZero, keys, done)
+		}
 	}
 }

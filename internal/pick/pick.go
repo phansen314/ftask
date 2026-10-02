@@ -53,6 +53,15 @@ func Run(in *jsonio.Object, problems []errs.Problem, env Env) ops.Envelope {
 		return ops.Envelope{Error: errs.Internal("locating the ftask binary: " + err.Error()), Warnings: l.Warnings}
 	}
 	pk := picker{exe: exe, scope: scope, query: pin.Query, missing: missing, warnings: len(l.Warnings), userOpts: opts}
+	if pin.SelectOne || pin.ExitZero {
+		matched, e := matchAtOnce(env, fzf, pk, lines)
+		if e != nil {
+			return ops.Envelope{Error: e, Warnings: l.Warnings}
+		}
+		if keys, done := decideAtOnce(matched, pin.SelectOne, pin.ExitZero); done {
+			return emit(env, keys, pin.Fields, []any{})
+		}
+	}
 	s, e := newSession(env.Ops.FS, sessionBase(environ))
 	if e != nil {
 		return ops.Envelope{Error: e, Warnings: l.Warnings}

@@ -249,3 +249,59 @@ func TestPickOptsUnsplittable(t *testing.T) {
 		t.Errorf("exit %d: %s", r.code, r.stdout)
 	}
 }
+
+// --select-one and --exit-zero match with the installed fzf's --filter and
+// pick's options: only titles and tags match, and the person's options
+// apply (pick-spec.md, Selecting at once). No terminal is needed unless the
+// picker opens.
+func TestPickAtOnce(t *testing.T) {
+	if _, err := exec.LookPath("fzf"); err != nil {
+		t.Skip("no fzf installed")
+	}
+	tr := newTree(t)
+	for _, c := range [][]string{
+		{"create-folder", "-p", "/trips/japan"},
+		{"create", "Book flights", "--folder", "/trips/japan", "--tags", "travel"},
+		{"create", "Book hotel", "--folder", "/trips/japan", "--tags", "travel"},
+		{"create", "Renew passport", "--folder", "/trips"},
+	} {
+		if r := run(t, tr.cmd(c...)); r.code != 0 {
+			t.Fatal(r.stdout)
+		}
+	}
+	for _, tc := range []struct {
+		args []string
+		env  string
+		want string
+	}{
+		{[]string{"--select-one", "--query", "passport"}, "", `"tasks":[{"id":3,"title":"Renew passport"}]`},
+		{[]string{"--select-one", "--query", "renew", "--folder", "/trips/japan"}, "", `"reason":"no-terminal"`},
+		{[]string{"--exit-zero", "--query", "zzz"}, "", `"tasks":[],`},
+		{[]string{"--select-one", "--exit-zero", "--query", "book"}, "", `"reason":"no-terminal"`},
+		{[]string{"--exit-zero", "--query", "japan"}, "", `"tasks":[],`},
+		{[]string{"--exit-zero", "--query", "travel hotel"}, "", `"reason":"no-terminal"`},
+		{[]string{"--select-one", "--query", "travel hotel"}, "", `"tasks":[{"id":2,"title":"Book hotel"}]`},
+		{[]string{"--exit-zero", "--query", "bkfl"}, "FTASK_PICK_OPTS=--exact", `"tasks":[],`},
+		{[]string{"--exit-zero", "--query", "bkfl"}, "", `"reason":"no-terminal"`},
+		{[]string{"--exit-zero"}, "FZF_DEFAULT_OPTS=--bogus", `"details":{"reason":"fzf-failed","status":2,"actions":[]}`},
+	} {
+		cmd := noTTY(tr.cmd(append([]string{"pick", "--fields", "id,title"}, tc.args...)...))
+		cmd.Env = append(cmd.Env, "XDG_RUNTIME_DIR="+t.TempDir())
+		if tc.env != "" {
+			cmd.Env = append(cmd.Env, tc.env)
+		}
+		r := run(t, cmd)
+		if strings.Contains(tc.env, "--bogus") {
+			// fzf's own message comes first, on the terminal (pick-spec.md,
+			// Errors), then ftask's line.
+			if !strings.HasPrefix(r.stderr, "$FZF_DEFAULT_OPTS: ") || !strings.HasSuffix(r.stderr, "\n"+note(t, r.stdout)) {
+				t.Errorf("stderr %q", r.stderr)
+			}
+		} else {
+			envelope(t, r)
+		}
+		if !strings.Contains(r.stdout, tc.want) {
+			t.Errorf("%q %s: exit %d: %s", tc.args, tc.env, r.code, r.stdout)
+		}
+	}
+}

@@ -36,6 +36,10 @@ type System struct {
 	// its own problems. It returns fzf's exit status; err only when fzf
 	// could not be started or did not exit normally.
 	RunFzf func(path string, args, env []string, stdin []byte) (status int, err error)
+	// Filter runs fzf --filter: path with args and env, stdin from stdin,
+	// stderr to this process's, and returns its stdout and exit status; err
+	// only when fzf could not be started or did not exit normally.
+	Filter func(path string, args, env []string, stdin []byte) (stdout []byte, status int, err error)
 	// CatchInterrupts catches SIGINT and SIGQUIT and discards them, until
 	// the function it returns restores default handling (pick-spec.md,
 	// Signals).
@@ -51,9 +55,22 @@ func OSSystem() System {
 		Executable: os.Executable,
 		OpenTTY:    openTTY,
 		RunFzf:     runFzf,
+		Filter:     filter,
 
 		CatchInterrupts: catchInterrupts,
 	}
+}
+
+func filter(path string, args, env []string, stdin []byte) ([]byte, int, error) {
+	var out bytes.Buffer
+	cmd := exec.Command(path, args...)
+	cmd.Env, cmd.Stdin, cmd.Stdout, cmd.Stderr = env, bytes.NewReader(stdin), &out, os.Stderr
+	err := cmd.Run()
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.Exited() {
+		return out.Bytes(), exit.ExitCode(), nil
+	}
+	return out.Bytes(), 0, err
 }
 
 // catchInterrupts catches the signals rather than ignoring them: an ignored

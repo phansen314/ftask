@@ -75,6 +75,12 @@ func finish(env Env, s *Session, status int, fields []string) ops.Envelope {
 		return ops.Failed(unavailable(fmt.Sprintf("fzf exited with status %d without a selection; any message from fzf is above, on the terminal", status),
 			UnavailableDetails{Reason: FzfFailed, Status: &status, Actions: actions}))
 	}
+	return emit(env, strings.Fields(string(b)), fields, actions)
+}
+
+// emit runs the final read and writes the selection of keys, as Enter does
+// (pick-spec.md, Output).
+func emit(env Env, keys, fields []string, actions []any) ops.Envelope {
 	l, failed := load(env.Ops, false)
 	if failed != nil {
 		e := &errs.Error{
@@ -84,7 +90,7 @@ func finish(env Env, s *Session, status int, fields []string) ops.Envelope {
 		}
 		return ops.Envelope{Error: e, Warnings: failed.Warnings}
 	}
-	tasks, missing := selected(l.Tasks, strings.Fields(string(b)))
+	tasks, missing := selected(l.Tasks, keys)
 	return ops.Envelope{
 		OK:       true,
 		Result:   Output{Tasks: ops.Tasks{Views: tasks, Fields: fields}, Missing: missing, Actions: actions, NotesEdited: []model.ID{}},
