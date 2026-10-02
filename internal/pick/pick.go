@@ -27,6 +27,15 @@ func Run(in *jsonio.Object, problems []errs.Problem, env Env) ops.Envelope {
 		return ops.Failed(e)
 	}
 	pin := v.(ops.PickInput)
+	// A live source's first run: its failures are input's, so before fzf
+	// is checked (pick-spec.md, Errors), with no time limit.
+	if pin.Source != nil {
+		ids, reason := sourceIDs(env, *pin.Source, 0)
+		if reason != "" {
+			return ops.Failed(errs.InvalidInput([]errs.Problem{{Field: "/source", Reason: reason}}))
+		}
+		pin.IDs = ids
+	}
 	fzf, e := findFzf(env.Sys)
 	if e != nil {
 		return ops.Failed(e)

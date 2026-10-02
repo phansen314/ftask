@@ -212,7 +212,7 @@ func act(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 	} else {
 		// Reload after every action that ran an operation (pick-spec.md,
 		// Actions).
-		out, e = reloadWithStatus(s, env, status)
+		out, e = reloadWithStatus(s, env, status, r.ifReloaded)
 	}
 	if e != nil || r.also == "" {
 		return out, e
@@ -220,18 +220,19 @@ func act(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 	return []byte(string(out) + "+" + r.also), nil
 }
 
-// reloadWithStatus reloads, then shows status in the status line. A load
-// that fails leaves the list as it was, and the status line says why.
-func reloadWithStatus(s *Session, env Env, status string) ([]byte, *errs.Error) {
+// reloadWithStatus reloads, then shows status in the status line, and
+// ifReloaded after it if the reload went through. A load that fails leaves
+// the list as it was, and the status line says why.
+func reloadWithStatus(s *Session, env Env, status, ifReloaded string) ([]byte, *errs.Error) {
 	out, warnings, failed := reload(s, env)
 	if failed != nil {
 		var sh shown
 		if e := readJSON(s, shownFile, &sh); e != nil {
 			return nil, e
 		}
-		return setStatus(s, env, sh.Warnings, joinStatus(status, "✗ reload: "+errText(failed)))
+		return setStatus(s, env, sh.Warnings, joinStatus(status, reloadFailed(failed)))
 	}
-	footer, e := setStatus(s, env, warnings, status)
+	footer, e := setStatus(s, env, warnings, joinStatus(status, ifReloaded))
 	if e != nil {
 		return nil, e
 	}
@@ -265,6 +266,9 @@ type actionRun struct {
 	// reload asks for a reload though no operation ran, e.g. to show a
 	// new scope.
 	reload bool
+	// ifReloaded is said in the status line only if the reload goes
+	// through: r's ✓ reloaded.
+	ifReloaded string
 	// also is more for fzf to do, after the reload and status line.
 	also string
 	// clearQuery, after a prompt, clears the search query rather than
@@ -376,6 +380,13 @@ func reload(s *Session, env Env) (string, int, *errs.Error) {
 	if e := readJSON(s, scopeFile, &scope); e != nil {
 		return "", 0, e
 	}
+	if scope.Source != "" {
+		ids, reason := sourceIDs(env, scope.Source, sourceLimit)
+		if reason != "" {
+			return "", 0, &errs.Error{Kind: sourceFailed, Message: reason}
+		}
+		scope.IDs = ids
+	}
 	l, failed := load(env.Ops, true)
 	if failed != nil {
 		return "", 0, failed.Error
@@ -421,9 +432,21 @@ func setStatus(s *Session, env Env, warnings int, status string) ([]byte, *errs.
 	return []byte("transform-footer(" + helperLine(exe, "text", "footer") + ")"), nil
 }
 
+// reloadFailed is a failed reload as the status line shows it: a live
+// source's ✗ source: …, or the load's error.
+func reloadFailed(e *errs.Error) string {
+	if e.Kind == sourceFailed {
+		return "✗ source: " + e.Message
+	}
+	return "✗ reload: " + errText(e)
+}
+
 func joinStatus(a, b string) string {
-	if a == "" {
+	switch {
+	case a == "":
 		return b
+	case b == "":
+		return a
 	}
 	return a + " · " + b
 }

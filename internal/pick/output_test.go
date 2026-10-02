@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/phansen314/ftask/internal/errs"
 	"github.com/phansen314/ftask/internal/jsonio"
@@ -57,6 +58,9 @@ type tree struct {
 	filter func(path string, args, env []string, stdin []byte) ([]byte, int, error)
 	// session is the session directory of the pick running now.
 	session string
+	// source is a live source's fake: what the command printed, its
+	// stderr, and whether it timed out.
+	source func(command string, limit time.Duration) (stdout, stderr string, timedOut bool)
 }
 
 func newTestTree(t *testing.T) *tree {
@@ -107,6 +111,10 @@ func (tr *tree) pick(in map[string]any, fzf fzfDoes) (ops.Envelope, []byte) {
 
 		CatchInterrupts: func() func() { return func() {} },
 		Filter:          tr.filter,
+	}
+	sys.RunSource = func(command string, _ []string, limit time.Duration) ([]byte, []byte, bool, error) {
+		out, errOut, timedOut := tr.source(command, limit)
+		return []byte(out), []byte(errOut), timedOut, nil
 	}
 	sys.RunFzf = func(_ string, _ []string, env []string, _ []byte) (int, error) {
 		tr.session = lookupEnv(env, SessionVar)

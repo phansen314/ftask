@@ -53,12 +53,15 @@ type Scope struct {
 	Readiness ops.PickScope
 	TagsAny   []model.Tag // nil: no filter
 	TagsAll   []model.Tag // nil: no filter
-	IDs       []model.ID  // a snapshot's; nil when there is none
+	IDs       []model.ID  // a snapshot's, or a live source's last run's; nil when there is neither
+	// Source is a live source's command, run again on every reload; ""
+	// when there is none.
+	Source string
 }
 
 // scopeOf is the scope pick's input starts with.
 func scopeOf(in ops.PickInput) Scope {
-	return Scope{
+	s := Scope{
 		Folder:    in.Folder,
 		Recursive: in.Recursive,
 		Readiness: in.Scope,
@@ -66,6 +69,10 @@ func scopeOf(in ops.PickInput) Scope {
 		TagsAll:   in.TagsAll,
 		IDs:       in.IDs,
 	}
+	if in.Source != nil {
+		s.Source = *in.Source
+	}
+	return s
 }
 
 // checkFolder is list's not-found for a scope folder the load does not

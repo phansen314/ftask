@@ -167,7 +167,7 @@ func backToTasks(s *Session, env Env, r *actionRun, query, status string) ([]byt
 		if e := readJSON(s, shownFile, &sh); e != nil {
 			return nil, e
 		}
-		status = joinStatus(status, "✗ reload: "+errText(failed))
+		status = joinStatus(status, reloadFailed(failed))
 		warnings = sh.Warnings
 		// The same lines again: the reload's load event hides the input.
 		exe, err := env.Sys.Executable()

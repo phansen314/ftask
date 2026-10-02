@@ -936,6 +936,84 @@ func TestPickMoveAndFolder(t *testing.T) {
 	})
 }
 
+// --source end to end: the command's IDs are the candidates, and every
+// reload runs it again, so a task an action takes out of its output leaves
+// the list, and one another process puts in joins it at r. A later run's
+// stderr shows in the status line literally, never run; a failed first run
+// ends pick before fzf.
+func TestPickSource(t *testing.T) {
+	eachFzf(t, func(t *testing.T, fzfDir string) {
+		tr := pickTree(t)
+		for _, id := range []string{"1", "3"} {
+			if r := run(t, tr.cmd("update", id, "--tags-add", "today")); r.code != 0 {
+				t.Fatal(r.stdout)
+			}
+		}
+		t.Run("live", func(t *testing.T) {
+			source := "'" + binary + "' list --tags-any today --fields id"
+			p := startPick(t, fzfDir, tr.cmd("pick", "--fields", "id", "--source", source))
+			if st := p.loaded(); st.TotalCount != 2 {
+				t.Fatalf("first run: %+v", st)
+			}
+			p.waitScreen("live source")
+			p.command()
+			p.send("t")
+			p.waitScreen("tags 1> today")
+			p.send(keyCtrlU + "later" + keyEnter)
+			p.waitScreen("✓ set tags 1")
+			p.waitState("1 gone from the source", func(st fzfState) bool { return st.TotalCount == 1 })
+			if r := run(t, tr.cmd("update", "2", "--tags-add", "today")); r.code != 0 {
+				t.Fatal(r.stdout)
+			}
+			p.waitFor("the input hidden", func() bool { return !strings.Contains(p.screen(), "> ") })
+			p.send("r")
+			p.waitScreen("✓ reloaded")
+			p.waitState("2 joined", func(st fzfState) bool { return st.TotalCount == 2 })
+			p.send(keyEsc)
+			if r := p.result(); r.code != 0 {
+				t.Errorf("exit %d: %s", r.code, r.stdout)
+			}
+		})
+
+		t.Run("hostile stderr", func(t *testing.T) {
+			dir := t.TempDir()
+			hostile := ")+execute-silent(touch X)+change-footer("
+			script := filepath.Join(dir, "source")
+			body := "#!/bin/sh\nif [ -e ran ]; then\n\techo '" + hostile + "' >&2\n\techo second line >&2\n\texit 1\nfi\ntouch ran\n'" + binary + "' list --fields id\n"
+			if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if _, err := os.Stat(filepath.Join(dir, "X")); !os.IsNotExist(err) {
+					t.Errorf("hostile text ran: %v", err)
+				}
+			})
+			cmd := tr.cmd("pick", "--source", script)
+			cmd.Dir = dir
+			cmd.Env = append(cmd.Env, "FTASK_PICK_OPTS=--preview-window=hidden")
+			p := startPick(t, fzfDir, cmd)
+			p.loaded()
+			p.command()
+			p.send("r")
+			p.waitScreen("✗ source: " + hostile)
+			if strings.Contains(p.screen(), "✓ reloaded") || strings.Contains(p.screen(), "second line") {
+				t.Errorf("status line:\n%s", p.screen())
+			}
+			p.send(keyEsc)
+			p.result()
+		})
+
+		t.Run("first run fails", func(t *testing.T) {
+			p := startPick(t, fzfDir, tr.cmd("pick", "--source", "echo nope; echo 'no such thing' >&2"))
+			r := p.result()
+			if out := decode(t, r); r.code != 1 || out.Error == nil || out.Error.Kind != "invalid-input" ||
+				!strings.Contains(r.stdout, `{"field":"/source","reason":"no such thing"}`) {
+				t.Errorf("exit %d: %s", r.code, r.stdout)
+			}
+		})
+	})
+}
+
 // pick in a pipeline: --from reads an upstream envelope, of each accepted
 // shape, while the picker draws on the terminal; stdout goes downstream.
 // The rejections end pick before the picker opens (pick-spec.md, Accepted

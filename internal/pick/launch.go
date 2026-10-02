@@ -126,7 +126,10 @@ func scopeLine(s Scope, missing int) string {
 	if s.TagsAll != nil {
 		parts = append(parts, "all of "+tags(s.TagsAll))
 	}
-	if s.IDs != nil {
+	switch {
+	case s.Source != "":
+		parts = append(parts, "live source")
+	case s.IDs != nil:
 		parts = append(parts, plural(len(s.IDs), "given ID"))
 	}
 	if missing > 0 {

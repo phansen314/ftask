@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/phansen314/ftask/internal/errs"
 )
@@ -40,6 +41,10 @@ type System struct {
 	// stderr to this process's, and returns its stdout and exit status; err
 	// only when fzf could not be started or did not exit normally.
 	Filter func(path string, args, env []string, stdin []byte) (stdout []byte, status int, err error)
+	// RunSource runs a live source's command (see runSource): its stdout,
+	// its stderr, and whether limit passed first; err only when it could
+	// not be started.
+	RunSource func(command string, env []string, limit time.Duration) (stdout, stderr []byte, timedOut bool, err error)
 	// RunEditor runs argv with env, with this process's stdin, stdout and
 	// stderr, the terminal fzf gives execute; it returns the exit status,
 	// 128+n if a signal n killed it, err only when it could not be
@@ -62,6 +67,7 @@ func OSSystem() System {
 		RunFzf:     runFzf,
 		Filter:     filter,
 		RunEditor:  runEditor,
+		RunSource:  runSource,
 
 		CatchInterrupts: catchInterrupts,
 	}
