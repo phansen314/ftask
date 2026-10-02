@@ -3,7 +3,6 @@ package pick
 import (
 	"bytes"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -12,7 +11,6 @@ import (
 	"github.com/phansen314/ftask/internal/errs"
 	"github.com/phansen314/ftask/internal/jsonio"
 	"github.com/phansen314/ftask/internal/model"
-	"github.com/phansen314/ftask/internal/ops"
 )
 
 // xAction is x (pick-spec.md, Actions: Editing as JSON): the target's
@@ -84,19 +82,10 @@ func editJSON(r *actionRun, targets []shownLine) {
 // xContent is the file x writes for t: its editable fields as they are
 // now, read fresh, pretty-printed. failed says why there is none.
 func xContent(env Env, t shownLine) ([]byte, string) {
-	in := &jsonio.Object{}
-	in.Set("id", idNumber(t.ID))
-	out := ops.Run("show", in, nil, env.Ops)
-	if !out.OK {
-		return nil, errText(out.Error)
+	v, failed := current(env, t)
+	if failed != "" {
+		return nil, failed
 	}
-	views := out.Result.(ops.ShowOutput).Tasks
-	// Of several copies, the one in the line's folder.
-	i := slices.IndexFunc(views, func(v model.TaskView) bool { return key(v) == t.Key })
-	if i < 0 {
-		i = 0
-	}
-	v := views[i]
 	obj := &jsonio.Object{}
 	obj.Set("title", string(v.Title))
 	if v.Priority == nil {
@@ -183,7 +172,7 @@ func afterX(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 		if e := readJSON(s, shownFile, &sh); e != nil {
 			return nil, e
 		}
-		return setStatus(s, env, sh.Warnings, status)
+		return clearMarks(setStatus(s, env, sh.Warnings, status))
 	}
 	return reloadWithStatus(s, env, status, "")
 }
@@ -193,7 +182,7 @@ func afterX(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 // kept: when it isn't valid, or update refused it.
 func applyX(r *actionRun, st xState) (string, bool) {
 	what := "x " + string(idNumber(st.ID))
-	b, err := os.ReadFile(st.Path)
+	b, err := r.env.Ops.FS.ReadFile(st.Path)
 	if err != nil {
 		return "✗ " + what + ": " + err.Error(), false
 	}

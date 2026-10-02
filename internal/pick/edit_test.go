@@ -9,6 +9,7 @@ import (
 
 	"github.com/phansen314/ftask/internal/fsys"
 	"github.com/phansen314/ftask/internal/model"
+	"github.com/phansen314/ftask/internal/ops"
 )
 
 // e records the notes' hashes and has fzf run the editor, then after-edit;
@@ -65,6 +66,44 @@ func TestEditAction(t *testing.T) {
 	if !strings.Contains(string(res), `"actions":[],"notes_edited":[3,1]`) {
 		t.Errorf("result %s", res)
 	}
+}
+
+// e opens the notes where they are now, not where the last load saw them:
+// a task moved by another process meanwhile has its notes edited in its
+// new folder, and one deleted meanwhile refuses the e.
+func TestEditActionFresh(t *testing.T) {
+	tr := newTestTree(t)
+	tr.run("create-folder", map[string]any{"folder": "/b"})
+	tr.run("create", map[string]any{"title": "one"})
+	tr.run("create", map[string]any{"title": "two"})
+	execute := "execute('/bin/ftask' __pick edit)+transform('/bin/ftask' __pick after-edit)"
+	tr.pick(map[string]any{}, fzfDoes{do: func(t *testing.T, helper func(...string) string) {
+		// Elsewhere, meanwhile.
+		tr.run("move", map[string]any{"id": 1, "to": "/b"})
+		tr.run("delete", map[string]any{"id": 2})
+		if got := helper("act", "e", "1@/"); got != execute {
+			t.Fatalf("e printed %q", got)
+		}
+		s, e := openSession(fsys.OS{}, []string{SessionVar + "=" + tr.session})
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer s.Close()
+		var es []edited
+		if e := readJSON(s, editFile, &es); e != nil {
+			t.Fatal(e)
+		}
+		moved := tr.run("show", map[string]any{"id": 1}).Result.(ops.ShowOutput).Tasks[0].NotesPath
+		if len(es) != 1 || es[0].Path != moved {
+			t.Errorf("editing %+v, want %s", es, moved)
+		}
+		helper("after-edit")
+		helper("act", "e", "2@/")
+		if f := helper("text", "footer"); !strings.HasPrefix(f, "✗ e: 2: not-found") {
+			t.Errorf("deleted: footer %q", f)
+		}
+		helper("quit")
+	}})
 }
 
 // shownNotes is each shown task's notes path, from the session.

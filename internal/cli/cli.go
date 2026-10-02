@@ -70,13 +70,19 @@ func Run(args []string, env Env) int {
 
 // helper runs pick's hidden helper, which fzf's callbacks run. It is no
 // command of the table, so that help, completion and suggestions never show
-// it. It prints what fzf reads, not an envelope, unless it fails.
+// it. It prints what fzf reads, not an envelope, unless it fails without
+// a session or a verb; a verb's failure it reports in what fzf reads, and
+// exits as the envelope would, with no stderr line.
 func helper(args []string, env Env) ([]byte, int, string) {
-	out, e := pick.Helper(args, pick.Env{Ops: env.Ops, Sys: env.Pick})
-	if e != nil {
-		return envelopeLine(ops.Failed(e))
+	out, reported, e := pick.Helper(args, pick.Env{Ops: env.Ops, Sys: env.Pick})
+	switch {
+	case e == nil:
+		return out, ExitOK, ""
+	case reported:
+		_, code, _ := envelopeLine(ops.Failed(e))
+		return out, code, ""
 	}
-	return out, ExitOK, ""
+	return envelopeLine(ops.Failed(e))
 }
 
 // execute runs args against cmds and returns what to write, the exit code,

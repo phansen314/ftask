@@ -74,6 +74,12 @@ func TestTagsAction(t *testing.T) {
 		if f := text("footer"); f != "no change" {
 			t.Errorf("several, empty: footer %q", f)
 		}
+		// Only separators is empty too: it never clears them all.
+		helper("act", "t", "2@/", "1@/")
+		helper("enter", ", ,")
+		if f := text("footer"); f != "no change" {
+			t.Errorf("several, separators only: footer %q", f)
+		}
 		helper("act", "t", "2@/", "1@/")
 		helper("enter", "+u -x")
 		helper("act", "t", "1@/")
@@ -100,7 +106,7 @@ func TestTagsAction(t *testing.T) {
 			t.Errorf("no %s in %s", want, res)
 		}
 	}
-	// The mix and the several's empty value made no call.
+	// The mix and the several's empty values made no call.
 	if n := strings.Count(res, `"operation":"update"`); n != 6 {
 		t.Errorf("%d updates", n)
 	}

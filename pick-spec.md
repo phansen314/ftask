@@ -1,12 +1,12 @@
 # ftask pick spec
 
-`ftask pick`: the interactive picker, built on [fzf](https://github.com/junegunn/fzf). Fuzzy-search tasks by title, act on them in place, and emit the ones chosen as JSON. It is the way a person works with ftask directly; agents use the other commands.
+`ftask pick`: the interactive picker, built on [fzf](https://github.com/junegunn/fzf). Fuzzy-search tasks by title and tags, act on them in place, and emit the ones chosen as JSON. It is the way a person works with ftask directly; agents use the other commands.
 
 `pick` is a CLI command, specified on top of the [CLI spec](cli-spec.md) and the [operations](operations.md). It runs no operation of its own. It composes [`list`](operations.md#list) for what it shows with the write operations its keys run, each as its own call. Everything the CLI spec says holds for `pick` except where this document says otherwise. Those places are collected in [Departures from the CLI spec](#departures-from-the-cli-spec).
 
 ## Goals
 
-- **Fuzzy search by title** over the tree, with the task's details and notes in a preview.
+- **Fuzzy search by title and tags** over the tree, with the task's details and notes in a preview.
 - **Act without leaving.** Complete, edit, create, block, move, reprioritize and retag, then see the list reload.
 - **A pipeline citizen.** Candidates can come from upstream (`ftask list … | ftask pick --from -`). The selection goes downstream as one [envelope](operations.md#output-envelope) (`ftask pick | jq …`). The interface draws on the terminal, never on stdin or stdout, so both can be redirected.
 - **Nothing hidden from a caller.** Every change made inside the picker is reported in the output, so a script or an agent that hands the terminal to a person learns what the person changed.
@@ -104,7 +104,7 @@ Fuzzy-pick tasks, or with `--folders` folders, and write the selection as one en
 ftask pick                                                  # open tasks; Enter → .result.tasks
 ftask pick --folder /work --scope ready                     # what's ready under /work
 ftask pick | jq -r '.result.tasks[].id'                     # the IDs picked
-ftask pick --fields id,title,notes_path | jq -r '.result.tasks[].notes_path' | xargs -r "$EDITOR"
+ftask pick --fields id,title,notes_path | jq -r '.result.tasks[].notes_path' | xargs -r -o "$EDITOR"   # -o: the editor gets the terminal
 ftask list --readiness blocked --fields id | ftask pick --from -   # choose among the blocked ones
 ftask frontier --tags-any today | ftask pick --from -
 ftask pick --source 'ftask frontier --tags-any today'       # the same, kept live
@@ -112,7 +112,7 @@ ftask pick --source "ftask list | jq -c '.result.tasks |= map(select(.extra.stat
 ftask pick --ids 41,42,43
 ftask complete "$(ftask pick --query 'renew pass' --select-one | jq -r '.result.tasks[0].id')"   # no picker if only one matches
 ftask pick --folders | jq -r '.result.folders[0]'           # a folder path, e.g. for create --folder
-ftask pick > picked.json; jq '.result.actions' picked.json  # what the session changed
+ftask pick > picked.json; jq '.result | {actions, notes_edited}' picked.json   # what the session changed
 ftask pick | ftask pick --from -                            # narrow in two passes
 ```
 
@@ -194,8 +194,8 @@ Each line has these columns, the title last:
 - **Prompt** names the scope: `open> `. In a [prompt](#modes), it names the value being asked for (e.g. `priority 42> `).
 - **Command mode hides the input line** (fzf's `hide-input`). That is the only way fzf drops typed keys: a key with no binding is otherwise typed into the query. The query is kept and still filters the list, and it reappears with insert mode.
 - **Header** shows the [mode](#modes) when it isn't insert (e.g. `[cmd] query: renew`, since command mode hides the query), the scope folder, the filters in effect, and a one-line key hint for the current mode.
-- <a id="status-line"></a>**Status line** (fzf's footer) is one line, showing the result of the last action until the next one, then, after ` · `, `N warnings` if the last load reported any:
-  - one target: `✓ completed 42`, `✓ created 51`, or `✗ block 43 ← 7: conflict (acyclic): 7 → 43 → 7`. A failure shows its error kind and its `message`.
+- <a id="status-line"></a>**Status line** (fzf's footer) is one line, showing the result of the last action until the next one, then, after ` · `, `N warnings` (`1 warning` for one) if the last load reported any:
+  - one target: `✓ completed 42`, `✓ created 51`, or `✗ block 43 ← 7: conflict (acyclic): blocker(s) 7 would create a cycle`. A failure shows its error kind and its `message`.
   - several: outcomes grouped, successes first, with at most five IDs per group, then `+N`: `✓ completed 38: 41, 42, 44, 45, 47 +33 · ✗ 2 failed: 43 busy, 46 conflict (duplicate-id)`.
   - Too long for the terminal, it is cut with `…`. Every outcome is in `actions` in the output, whatever the status line shows.
 
@@ -235,7 +235,7 @@ The picker always has one of four modes. Typing reaches the query only in insert
 - **Prompts borrow the query line.** On entering prompt mode, the helper saves the search query in the session and disables search. On leaving, by apply or cancel, it restores the query (`transform-query`, see [No data in action text](#fzf-contract)) and enables search again. The one exception is a successful `n`, which clears it (see [Actions](#actions)).
 - **ctrl-c** in any mode [cancels](#output): exits at once, with error kind `cancelled`. So do fzf's other abort keys (ctrl-g, ctrl-q).
 - **ctrl-d** only deletes the character under the cursor. fzf's default, `delete-char/eof`, also aborts on an empty query, which in a prompt would cancel the whole session, so `pick` binds it to `delete-char` in every mode.
-- **Marks.** Tab (and, in command mode, space) marks or unmarks the line under the cursor, in insert, command and choose modes. Marks are cleared after every action, on every switch between the task list and a choose list, and on every reload. Each of these clears explicitly, even where fzf's reload would: fzf keeps marks across a reload when the person's options include `--track --id-nth`.
+- **Marks.** Tab (and, in command mode, space) marks or unmarks the line under the cursor, in insert, command and choose modes. Marks are cleared after every action, whether or not it ran an operation or its reload went through, except one refused for its number of targets (`✗ x takes one task: 3 marked`), which keeps them to be fixed; on every switch between the task list and a choose list, and on every reload. Each of these clears explicitly, even where fzf's reload would: fzf keeps marks across a reload when the person's options include `--track --id-nth`.
 
 ## Actions
 
@@ -246,7 +246,7 @@ Command mode's keys:
 | Key | Action | Runs | Targets |
 |---|---|---|---|
 | `c` | Complete or reopen, by the readiness the lines show. If any target is shown open, it completes every target. If every target is shown complete, it reopens them all. A task completed or reopened elsewhere since the last load makes its call a no-op (`changed: false`), never a reversal. | [`complete`](operations.md#complete), [`reopen`](operations.md#reopen) | any |
-| `e` | Edit notes: opens the targets' `notes_path`, all as arguments to one editor, with fzf suspended. `$VISUAL`, else `$EDITOR`, else `vi`. | none: ftask never sees notes edits. `pick` reports which notes changed in [`notes_edited`](#output). | any |
+| `e` | Edit notes: opens the targets' `notes_path`, all as arguments to one editor, with fzf suspended. `$VISUAL`, else `$EDITOR`, else `vi`. Each `notes_path` is read fresh by ID as `e` runs, not taken from the last load, so a task moved meanwhile has its notes edited where they now are; a target deleted meanwhile refuses the whole `e`. | none: ftask never sees notes edits. `pick` reports which notes changed in [`notes_edited`](#output). | any |
 | `n` | New task. Prompt `new> `, filled with the query. Creates an open task with that title in the scope folder (see below). | [`create`](operations.md#create) | none |
 | `b` | Block. Choose list `blockers of 42> ` (see below). Adds the chosen tasks to each target's `blocked_by`. | [`block`](operations.md#block) | any |
 | `u` | Unblock. Choose list `unblock 42> ` of the target's `blocked_by`, missing IDs included. Removes the chosen ones. | [`unblock`](operations.md#unblock) | one |
@@ -466,7 +466,7 @@ It holds:
 - the **load**: the result of one `list` call per load, with `folder` `/`, `recursive`, `readiness` `["ready", "blocked", "complete"]`, `include_folders`, and no filters. `pick` derives from it the candidate lines (applying the scope folder, recursion, readiness scope and tag filters with `list`'s meanings), the preview's `blocks`, `b`'s candidates, and the `f` and `m` folder lists, so all of them agree. The status line's `N warnings` counts this read's warnings, never a `--source` command's. With a live source, a reload therefore reads the tree twice: once in the source's command, and once in this load, which supplies the data. A snapshot or source ID that the load does not find is left out of the list, and the header says how many (`2 given IDs not found`);
 - the **notes hashes** of the targets of an `e`, from before the editor ran, for `notes_edited`.
 
-**The helper** is a hidden command, `ftask __pick <verb> …`, that fzf's callbacks run. It reads the session directory from `FTASK_PICK_SESSION`, which `pick` sets in fzf's environment. It is internal: not listed in help, not part of the contract, and it may change in any release. Run with no valid session, it fails with `usage`.
+**The helper** is a hidden command, `ftask __pick <verb> …`, that fzf's callbacks run. It reads the session directory from `FTASK_PICK_SESSION`, which `pick` sets in fzf's environment. It is internal: not listed in help, not part of the contract, and it may change in any release. Run with no valid session, it fails with `usage`. Inside a session, a callback's own failure (e.g. an unreadable session file) never prints an envelope, which fzf would parse as actions or list as a line: a callback whose output fzf runs shows the error in the status line instead (`✗ internal: …`), or does nothing if even that fails; a list's callback prints no lines; and one whose output fzf shows as it is, such as the preview, prints the error as one line.
 
 ## Departures from the CLI spec
 

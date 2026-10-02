@@ -38,9 +38,23 @@ func openUnblock(r *actionRun, targets []shownLine) {
 
 // unblockChoices are the lines of t's blockers in the load: each blocker's
 // task, in pick's line order, then each ID with no task, ascending, keyed
-// by the ID alone. found is false if the load has no t.
+// by the ID alone. t is found as the final read finds a selected line
+// (pick-spec.md, Output): by its key, else as the one task with its ID,
+// wherever it now is, e.g. moved by another process. found is false if
+// the load has neither.
 func unblockChoices(l *Load, t shownLine, color bool) (lines []string, found bool) {
 	i := slices.IndexFunc(l.Tasks, func(v model.TaskView) bool { return key(v) == t.Key })
+	if i < 0 {
+		for j, v := range l.Tasks {
+			if v.ID != t.ID {
+				continue
+			}
+			if i >= 0 {
+				return nil, false // several copies, none in the line's folder
+			}
+			i = j
+		}
+	}
 	if i < 0 {
 		return nil, false
 	}

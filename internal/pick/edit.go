@@ -6,10 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"slices"
 
 	"github.com/phansen314/ftask/internal/errs"
+	"github.com/phansen314/ftask/internal/fsys"
 	"github.com/phansen314/ftask/internal/model"
 )
 
@@ -43,12 +43,19 @@ type edited struct {
 func editNotes(r *actionRun, targets []shownLine) {
 	es := make([]edited, len(targets))
 	for i, t := range targets {
-		h, err := notesHash(t.Notes)
+		// The notes path as it is now: the task may have moved since the
+		// load, and its notes with it.
+		v, failed := current(r.env, t)
+		if failed != "" {
+			r.status = "✗ e: " + string(idNumber(t.ID)) + ": " + failed
+			return
+		}
+		h, err := notesHash(r.env.Ops.FS, v.NotesPath)
 		if err != nil {
 			r.status = "✗ e: " + err.Error()
 			return
 		}
-		es[i] = edited{ID: t.ID, Path: t.Notes, Hash: h}
+		es[i] = edited{ID: t.ID, Path: v.NotesPath, Hash: h}
 	}
 	if r.err = writeJSON(r.s, editFile, es); r.err != nil {
 		return
@@ -66,8 +73,8 @@ func editNotes(r *actionRun, targets []shownLine) {
 
 // notesHash is the hash of a notes file's content; a missing one reads as
 // empty, as its notes do.
-func notesHash(path string) (string, error) {
-	b, err := os.ReadFile(path)
+func notesHash(fsy fsys.FS, path string) (string, error) {
+	b, err := fsy.ReadFile(path)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return "", err
 	}
@@ -135,7 +142,7 @@ func afterEdit(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 	var changed []outcome
 	var problems []string
 	for _, ed := range es {
-		h, err := notesHash(ed.Path)
+		h, err := notesHash(env.Ops.FS, ed.Path)
 		switch {
 		case err != nil:
 			problems = append(problems, "✗ e: "+err.Error())

@@ -40,6 +40,13 @@ func Run(in *jsonio.Object, problems []errs.Problem, env Env) ops.Envelope {
 	if e != nil {
 		return ops.Failed(e)
 	}
+	// FTASK_PICK_OPTS is fzf's too: checked with it, before the tree is
+	// read.
+	environ := env.Sys.Environ()
+	opts, e := userOpts(environ)
+	if e != nil {
+		return ops.Failed(e)
+	}
 	l, failed := load(env.Ops, true)
 	if failed != nil {
 		return *failed
@@ -48,7 +55,6 @@ func Run(in *jsonio.Object, problems []errs.Problem, env Env) ops.Envelope {
 	if e := l.checkFolder(scope.Folder); e != nil {
 		return ops.Envelope{Error: e, Warnings: l.Warnings}
 	}
-	environ := env.Sys.Environ()
 	var views []model.TaskView
 	var missing int
 	var lines []string
@@ -57,10 +63,6 @@ func Run(in *jsonio.Object, problems []errs.Problem, env Env) ops.Envelope {
 	} else {
 		views, missing = l.candidates(scope)
 		lines = renderLines(views, !noColor(environ))
-	}
-	opts, e := userOpts(environ)
-	if e != nil {
-		return ops.Envelope{Error: e, Warnings: l.Warnings}
 	}
 	exe, err := env.Sys.Executable()
 	if err != nil {

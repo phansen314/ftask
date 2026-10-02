@@ -208,7 +208,7 @@ func TestHelper(t *testing.T) {
 	env0 := env(SessionVar + "=" + s.Dir)
 	env0.Ops.FS = fsys.OS{}
 
-	out, e := Helper([]string{"echo", "a", "b c"}, env0)
+	out, _, e := Helper([]string{"echo", "a", "b c"}, env0)
 	if e != nil || string(out) != "accept" || !slices.Equal(got, []string{"a", "b c"}) {
 		t.Errorf("got %q, %v, args %q", out, e, got)
 	}
@@ -223,7 +223,10 @@ func TestHelper(t *testing.T) {
 		{"missing verb", nil, env0, nil},
 		{"unknown verb", []string{"nope", "x"}, env0, ptr("nope")},
 	} {
-		_, e := Helper(tc.args, tc.env)
+		_, reported, e := Helper(tc.args, tc.env)
+		if reported {
+			t.Errorf("%s: reported, want an envelope", tc.name)
+		}
 		if e == nil || e.Kind != errs.KindUsage {
 			t.Errorf("%s: %v, want usage", tc.name, e)
 			continue
@@ -233,6 +236,52 @@ func TestHelper(t *testing.T) {
 			t.Errorf("%s: problem %+v", tc.name, p)
 		}
 	}
+}
+
+// A verb's failure is reported where fzf sends its output, never as an
+// envelope: an action verb's in the status line, a list verb's as no
+// lines, a shown text's as one line.
+func TestHelperFailed(t *testing.T) {
+	tr := newTestTree(t)
+	tr.run("create", map[string]any{"title": "one"})
+	tr.pick(map[string]any{}, fzfDoes{do: func(t *testing.T, helper func(...string) string) {
+		helper("command", "")
+		env := Env{Ops: tr.env, Sys: System{
+			Environ:    func() []string { return []string{SessionVar + "=" + tr.session} },
+			Executable: func() (string, error) { return "/bin/ftask", nil },
+		}}
+		run := func(args ...string) (string, bool, *errs.Error) {
+			out, reported, e := Helper(args, env)
+			return string(out), reported, e
+		}
+		// Broken: what every verb below reads first.
+		for _, name := range []string{shownFile, linesFile} {
+			if err := os.Remove(filepath.Join(tr.session, name)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		out, reported, e := run("act", "c", "1@/")
+		if e == nil || !reported || out != "transform-footer('/bin/ftask' __pick text 'footer')" {
+			t.Errorf("act: %q, %v, %v", out, reported, e)
+		}
+		if f, _, _ := run("text", "footer"); !strings.HasPrefix(f, "✗ internal: session has no "+shownFile) {
+			t.Errorf("footer %q", f)
+		}
+		os.Remove(filepath.Join(tr.session, statusFile))
+		os.Chmod(tr.session, 0o500) // nowhere to write the status line
+		out, reported, e = run("act", "c", "1@/")
+		os.Chmod(tr.session, 0o700)
+		if e == nil || !reported || out != "" {
+			t.Errorf("act, unwritable: %q, %v, %v", out, reported, e)
+		}
+		if out, reported, e = run("lines", "x"); e == nil || !reported || out != "" {
+			t.Errorf("lines: %q, %v, %v", out, reported, e)
+		}
+		if out, reported, e = run("text", "nope"); e == nil || !reported || out != "✗ usage: usage: unknown text\n" {
+			t.Errorf("text: %q, %v, %v", out, reported, e)
+		}
+		helper("quit")
+	}})
 }
 
 func ptr[T any](v T) *T { return &v }

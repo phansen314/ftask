@@ -58,7 +58,10 @@ func TestXAction(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			helper("after-x")
+			// Changed or not, valid or not, the marks are cleared.
+			if got := helper("after-x"); !strings.HasPrefix(got, "clear-selection+") {
+				t.Errorf("after-x printed %q", got)
+			}
 			return string(b)
 		}
 

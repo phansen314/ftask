@@ -144,7 +144,7 @@ func TestAct(t *testing.T) {
 		}
 		// An action with no targets ignores the cursor, and runs nothing
 		// here, so nothing reloads.
-		if got := helper("act", "w", "1@/"); got != "transform-footer('/bin/ftask' __pick text 'footer')" {
+		if got := helper("act", "w", "1@/"); got != "clear-selection+transform-footer('/bin/ftask' __pick text 'footer')" {
 			t.Errorf("w printed %q", got)
 		}
 		if got := footer(helper); got != "✓ nothing to do" {
@@ -206,7 +206,7 @@ func TestActBeforeReloadShows(t *testing.T) {
 }
 
 // A load that fails after an action leaves the list as it was: the status
-// line says so, and the marks stay.
+// line says so. The marks are cleared all the same: the action is over.
 func TestActReloadFails(t *testing.T) {
 	withAction(t, completing("z", anyTargets))
 	tr := newTestTree(t)
@@ -217,7 +217,7 @@ func TestActReloadFails(t *testing.T) {
 		tr.run("create-folder", map[string]any{"folder": "/b"})
 		tr.run("move", map[string]any{"id": 1, "to": "/b"})
 		tr.run("delete-folder", map[string]any{"folder": "/a"})
-		if got := helper("act", "z", "1@/a"); got != "transform-footer('/bin/ftask' __pick text 'footer')" {
+		if got := helper("act", "z", "1@/a"); got != "clear-selection+transform-footer('/bin/ftask' __pick text 'footer')" {
 			t.Errorf("printed %q", got)
 		}
 		if got := helper("text", "footer"); !strings.HasPrefix(got, "✓ completed 1 · ✗ reload: not-found: ") {

@@ -38,22 +38,57 @@ var verbs = map[string]verb{
 }
 
 // Helper runs ftask __pick with args, the words after it, and returns what
-// to print. Its failures are envelopes, like any command's; one run with no
-// valid session, or with no verb it knows, is usage.
-func Helper(args []string, env Env) ([]byte, *errs.Error) {
+// to print. With no valid session, or no verb it knows, it fails as any
+// command does, with an envelope: usage. A verb's failure is reported
+// instead, and out is what to print for it (see failed): fzf reads a
+// verb's output as actions or as a list, never as an envelope. e is
+// returned then too, for the exit status, with reported true.
+func Helper(args []string, env Env) (out []byte, reported bool, e *errs.Error) {
 	s, e := openSession(env.Ops.FS, env.Sys.Environ())
 	if e != nil {
-		return nil, e
+		return nil, false, e
 	}
 	defer s.Close()
 	if len(args) == 0 {
-		return nil, errs.Usage([]errs.UsageProblem{{Reason: "missing verb"}})
+		return nil, false, errs.Usage([]errs.UsageProblem{{Reason: "missing verb"}})
 	}
 	v, ok := verbs[args[0]]
 	if !ok {
-		return nil, errs.Usage([]errs.UsageProblem{{Argument: &args[0], Reason: "unknown verb"}})
+		return nil, false, errs.Usage([]errs.UsageProblem{{Argument: &args[0], Reason: "unknown verb"}})
 	}
-	return v(s, args[1:], env)
+	if out, e = v(s, args[1:], env); e != nil {
+		return failed(s, args[0], e, env), true, e
+	}
+	return out, false, nil
+}
+
+// actionVerbs are the verbs whose output fzf runs as actions: transform's,
+// and execute's chained transform.
+var actionVerbs = []string{"enter", "act", "esc", "command", "insert", "quit", "after-edit", "after-x", "on-load"}
+
+// listVerbs are the verbs whose output is a reload-sync's list.
+var listVerbs = []string{"lines", "choices"}
+
+// failed is what a verb that failed with e prints, by where fzf sends its
+// output, so that no envelope, which may hold data, is ever parsed as
+// actions or listed: for an action verb, the status line, showing e; for
+// a list verb, nothing, which leaves the list empty; for the rest, whose
+// output fzf shows as it is (the preview, a text, the editor's terminal),
+// e as one line.
+func failed(s *Session, verb string, e *errs.Error, env Env) []byte {
+	msg := "✗ " + errText(e)
+	switch {
+	case slices.Contains(actionVerbs, verb):
+		var sh shown
+		readJSON(s, shownFile, &sh) // no load to count warnings from: none
+		if out, e := setStatus(s, env, sh.Warnings, msg); e == nil {
+			return out
+		}
+		return []byte{} // nothing to show it with: do nothing
+	case slices.Contains(listVerbs, verb):
+		return []byte{}
+	}
+	return []byte(errs.OneLine(msg) + "\n")
 }
 
 // Session files the verbs share.

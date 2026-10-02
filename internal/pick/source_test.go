@@ -112,7 +112,7 @@ func TestLiveSource(t *testing.T) {
 			t.Errorf("after r: %s", ks)
 		}
 		listed = `{"ok":false,"error":{"kind":"busy","message":"another write holds the lock"},"warnings":[]}`
-		if got := helper("act", "r"); got != "transform-footer('/bin/ftask' __pick text 'footer')" {
+		if got := helper("act", "r"); got != "clear-selection+transform-footer('/bin/ftask' __pick text 'footer')" {
 			t.Errorf("failed r printed %q", got)
 		}
 		if f, ks := helper("text", "footer"), lineKeys(helper); f != "✗ source: upstream failed with busy: another write holds the lock" || ks != "2@/" {

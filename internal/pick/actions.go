@@ -208,7 +208,8 @@ func act(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 	var out []byte
 	var e *errs.Error
 	if len(r.outcomes) == 0 && !r.reload {
-		out, e = setStatus(s, env, sh.Warnings, status)
+		// No reload to clear the marks, but the action is over.
+		out, e = clearMarks(setStatus(s, env, sh.Warnings, status))
 	} else {
 		// Reload after every action that ran an operation (pick-spec.md,
 		// Actions).
@@ -230,7 +231,8 @@ func reloadWithStatus(s *Session, env Env, status, ifReloaded string) ([]byte, *
 		if e := readJSON(s, shownFile, &sh); e != nil {
 			return nil, e
 		}
-		return setStatus(s, env, sh.Warnings, joinStatus(status, reloadFailed(failed)))
+		// The list stays, but the action is over.
+		return clearMarks(setStatus(s, env, sh.Warnings, joinStatus(status, reloadFailed(failed))))
 	}
 	footer, e := setStatus(s, env, warnings, joinStatus(status, ifReloaded))
 	if e != nil {
@@ -346,6 +348,21 @@ func (r *actionRun) call(id model.ID, op string, in *jsonio.Object, done, what s
 	return out
 }
 
+// current is t's task as it now is, read fresh by ID: of several copies,
+// the one in t's line's folder, else the first. failed says why there is
+// none.
+func current(env Env, t shownLine) (v model.TaskView, failed string) {
+	in := &jsonio.Object{}
+	in.Set("id", idNumber(t.ID))
+	out := ops.Run("show", in, nil, env.Ops)
+	if !out.OK {
+		return model.TaskView{}, errText(out.Error)
+	}
+	views := out.Result.(ops.ShowOutput).Tasks
+	i := max(0, slices.IndexFunc(views, func(v model.TaskView) bool { return key(v) == t.Key }))
+	return views[i], ""
+}
+
 // idNumber is id as an operation's input holds it.
 func idNumber(id model.ID) json.Number {
 	return json.Number(strconv.FormatInt(int64(id), 10))
@@ -430,6 +447,15 @@ func setStatus(s *Session, env Env, warnings int, status string) ([]byte, *errs.
 		return nil, errs.Internal("locating the ftask binary: " + err.Error())
 	}
 	return []byte("transform-footer(" + helperLine(exe, "text", "footer") + ")"), nil
+}
+
+// clearMarks is out, an action's ending without a reload, after clearing
+// the marks: they are cleared after every action (pick-spec.md, Modes).
+func clearMarks(out []byte, e *errs.Error) ([]byte, *errs.Error) {
+	if e != nil {
+		return nil, e
+	}
+	return []byte("clear-selection+" + string(out)), nil
 }
 
 // reloadFailed is a failed reload as the status line shows it: a live

@@ -28,11 +28,12 @@ func openPriority(r *actionRun, targets []shownLine) {
 func setPriority(r *actionRun, value string, targets []shownLine) bool {
 	value = strings.TrimSpace(value)
 	var priority any = value
-	switch _, err := strconv.ParseInt(value, 10, 64); {
+	switch n, err := strconv.ParseInt(value, 10, 64); {
 	case value == "" || value == "null":
 		priority = nil
 	case err == nil:
-		priority = json.Number(value)
+		// As JSON has it: +5 and 05 parse, but are no JSON number.
+		priority = json.Number(strconv.FormatInt(n, 10))
 	}
 	return r.applyEach(value, targets, func(t shownLine) {
 		in := &jsonio.Object{}

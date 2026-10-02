@@ -21,7 +21,7 @@ How the design spec's [write lock](design-spec.md#write-lock) and [Guarantees](d
 ## Toolchain
 
 - **Go**, standard library first. The `version` operation's `go`, `commit`, `commit_time`, and `uncommitted_changes` come from the build information Go embeds (`runtime/debug.ReadBuildInfo`: the Go version and the `vcs.revision`, `vcs.time`, and `vcs.modified` settings); `version` itself is set at release build time; a build without it takes the main module's version when that is a release tag — a valid semantic version that is not a pseudo-version and has no build metadata (e.g. `+dirty`) — so `go install …@v0.1.0` reports `0.1.0`, and anything else reports `0.0.0-dev`. A **release build** must come from a git checkout, so this information is present; the release build fails otherwise. A build with no VCS information falls back to the main module's version: `go install …@<version>` builds from the module cache without git, but a pseudo-version (e.g. `v0.0.0-20260929021723-4df90bd5d3e3`) still names the commit, by its 12-character prefix, and its UTC commit time, parsed with `golang.org/x/mod/module`; `uncommitted_changes` is `false`, since a module download has none. Any other build without it — a tagged version, `(devel)` — reports `commit` `"unknown"` and `commit_time` `"1970-01-01T00:00:00Z"`, so the output still matches `version-output`.
-- **No runtime dependencies** beyond the standard library, except cobra (and pflag) in the CLI (see [Argument parsing](#argument-parsing)), and `golang.org/x/mod` for reading pseudo-versions. A JSON Schema library is a **test-only** dependency (see [Validation](#validation)), as are `creack/pty` and `hinshun/vt10x`, which give the picker's end-to-end tests a terminal and render its screen.
+- **No runtime dependencies** beyond the standard library, except cobra (and pflag) in the CLI (see [Argument parsing](#argument-parsing)), `golang.org/x/mod` for reading pseudo-versions, and two that only `pick` uses: `junegunn/go-shellwords`, fzf's own parser, to split `FTASK_PICK_OPTS` exactly as fzf splits `FZF_DEFAULT_OPTS`, and `mattn/go-runewidth`, to measure the picker's columns in terminal cells. A JSON Schema library is a **test-only** dependency (see [Validation](#validation)), as are `creack/pty` and `hinshun/vt10x`, which give the picker's end-to-end tests a terminal and render its screen.
 
 ## JSON reading
 
@@ -334,14 +334,14 @@ cmd/ftask → cli → ops → store → fsys
                       ↘ graph      ↘ jsonio
                       ↘ model ←── (store, graph)
 cmd/ftask → buildinfo (and ops → buildinfo, for version)
-cli → pick → ops, for pick, which runs no operation of its own
+cli → pick → ops, model, fsys, for pick, which runs no operation of its own
 cmd/ftask → fsys, in the e2e_hooks build only (Test hooks)
 errs and jsonio may be imported by any package, and import none of ftask's own.
 ```
 
 - **The CLI does not know the data model.** `cli` never imports `model` or `store`: it builds a `jsonio` tree from the command line, calls `ops.Run(name, tree, env)`, and writes the envelope it gets back. `pick`, which runs no operation of its own, is the one command the CLI hands to another package: `internal/pick` validates its tree with `ops.Validate`, through a `pick` input adapter that `ops` holds with the operations' adapters, and runs `list` and the write operations through `ops.Run`, each as its own call. A composed command is defined in `ops` as a named composition (see [Operations and transactions](#operations-and-transactions)) and exposed by the CLI like any other name, so `cli` still composes nothing itself. The CLI spec's "no behavior beyond parsing arguments and composing operations" is thereby enforced by the compiler. Command tables hold field pointers and value types, which is CLI-spec knowledge, not model knowledge.
 - **`graph` is pure.** Readiness and the [cycle check](#cycle-check) take already-loaded nodes; `store` does the loading. The brute-force comparison runs in memory.
-- **`fsys` is the only package that touches the disk.** Its real implementation wraps `os.Root` and `flock`, and refuses symlinks with `Lstat` and a same-file check after each open ([Filesystem access](#filesystem-access)). Its fault implementation wraps the real one and, at a chosen call, returns an injected errno or ends the process — the one seam for the [OS error](#os-errors) tests and for crash injection.
+- **`fsys` is the only package that touches the disk.** Its real implementation wraps `os.Root` and `flock`, and refuses symlinks with `Lstat` and a same-file check after each open ([Filesystem access](#filesystem-access)). Its fault implementation wraps the real one and, at a chosen call, returns an injected errno or ends the process — the one seam for the [OS error](#os-errors) tests and for crash injection. `pick` also opens `/dev/tty` to check for a terminal and starts fzf, the editor and the preview's renderers, none of which reads or writes the tree's files.
 
 ### Operations and transactions
 

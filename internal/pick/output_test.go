@@ -121,7 +121,7 @@ func (tr *tree) pick(in map[string]any, fzf fzfDoes) (ops.Envelope, []byte) {
 		helper := func(args ...string) string {
 			hsys := sys
 			hsys.Environ = func() []string { return env }
-			out, e := Helper(args, Env{Ops: tr.env, Sys: hsys})
+			out, _, e := Helper(args, Env{Ops: tr.env, Sys: hsys})
 			if e != nil {
 				tr.t.Fatalf("helper %q: %v", args, e)
 			}

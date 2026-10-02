@@ -31,6 +31,11 @@ func setTags(r *actionRun, value string, targets []shownLine) bool {
 		r.status = "✗ tags: a mix of bare and +/- tags"
 		return true
 	}
+	// Only separators is empty, as parseTags reads it: with several
+	// targets, it must not clear them all.
+	if strings.Trim(value, ", \t") == "" {
+		value = ""
+	}
 	return r.applyEach(strings.TrimSpace(value), targets, func(t shownLine) {
 		in := &jsonio.Object{}
 		in.Set("id", idNumber(t.ID))

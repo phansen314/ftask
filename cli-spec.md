@@ -823,7 +823,29 @@ ftask list --fields folder | jq -c 'if .ok then .result |= (.tasks |= (group_by(
 
 Fuzzy-pick tasks, or folders, in an interactive [fzf](https://github.com/junegunn/fzf) picker, act on them in place, and write the ones chosen as one envelope. For people at a terminal, not agents. It is specified in its own document, [pick-spec.md](pick-spec.md), which says where it departs from this spec's global rules.
 
-**Synopsis:** `ftask pick [options]`, or `ftask pick -i <file>`. See [pick-spec.md](pick-spec.md#command).
+**Synopsis:** `ftask pick [--folder <path>] [--recursive=false] [--scope <scope>] [--tags-any <tags>] [--tags-all <tags>] [--ids <ids> | --from <file> | --source <command>] [--query <text>] [--select-one] [--exit-zero] [--fields <names>]`, `ftask pick --folders [--folder <path>] [--recursive=false] [--query <text>] [--select-one] [--exit-zero]`, or `ftask pick -i <file>`.
+
+**Operation:** none of its own: [`list`](operations.md#list) for each load, and one write operation per target for each action. See [pick-spec.md, Command](pick-spec.md#command).
+
+**Arguments:** none.
+
+**Options:** see [pick-spec.md, Command](pick-spec.md#command).
+
+**Input:** pick's own input schema, `pick-input`; `--from` resolves to `ids`. See [pick-spec.md, Command](pick-spec.md#command).
+
+**Output:** pick's own, `pick-output`: the selection, read fresh, and every action the session ran. See [pick-spec.md, Output](pick-spec.md#output).
+
+**Errors:** three CLI-only kinds, `unavailable`, `cancelled` and `incomplete`. See [pick-spec.md, Errors](pick-spec.md#errors).
+
+**Composition:** each action is its own call with its own lock; a failure leaves the others in effect. See [pick-spec.md, Command](pick-spec.md#command).
+
+**Examples:**
+
+```sh
+ftask pick | jq -r '.result.tasks[].id'                            # the IDs picked
+ftask list --readiness blocked --fields id | ftask pick --from -   # choose among the blocked ones
+ftask pick --folders | jq -r '.result.folders[0]'                  # a folder path
+```
 
 ## Not included
 

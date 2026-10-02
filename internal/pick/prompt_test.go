@@ -35,6 +35,14 @@ func TestPromptOnTargets(t *testing.T) {
 		if f := text("footer"); f != "✓ set priority 1" {
 			t.Errorf("applied: footer %q", f)
 		}
+		// An integer in another form is sent as the number it is.
+		for _, v := range []string{"+05", "-05"} {
+			helper("act", "p", "1@/")
+			helper("enter", v)
+			if f := text("footer"); f != "✓ set priority 1" {
+				t.Errorf("%s: footer %q", v, f)
+			}
+		}
 
 		// Several: empty, counted in the label; empty does nothing.
 		helper("act", "p", "2@/", "1@/")
@@ -77,7 +85,8 @@ func TestPromptOnTargets(t *testing.T) {
 		helper("quit")
 	}})
 	// Every call, the refused one included; none for no change.
-	if n := strings.Count(string(line), `"operation":"update"`); n != 7 ||
+	if n := strings.Count(string(line), `"operation":"update"`); n != 9 ||
+		!strings.Contains(string(line), `"input":{"id":1,"priority":5}`) || !strings.Contains(string(line), `"input":{"id":1,"priority":-5}`) ||
 		!strings.Contains(string(line), `"input":{"id":1,"priority":null}`) || !strings.Contains(string(line), `"input":{"id":2,"priority":null}`) {
 		t.Errorf("%d updates: %s", n, line)
 	}

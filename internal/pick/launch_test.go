@@ -10,6 +10,7 @@ import (
 
 	"github.com/phansen314/ftask/internal/errs"
 	"github.com/phansen314/ftask/internal/fsys"
+	"github.com/phansen314/ftask/internal/jsonio"
 	"github.com/phansen314/ftask/internal/model"
 	"github.com/phansen314/ftask/internal/ops"
 )
@@ -113,6 +114,24 @@ func TestUserOpts(t *testing.T) {
 	b, _ := json.Marshal(e.Details)
 	if string(b) != `{"reason":"fzf-failed"}` || !strings.Contains(e.Message, OptsVar) {
 		t.Errorf("unbalanced: %s: %s", e.Message, b)
+	}
+}
+
+// FTASK_PICK_OPTS that doesn't split is found with fzf, before anything
+// is read from the tree (pick-spec.md, Errors): not a scope folder's
+// not-found.
+func TestRunBadOptsFirst(t *testing.T) {
+	tr := newTestTree(t)
+	sys := System{
+		LookPath: func(string) (string, error) { return "/bin/fzf", nil },
+		Output:   func(string, []string, []string) ([]byte, []byte, int, error) { return []byte("0.63.0\n"), nil, 0, nil },
+		Environ:  func() []string { return []string{OptsVar + "=--prompt 'x"} },
+	}
+	in := &jsonio.Object{}
+	in.Set("folder", "/nope")
+	out := Run(in, nil, Env{Ops: tr.env, Sys: sys})
+	if out.OK || out.Error.Kind != errs.KindUnavailable || out.Error.Details.(UnavailableDetails).Reason != FzfFailed {
+		t.Errorf("%+v", out.Error)
 	}
 }
 
