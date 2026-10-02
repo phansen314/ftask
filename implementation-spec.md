@@ -21,7 +21,7 @@ How the design spec's [write lock](design-spec.md#write-lock) and [Guarantees](d
 ## Toolchain
 
 - **Go**, standard library first. The `version` operation's `go`, `commit`, `commit_time`, and `uncommitted_changes` come from the build information Go embeds (`runtime/debug.ReadBuildInfo`: the Go version and the `vcs.revision`, `vcs.time`, and `vcs.modified` settings); `version` itself is set at release build time; a build without it takes the main module's version when that is a release tag — a valid semantic version that is not a pseudo-version and has no build metadata (e.g. `+dirty`) — so `go install …@v0.1.0` reports `0.1.0`, and anything else reports `0.0.0-dev`. A **release build** must come from a git checkout, so this information is present; the release build fails otherwise. A build with no VCS information falls back to the main module's version: `go install …@<version>` builds from the module cache without git, but a pseudo-version (e.g. `v0.0.0-20260929021723-4df90bd5d3e3`) still names the commit, by its 12-character prefix, and its UTC commit time, parsed with `golang.org/x/mod/module`; `uncommitted_changes` is `false`, since a module download has none. Any other build without it — a tagged version, `(devel)` — reports `commit` `"unknown"` and `commit_time` `"1970-01-01T00:00:00Z"`, so the output still matches `version-output`.
-- **No runtime dependencies** beyond the standard library, except cobra (and pflag) in the CLI (see [Argument parsing](#argument-parsing)), and `golang.org/x/mod` for reading pseudo-versions. A JSON Schema library is a **test-only** dependency (see [Validation](#validation)).
+- **No runtime dependencies** beyond the standard library, except cobra (and pflag) in the CLI (see [Argument parsing](#argument-parsing)), and `golang.org/x/mod` for reading pseudo-versions. A JSON Schema library is a **test-only** dependency (see [Validation](#validation)), as are `creack/pty` and `hinshun/vt10x`, which give the picker's end-to-end tests a terminal and render its screen.
 
 ## JSON reading
 
@@ -533,8 +533,9 @@ For each operation, a set of faults, each of which alone triggers one error kind
 1. `gofmt -l .`, which must print nothing;
 2. `go vet ./...`, then `go vet -tags e2e_hooks ./...` for the [test hooks](#test-hooks);
 3. `go build ./...`;
-4. `go test ./...`, never with `-short`: the [lock](#lock) stress tests (5 and 6) skip under it, and their macOS run is the check [Mechanism](#mechanism) relies on;
-5. `scripts/smoke.sh`, installing `jq` first if the runner lacks it.
+4. `scripts/fetch-fzf.sh`, which downloads fzf 0.63.0 and the current release, checked against pinned checksums, for the picker's [end-to-end tests](pick-spec.md#testing), which run against each fzf in `FTASK_E2E_FZF` (else the one on `PATH`, else skip);
+5. `go test ./...`, never with `-short`: the [lock](#lock) stress tests (5 and 6) skip under it, and their macOS run is the check [Mechanism](#mechanism) relies on;
+6. `scripts/smoke.sh`, installing `jq` first if the runner lacks it.
 
 Every test runs on both, except the two `/dev/full` tests ([Exit and signals](#exit-and-signals)), which skip elsewhere: macOS has no `/dev/full`.
 
