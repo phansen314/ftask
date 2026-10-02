@@ -2,7 +2,7 @@
 
 The `ftask` command-line interface: how each command maps to the [operations](operations.md), how input gets in, and what comes out. The CLI adds no behavior of its own beyond parsing arguments — including any input resolution a command's Input part lists, such as `init`'s path resolution or `create`'s `--notes-file` — and composing operations; everything about the data is specified by the operations and the [design spec](design-spec.md).
 
-The intended user is a power user working through Claude, with `jq` for anything a person reads directly. The one exception is the planned [`pick`](#pick), an interactive picker for people, specified in [pick-spec.md](pick-spec.md).
+The intended user is a power user working through Claude, with `jq` for anything a person reads directly. The one exception is [`pick`](#pick), an interactive picker for people, specified in [pick-spec.md](pick-spec.md).
 
 ## Global behavior
 
@@ -818,10 +818,6 @@ ftask list --readiness ready,blocked,complete --tags-all db,backend --fields id,
 ftask list --include-folders --limit 0                                      # every folder: .result.folders
 ftask list --fields folder | jq -c 'if .ok then .result |= (.tasks |= (group_by(.folder) | map({folder: .[0].folder, ids: map(.id)}))) else . end'
 ```
-
-## Planned commands
-
-Commands specified but not yet implemented.
 
 ### pick
 

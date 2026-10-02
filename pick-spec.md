@@ -2,8 +2,6 @@
 
 `ftask pick`: the interactive picker, built on [fzf](https://github.com/junegunn/fzf). Fuzzy-search tasks by title, act on them in place, and emit the ones chosen as JSON. It is the way a person works with ftask directly; agents use the other commands.
 
-**Draft.** Not yet implemented.
-
 `pick` is a CLI command, specified on top of the [CLI spec](cli-spec.md) and the [operations](operations.md). It runs no operation of its own. It composes [`list`](operations.md#list) for what it shows with the write operations its keys run, each as its own call. Everything the CLI spec says holds for `pick` except where this document says otherwise. Those places are collected in [Departures from the CLI spec](#departures-from-the-cli-spec).
 
 ## Goals
@@ -15,7 +13,7 @@
 
 ## Non-goals
 
-- **Agents.** `pick` is for a person at a terminal. Without one, it fails whenever it would show the picker (see [Errors](#errors)). The [ftask skill](claude/skills/ftask/SKILL.md) will tell agents never to run it, once `pick` ships (see [Shipping](#shipping)).
+- **Agents.** `pick` is for a person at a terminal. Without one, it fails whenever it would show the picker (see [Errors](#errors)). The [ftask skill](claude/skills/ftask/SKILL.md) tells agents never to run it (see [Shipping](#shipping)).
 - **Deleting.** No key deletes a task or a folder. Deletes stay with `ftask delete` and `ftask delete-folder`, which agents' permission rules make ask first.
 - **A configurable keymap.** The keymap is fixed and documented here. fzf's own options restyle the picker (see [fzf options](#fzf-options)).
 - **A tree view.** Folders are a column and a narrowing step, not a nested display. That is the design spec's [Tree view](design-spec.md#tree-view).
