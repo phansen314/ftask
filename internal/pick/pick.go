@@ -58,6 +58,9 @@ func Run(in *jsonio.Object, problems []errs.Problem, env Env) ops.Envelope {
 		return ops.Envelope{Error: e, Warnings: l.Warnings}
 	}
 	defer s.Remove()
+	if e := writePreviews(s, l); e != nil {
+		return ops.Envelope{Error: e, Warnings: l.Warnings}
+	}
 	return ops.Envelope{Error: show(env, fzf, pk, lines, s), Warnings: l.Warnings}
 }
 

@@ -29,7 +29,9 @@ func TestPickerArgs(t *testing.T) {
 		"--prompt", "open> ",
 		"--query", "renew pass",
 		"--header", "/\nenter: pick · tab: mark · ctrl-c: cancel",
+		"--preview", "'/opt/my ftask/ftask' __pick preview {1}",
 		"--bind", "ctrl-d:delete-char",
+		"--bind", "ctrl-/:toggle-preview",
 		"--bind", "start:unbind(load)",
 		"--bind", "load:transform:'/opt/my ftask/ftask' __pick on-load",
 	}

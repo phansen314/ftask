@@ -59,7 +59,9 @@ func (pk picker) args() []string {
 		"--prompt", string(pk.scope.Readiness)+"> ",
 		"--query", pk.query,
 		"--header", pk.header(),
+		"--preview", pk.helper("preview")+" {1}",
 		"--bind", "ctrl-d:delete-char",
+		"--bind", "ctrl-/:toggle-preview",
 		// load is bound from the start, so that a callback can rebind it
 		// to move the cursor once a reload is in (pick-spec.md, Actions).
 		"--bind", "start:unbind(load)",
