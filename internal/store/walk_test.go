@@ -237,7 +237,8 @@ func TestInScope(t *testing.T) {
 }
 
 // A copy gone by the time duplicates are counted is dropped: a task moved
-// mid-read is counted once, at the location seen last.
+// mid-read is counted once, at the location seen last. One that can't be
+// looked at is kept, for its load to report.
 func TestCopies(t *testing.T) {
 	f := newFixture(t)
 	f.task("a", 5, false)
@@ -248,25 +249,24 @@ func TestCopies(t *testing.T) {
 		tx.Index()
 		must(t, os.Remove(f.root+"/a/5.json"))
 		must(t, os.Remove(f.root+"/a/6.json"))
-		got, e := tx.Copies(5)
-		wantNoErr(t, e)
+		got := tx.Copies(5)
 		if want := []Location{{"/b", 5}, {"/c", 5}}; !reflect.DeepEqual(got, want) {
 			t.Errorf("Copies(5) = %v, want %v", got, want)
 		}
 		// A single copy is not checked again; loading it finds it gone.
-		got, e = tx.Copies(6)
-		wantNoErr(t, e)
+		got = tx.Copies(6)
 		if want := []Location{{"/a", 6}}; !reflect.DeepEqual(got, want) {
 			t.Errorf("Copies(6) = %v, want %v", got, want)
 		}
-		if got, _ := tx.Copies(7); len(got) != 0 {
+		if got := tx.Copies(7); len(got) != 0 {
 			t.Errorf("Copies(7) = %v", got)
 		}
 	})
 	env := f.withFault(fsys.ErrnoAt(fsys.OpLstat, "b/5.json", 1, syscall.EIO))
 	readTx(t, env, nil, func(tx *Tx) {
-		_, e := tx.Copies(5)
-		wantErr(t, e, errs.KindIO, errs.IODetails{Path: tx.Path("b/5.json"), Code: "EIO"})
+		if got, want := tx.Copies(5), []Location{{"/b", 5}, {"/c", 5}}; !reflect.DeepEqual(got, want) {
+			t.Errorf("Copies(5) = %v, want %v", got, want)
+		}
 	})
 }
 

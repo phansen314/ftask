@@ -388,6 +388,24 @@ func TestDoctorUnreadableFolder(t *testing.T) {
 	}
 }
 
+// An orphaned .md that can't be looked at, e.g. in a folder that can be
+// listed but not searched, is reported with its code, never passed over as
+// healthy; repair leaves it.
+func TestDoctorOrphanUnreadable(t *testing.T) {
+	f := newFixture(t)
+	f.write("tasks/e/77.md", "hi\n")
+	f.fail(fsys.OpLstat, "e/77.md", syscall.EACCES)
+	want := `{"healthy":false,"findings":[{"kind":"orphan-notes","class":"auto","count":1,"truncated":false,"items":[` +
+		`{"paths":["~/tasks/e/77.md"],"ids":[77],"action":null,"suggest":"fix its permissions, then run ftask doctor again to see what it is","reason":"unreadable","code":"EACCES"}]}]}`
+	if got := f.op("doctor", `{}`); got != want {
+		t.Errorf("doctor:\ngot  %s\nwant %s", got, want)
+	}
+	f.op("repair", `{}`)
+	if got := f.read("tasks/e/77.md"); got != "hi\n" {
+		t.Errorf("77.md %q", got)
+	}
+}
+
 // At most 20 items a kind, unless the input names the kind.
 func TestDoctorCap(t *testing.T) {
 	f := newFixture(t)

@@ -34,10 +34,7 @@ func loadCopies(tx *store.Tx, id model.ID) ([]*store.Loaded, *errs.Error) {
 	if e := tx.RequireWholeTree(tx.Index()); e != nil {
 		return nil, e
 	}
-	locs, e := tx.Copies(id)
-	if e != nil {
-		return nil, e
-	}
+	locs := tx.Copies(id)
 	var found []*store.Loaded
 	for _, l := range locs {
 		ld := tx.Load(l)
@@ -88,10 +85,7 @@ func view(tx *store.Tx, ld *store.Loaded) (model.TaskView, *errs.Error) {
 // when it has several, unusable-file when its one file is unusable. A file
 // that vanished since the walk counts as no task file.
 func blockerState(tx *store.Tx, ref *store.Loaded, id model.ID) (graph.BlockerState, *errs.Error) {
-	locs, e := tx.Copies(id)
-	if e != nil {
-		return 0, e
-	}
+	locs := tx.Copies(id)
 	switch {
 	case len(locs) == 0:
 		return missingBlocker(tx, ref, id), nil
@@ -134,11 +128,7 @@ func lookupIDs(tx *store.Tx, ids []model.ID) (map[model.ID][]*store.Loaded, []in
 	found := map[model.ID][]*store.Loaded{}
 	var missing []int64
 	for _, id := range ids {
-		locs, e := tx.Copies(id)
-		if e != nil {
-			return nil, nil, e
-		}
-		for _, l := range locs {
+		for _, l := range tx.Copies(id) {
 			if ld := tx.Load(l); ld.State != store.Vanished {
 				found[id] = append(found[id], ld)
 			}
@@ -261,11 +251,7 @@ func inScope(tx *store.Tx, in ScopeInput) ([]model.FolderPath, []model.TaskView,
 			continue
 		}
 		checked[l.ID] = true
-		copies, e := tx.Copies(l.ID)
-		if e != nil {
-			return nil, nil, e
-		}
-		copies = slices.DeleteFunc(copies, func(m store.Location) bool { return !inScope[m] })
+		copies := slices.DeleteFunc(tx.Copies(l.ID), func(m store.Location) bool { return !inScope[m] })
 		if len(copies) > 1 {
 			duplicateID(tx, l.ID, copies)
 		}

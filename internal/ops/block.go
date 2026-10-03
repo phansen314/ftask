@@ -130,12 +130,8 @@ func reachable(tx *store.Tx, id model.ID, from []model.ID) (map[model.ID][]model
 	var loaded []*store.Loaded
 	for queue := slices.Clone(from); len(queue) > 0; queue = queue[1:] {
 		n := queue[0]
-		locs, e := tx.Copies(n)
-		if e != nil {
-			return nil, e
-		}
 		var lists [][]model.ID
-		for _, l := range locs {
+		for _, l := range tx.Copies(n) {
 			ld := tx.Load(l)
 			switch ld.State {
 			case store.Vanished:

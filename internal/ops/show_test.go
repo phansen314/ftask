@@ -91,6 +91,12 @@ func TestShowCases(t *testing.T) {
 			"/ 1 blocked [2]; dangling-reference [1 2] [~/tasks/1.json]"},
 		{"duplicated blocker", func(f *fixture) { f.task("", 1, false, 2); f.task("", 2, true); f.task("a", 2, true) },
 			"/ 1 blocked [2]; duplicate-id [2] [~/tasks/2.json ~/tasks/a/2.json]"},
+		{"duplicated blocker, one copy can't be looked at", func(f *fixture) {
+			f.task("", 1, false, 2)
+			f.task("", 2, true)
+			f.task("a", 2, true)
+			f.failFile("a/2.json", syscall.EACCES)
+		}, "/ 1 blocked [2]; duplicate-id [2] [~/tasks/2.json ~/tasks/a/2.json]"},
 		{"corrupt blocker", func(f *fixture) { f.task("", 1, false, 2); f.write("tasks/2.json", "{}") },
 			"/ 1 blocked [2]; unusable-file [2] [~/tasks/2.json] corrupt"},
 		{"unsupported blocker", func(f *fixture) { f.task("", 1, false, 2); f.write("tasks/2.json", `{"schema": 2}`) },

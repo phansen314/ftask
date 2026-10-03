@@ -140,6 +140,11 @@ func TestDeleteCases(t *testing.T) {
 			`not-found {"folders":[],"ids":[5],"paths":[]}`, "6.json"},
 		{"duplicated", `{"id": 5}`, func(f *fixture) { f.task("", 5, false); f.task("p", 5, false) },
 			`conflict {"rule":"duplicate-id","ids":[5]}`, "5.json p/ p/5.json"},
+		{"duplicated, one copy can't be looked at", `{"id": 5}`, func(f *fixture) {
+			f.task("", 5, false)
+			f.task("p", 5, false)
+			f.failFile("p/5.json", syscall.EACCES)
+		}, `conflict {"rule":"duplicate-id","ids":[5]}`, "5.json p/ p/5.json"},
 		{"above last_id", `{"id": 101}`, func(f *fixture) { f.task("", 101, false); f.task("", 6, false, 101) },
 			`conflict {"rule":"id-above-last-id","ids":[101]}`, "101.json 6.json"},
 		{"duplicated and above last_id: duplicated first", `{"id": 101}`, func(f *fixture) { f.task("", 101, false); f.task("p", 101, false) },

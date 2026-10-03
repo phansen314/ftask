@@ -272,26 +272,24 @@ func (tx *Tx) WarnUnreadable(x *Index) *errs.Error {
 
 // Copies returns the locations of id's task files that still exist, in tree
 // order. When the index has several, each is checked again with Lstat and
-// those gone are dropped: a task moved mid-read is then counted once, at the
-// location seen last, not reported as a duplicate (implementation-spec.md,
-// Concurrent writes during a read).
-func (tx *Tx) Copies(id model.ID) ([]Location, *errs.Error) {
+// those gone (ENOENT) are dropped: a task moved mid-read is then counted
+// once, at the location seen last, not reported as a duplicate
+// (implementation-spec.md, Concurrent writes during a read). Any other
+// error keeps the location: it was listed, so it is a copy, and loading it
+// reports the error.
+func (tx *Tx) Copies(id model.ID) []Location {
 	locs := tx.Index().Locations(id)
 	if len(locs) <= 1 {
-		return locs, nil
+		return locs
 	}
 	var out []Location
 	for _, l := range locs {
-		_, err := tx.root.Lstat(l.Rel())
-		switch {
-		case isErrno(err, syscall.ENOENT):
+		if _, err := tx.root.Lstat(l.Rel()); isErrno(err, syscall.ENOENT) {
 			continue
-		case err != nil:
-			return nil, tx.OSError(l.Rel(), err)
 		}
 		out = append(out, l)
 	}
-	return out, nil
+	return out
 }
 
 // CompareLocations orders locations in tree order: by folder (a parent before

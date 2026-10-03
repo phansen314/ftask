@@ -183,6 +183,12 @@ func TestListCases(t *testing.T) {
 			"tasks [/:1 complete []]"},
 		{"duplicated blocker", `{"folder": "/a"}`, func(f *fixture) { f.task("a", 1, false, 2); f.task("b", 2, true); f.task("c", 2, true) },
 			"tasks [/a:1 blocked [2]]; duplicate-id [2] [~/tasks/b/2.json ~/tasks/c/2.json]"},
+		{"duplicated blocker, one copy can't be looked at", `{}`, func(f *fixture) {
+			f.task("", 1, false, 2)
+			f.task("", 2, true)
+			f.task("a", 2, true)
+			f.failFile("a/2.json", syscall.EACCES)
+		}, "tasks [/:1 blocked [2]]; duplicate-id [2] [~/tasks/2.json ~/tasks/a/2.json]; unusable-file [2] [~/tasks/a/2.json]"},
 		{"unusable blocker", `{"folder": "/a"}`, func(f *fixture) { f.task("a", 1, false, 2); f.write("tasks/b/2.json", "{") },
 			"tasks [/a:1 blocked [2]]; unusable-file [2] [~/tasks/b/2.json]"},
 		{"unreadable folder: warned, its tasks missing, no dangling warning", `{}`, func(f *fixture) {

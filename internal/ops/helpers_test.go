@@ -123,5 +123,16 @@ func (f *fixture) read(rel string) string {
 // hook wraps f's filesystem so each call runs through h first.
 func (f *fixture) hook(h fsys.Hook) { f.env.FS = fsys.Fault{FS: fsys.OS{}, Hook: h} }
 
+// failFile fails every look at the file at rel, under the root, with errno:
+// Lstat and ReadFile, as in a folder that can be listed but not searched.
+func (f *fixture) failFile(rel string, errno syscall.Errno) {
+	f.hook(func(o fsys.Op) error {
+		if (o.Name == fsys.OpLstat || o.Name == fsys.OpReadFile) && o.Path == rel {
+			return errno
+		}
+		return nil
+	})
+}
+
 // rel replaces f's home in s with "~", so expected outputs name paths short.
 func (f *fixture) rel(s string) string { return strings.ReplaceAll(s, f.home, "~") }

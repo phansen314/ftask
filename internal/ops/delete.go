@@ -37,10 +37,8 @@ func runDelete(env Env, in IDInput, w *errs.Collector) (any, *errs.Error) {
 		if e := tx.RequireWholeTree(tx.Index()); e != nil {
 			return e
 		}
-		locs, e := tx.Copies(in.ID)
+		locs := tx.Copies(in.ID)
 		switch {
-		case e != nil:
-			return e
 		case len(locs) == 0:
 			return errs.NotFound(nil, []int64{int64(in.ID)}, nil)
 		case len(locs) > 1:
@@ -193,11 +191,7 @@ func runDeleteFolder(env Env, in DeleteFolderInput, w *errs.Collector) (any, *er
 			}
 			var dup, above []int64
 			for _, id := range ids {
-				locs, e := tx.Copies(id)
-				if e != nil {
-					return e
-				}
-				if len(locs) > 1 {
+				if len(tx.Copies(id)) > 1 {
 					dup = append(dup, int64(id))
 				}
 				if int64(id) > tx.Meta().LastID {

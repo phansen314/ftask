@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/phansen314/ftask/internal/errs"
 	"github.com/phansen314/ftask/internal/graph"
@@ -78,6 +79,7 @@ const (
 	orphanLinked        = "linked"
 	orphanTaskElsewhere = "task-elsewhere"
 	orphanNoTask        = "no-task"
+	orphanUnreadable    = "unreadable"
 )
 
 // findingCap is how many items a kind lists unless the input names it.
@@ -408,7 +410,7 @@ func duplicates(tx *store.Tx, x *store.Index, fs findings) *errs.Error {
 }
 
 // orphans adds an orphan-notes finding for each .md with no task file of its
-// ID beside it.
+// ID beside it; one that can't be looked at is unreadable, with its code.
 func orphans(tx *store.Tx, x *store.Index, fs findings) *errs.Error {
 	for _, n := range x.Survey.Notes {
 		locs := x.Locations(n.ID)
@@ -421,11 +423,20 @@ func orphans(tx *store.Tx, x *store.Index, fs findings) *errs.Error {
 			it.Paths = append(it.Paths, tx.Path(l.Rel()))
 		}
 		reason, linked, err := orphanReason(tx, rel, locs)
+		if errno, ok := errs.ErrnoOf(err); ok && errno == syscall.ENOENT {
+			continue // gone since the walk: nothing to say about it
+		}
 		if err != nil {
-			continue // gone, or can't be looked at: nothing to say about it
+			code, e := tx.Code(rel, err)
+			if e != nil {
+				return e
+			}
+			reason, it.Code = orphanUnreadable, code
 		}
 		it.Reason, it.linked = reason, linked
 		switch reason {
+		case orphanUnreadable:
+			it.Suggest = ptr("fix its permissions, then run ftask doctor again to see what it is")
 		case orphanEmpty, orphanLinked:
 			it.Action, it.Suggest = ptr(actionRemove), ptr("ftask repair")
 		case orphanTaskElsewhere:
