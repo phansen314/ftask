@@ -179,7 +179,7 @@ func afterX(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 
 // applyX compares the edited file with what x wrote, and runs one update
 // with what changed. It returns the status line, and whether the file is
-// kept: when it isn't valid, or update refused it.
+// kept: when it isn't valid, update refused it, or the tree was busy.
 func applyX(r *actionRun, st xState) (string, bool) {
 	what := "x " + string(idNumber(st.ID))
 	b, err := r.env.Ops.FS.ReadFile(st.Path)
@@ -212,7 +212,7 @@ func applyX(r *actionRun, st xState) (string, bool) {
 	}
 	in.Members = append([]jsonio.Member{{Key: "id", Value: idNumber(st.ID)}}, in.Members...)
 	out := r.call(st.ID, "update", in, "updated", "update "+string(idNumber(st.ID)))
-	return statusLine(r.outcomes), out.Error != nil && out.Error.Kind == errs.KindInvalidInput
+	return statusLine(r.outcomes), out.Error != nil && (out.Error.Kind == errs.KindInvalidInput || out.Error.Kind == errs.KindBusy)
 }
 
 // xChanges is update's input for what changed from wrote to edited, but

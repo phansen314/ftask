@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io/fs"
 	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/phansen314/ftask/internal/errs"
@@ -64,7 +65,13 @@ func lookupEnv(environ []string, key string) string {
 }
 
 // newSession makes a session directory under base, mode 0700, and marks it.
+// A relative base is made absolute, as the helper accepts only an absolute
+// session directory.
 func newSession(fsy fsys.FS, base string) (*Session, *errs.Error) {
+	base, err := filepath.Abs(base)
+	if err != nil {
+		return nil, errs.FromOS(base, err)
+	}
 	b, err := fsy.OpenRoot(base)
 	if err != nil {
 		return nil, errs.FromOS(base, err)

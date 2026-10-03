@@ -95,6 +95,28 @@ func TestSession(t *testing.T) {
 }
 
 // Two sessions in one base never share a directory.
+// A relative base, e.g. from TMPDIR=tmp, is made absolute: the helper
+// accepts only an absolute session directory.
+func TestSessionRelativeBase(t *testing.T) {
+	t.Chdir(t.TempDir())
+	if err := os.Mkdir("tmp", 0o700); err != nil {
+		t.Fatal(err)
+	}
+	s, e := newSession(fsys.OS{}, "tmp")
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer s.Remove()
+	if !filepath.IsAbs(s.Dir) {
+		t.Fatalf("session at %s", s.Dir)
+	}
+	o, e := openSession(fsys.OS{}, []string{SessionVar + "=" + s.Dir})
+	if e != nil {
+		t.Fatal(e)
+	}
+	o.root.Close()
+}
+
 func TestSessionsApart(t *testing.T) {
 	base := t.TempDir()
 	a, e := newSession(fsys.OS{}, base)
@@ -268,12 +290,14 @@ func TestHelperFailed(t *testing.T) {
 		if f, _, _ := run("text", "footer"); !strings.HasPrefix(f, "✗ internal: session has no "+shownFile) {
 			t.Errorf("footer %q", f)
 		}
-		os.Remove(filepath.Join(tr.session, statusFile))
-		os.Chmod(tr.session, 0o500) // nowhere to write the status line
-		out, reported, e = run("act", "c", "1@/")
-		os.Chmod(tr.session, 0o700)
-		if e == nil || !reported || out != "" {
-			t.Errorf("act, unwritable: %q, %v, %v", out, reported, e)
+		if os.Geteuid() != 0 { // root writes to a read-only directory
+			os.Remove(filepath.Join(tr.session, statusFile))
+			os.Chmod(tr.session, 0o500) // nowhere to write the status line
+			out, reported, e = run("act", "c", "1@/")
+			os.Chmod(tr.session, 0o700)
+			if e == nil || !reported || out != "" {
+				t.Errorf("act, unwritable: %q, %v, %v", out, reported, e)
+			}
 		}
 		// After an action's status, as a reload's chain has it.
 		os.WriteFile(filepath.Join(tr.session, statusFile), []byte("✓ completed 1"), 0o600)

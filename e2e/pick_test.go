@@ -284,6 +284,12 @@ func testPickAtOnce(t *testing.T, fzfDir string) {
 		{[]string{"--select-one", "--query", "travel hotel"}, "", `"tasks":[{"id":2,"title":"Book hotel"}]`},
 		{[]string{"--exit-zero", "--query", "bkfl"}, "FTASK_PICK_OPTS=--exact", `"tasks":[],`},
 		{[]string{"--exit-zero", "--query", "bkfl"}, "", `"reason":"no-terminal"`},
+		// Options that change what fzf --filter reads or writes are undone.
+		{[]string{"--select-one", "--query", "book"}, "FZF_DEFAULT_OPTS=--print0", `"reason":"no-terminal"`},
+		{[]string{"--select-one", "--query", "passport"}, "FZF_DEFAULT_OPTS=--print-query", `"tasks":[{"id":3,"title":"Renew passport"}]`},
+		{[]string{"--select-one", "--query", "passport"}, "FZF_DEFAULT_OPTS=--read0", `"tasks":[{"id":3,"title":"Renew passport"}]`},
+		{[]string{"--select-one", "--query", "passport"}, "FZF_DEFAULT_OPTS=--header-lines 3", `"tasks":[{"id":3,"title":"Renew passport"}]`},
+		{[]string{"--select-one", "--query", "passport"}, "FZF_DEFAULT_OPTS=--accept-nth 2", `"tasks":[{"id":3,"title":"Renew passport"}]`},
 		{[]string{"--exit-zero"}, "FZF_DEFAULT_OPTS=--bogus", `"details":{"reason":"fzf-failed","status":2,"actions":[]}`},
 	} {
 		cmd := noTTY(tr.cmd(append([]string{"pick", "--fields", "id,title"}, tc.args...)...))

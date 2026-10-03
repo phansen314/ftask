@@ -52,8 +52,9 @@ func TestSelected(t *testing.T) {
 // tree is an initialized ftask tree in a home of its own, for running pick
 // whole.
 type tree struct {
-	t   *testing.T
-	env ops.Env
+	t    *testing.T
+	env  ops.Env
+	root string
 	// filter is fzf --filter's fake, for --select-one and --exit-zero.
 	filter func(path string, args, env []string, stdin []byte) ([]byte, int, error)
 	// session is the session directory of the pick running now.
@@ -71,8 +72,8 @@ func newTestTree(t *testing.T) *tree {
 		}
 		return ""
 	}
-	tr := &tree{t: t, env: ops.NewEnv(getenv, runtime.GOOS)}
-	tr.run("init", map[string]any{"root": filepath.Join(home, "tasks")})
+	tr := &tree{t: t, env: ops.NewEnv(getenv, runtime.GOOS), root: filepath.Join(home, "tasks")}
+	tr.run("init", map[string]any{"root": tr.root})
 	return tr
 }
 

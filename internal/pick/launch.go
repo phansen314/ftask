@@ -15,8 +15,12 @@ import (
 const OptsVar = "FTASK_PICK_OPTS"
 
 // undone are the options pick passes after FZF_DEFAULT_OPTS to undo any
-// there that would end fzf without a callback, or move it into a popup.
-var undone = []string{"--no-select-1", "--no-exit-0", "--no-expect", "--no-tmux"}
+// there that would end fzf without a callback, move it into a popup, or
+// change which lines it reads or how --filter writes them.
+var undone = []string{
+	"--no-select-1", "--no-exit-0", "--no-expect", "--no-tmux",
+	"--no-read0", "--no-header-lines", "--no-print0", "--no-print-query", "--accept-nth", "..",
+}
 
 // picker is what one fzf session starts with.
 type picker struct {

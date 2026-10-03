@@ -105,6 +105,28 @@ func TestXAction(t *testing.T) {
 			t.Errorf("refused file not kept: %q", got)
 		}
 
+		// The tree busy: kept too, to try again.
+		r, err := fsys.OS{}.OpenRoot(tr.root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		l, err := r.Lock()
+		if err != nil {
+			t.Fatal(err)
+		}
+		x("1@/", func(_, c string) string { return strings.Replace(c, `"a"`, `"b"`, 1) })
+		if f := footer(); !strings.HasPrefix(f, "✗ update 1: busy") {
+			t.Errorf("busy: %q", f)
+		}
+		l.Unlock()
+		r.Close()
+		if got := x("1@/", nil); !strings.Contains(got, `"b"`) {
+			t.Errorf("busy file not kept: %q", got)
+		}
+		if f := footer(); f != "✓ updated 1" {
+			t.Errorf("after busy: %q", f)
+		}
+
 		// Only what was edited is sent: a change made elsewhere meanwhile
 		// to another field survives.
 		helper("act", "x", "1@/")
@@ -127,6 +149,8 @@ func TestXAction(t *testing.T) {
 	res := string(line)
 	for _, want := range []string{
 		`"input":{"id":1,"priority":"high"}`,
+		`"input":{"id":1,"tags":{"replace_all":["b"]}},"output":{"ok":false,"error":{"kind":"busy"`,
+		`"input":{"id":1,"tags":{"replace_all":["b"]}},"output":{"ok":true`,
 		`"input":{"id":1,"title":"uno","extra":{"merge":{"z":[1]}}}`,
 		`"title":"uno","priority":9,`,
 	} {
@@ -134,7 +158,7 @@ func TestXAction(t *testing.T) {
 			t.Errorf("no %s in %s", want, res)
 		}
 	}
-	if n := strings.Count(res, `"operation":"update"`); n != 2 {
+	if n := strings.Count(res, `"operation":"update"`); n != 4 {
 		t.Errorf("%d updates", n)
 	}
 }

@@ -130,6 +130,10 @@ func TestPreviewVerb(t *testing.T) {
 	if got := run(&fakeTools{}, "2@/"); got != "loading…\n" {
 		t.Errorf("unknown key: %q", got)
 	}
+	// A blocker with no task, keyed by its ID alone.
+	if got := run(&fakeTools{}, "50"); got != "no task with ID 50\n" {
+		t.Errorf("no such task: %q", got)
+	}
 
 	// Missing and empty notes; the first line fills the pane's width.
 	plain := &fakeTools{environ: []string{"FZF_PREVIEW_COLUMNS=30"}}

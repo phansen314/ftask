@@ -143,6 +143,10 @@ func previewVerb(s *Session, args []string, env Env) ([]byte, *errs.Error) {
 	if strings.HasPrefix(key, "/") {
 		return []byte(key + "\n"), nil
 	}
+	// A blocker with no task, in u's choose list: its ID alone.
+	if !strings.Contains(key, "@") {
+		return []byte("no task with ID " + key + "\n"), nil
+	}
 	b, ok, e := s.Read(previewsFile)
 	var all map[string]previewEntry
 	if e != nil || !ok || json.Unmarshal(b, &all) != nil {

@@ -23,6 +23,7 @@ func TestPickerArgs(t *testing.T) {
 	}
 	want := []string{
 		"--no-select-1", "--no-exit-0", "--no-expect", "--no-tmux",
+		"--no-read0", "--no-header-lines", "--no-print0", "--no-print-query", "--accept-nth", "..",
 		"--with-shell", "sh -c",
 		"--multi", "--ansi",
 		"--delimiter", "\t", "--with-nth", "2..", "--nth", "2,3",

@@ -611,6 +611,7 @@ func TestPickNew(t *testing.T) {
 		p.waitState("the prompt emptied", func(st fzfState) bool { return st.Query == "" })
 		p.send(keyCtrlD + "?")
 		p.waitState("ctrl-d handled", func(st fzfState) bool { return st.Query == "?" })
+		p.waitScreen("new> ?") // the state comes before the redraw
 		if p.done() || !strings.Contains(p.screen(), "new> ?") {
 			t.Fatalf("ctrl-d ended the prompt:\n%s", p.screen())
 		}
@@ -817,8 +818,12 @@ func TestPickBlock(t *testing.T) {
 		p.send("b")
 		p.waitScreen("blockers of 3> ")
 		p.waitScreen("[blockers of 3]")
-		st := p.waitState("the choose list", func(st fzfState) bool { return st.TotalCount == 2 && !st.Reading })
-		if len(st.Selected) != 0 || lineKey(st.Current) != "~1@/trips" {
+		// The cursor lands on the first line with on-load's pos(1), after
+		// the list is in.
+		st := p.waitState("the choose list", func(st fzfState) bool {
+			return st.TotalCount == 2 && !st.Reading && lineKey(st.Current) == "~1@/trips"
+		})
+		if len(st.Selected) != 0 {
 			t.Fatalf("choose list: %+v", st)
 		}
 		p.setQuery("pass", 1)
@@ -1531,6 +1536,9 @@ func TestPickFirstLoadCursor(t *testing.T) {
 func TestPickTmux(t *testing.T) {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("no tmux installed")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root's shell prompt is #, not the $ waited for")
 	}
 	eachFzf(t, func(t *testing.T, fzfDir string) {
 		tr := pickTree(t)

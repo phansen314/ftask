@@ -93,7 +93,7 @@ Type to search. Esc switches to command mode, where single keys act on the marke
 | Enter | Emits the marked tasks, or the one under the cursor, and exits. In a prompt (`n`, `p`, `t`) or a list to choose from (`b`, `u`, `m`, `f`), it applies what you entered or chose instead. |
 | `c` | Completes, or reopens if every target is complete. |
 | `e` | Edits notes in `$VISUAL` or `$EDITOR`. |
-| `n` | Creates a task in the scope folder, titled with the query. |
+| `n` | Creates a task in the scope folder. Its title prompt starts with the query, to keep or edit. |
 | `b` / `u` | Blocks on, or unblocks from, tasks chosen from a list. |
 | `m` | Moves to a folder chosen from a list. |
 | `p` / `t` | Sets the priority (`null` clears it) or the tags (`a b` replaces them, `+a -b` adds and removes). |
