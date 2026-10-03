@@ -318,7 +318,7 @@ Two kinds of interruption are distinguished throughout:
 - A **process crash** — the ftask process crashing or being killed — leaves every completed file step in place, in order.
 - A **system crash** — power loss or an operating-system crash — may not: the filesystem can lose recent steps, or keep a later step while losing an earlier one.
 
-ftask narrows that: every file it writes is flushed to disk before it is published, and its folder after, so a written file survives a system crash whole, and before any later step. The other steps — creating folders, and renaming or removing files and folders — are not flushed, so a system crash can still lose them or reorder them. All of this relies on the disk honoring flushes, which some consumer drives and virtual machines don't.
+ftask narrows that: every file it writes is flushed to disk before it is published, and its folder after, so a written file survives a system crash whole, and before any later step. The other steps — creating folders, and renaming or removing files and folders — are not flushed, so a system crash can still lose them or reorder them. The one exception is the hard link [`move`](operations.md#move) makes of a task's notes, which is flushed with its folder before the task file moves. All of this relies on the disk honoring flushes, which some consumer drives and virtual machines don't.
 
 A bare "crash" means either.
 
@@ -434,12 +434,15 @@ root = "~/tasks"
 
 `~` is the user's home directory, taken from `HOME`, which must be set to an absolute path. When the config directory can't be determined — no usable `HOME`, and on Linux no absolute `XDG_CONFIG_HOME` either — every operation that needs the config fails with [`environment`](operations.md#error-kinds), and [`info`](operations.md#info) reports it as state.
 
+The config must be a regular file, or a symlink to one (into a dotfiles checkout, say); anything else in its place makes it `corrupt`.
+
 ftask keeps no other per-machine state.
 
 ### Root path
 
 - **Form.** `root` is an absolute path, or a path beginning with `~/`, which ftask expands to the user's home directory when reading the config. Any other form — a relative path, `~user/` — makes the config `corrupt`. `init` always writes an absolute path.
 - **No `..`.** A root path may not contain `..` segments: removing them lexically can change which directory is meant when an earlier segment is a symlink. [`init`](operations.md#init) rejects such a path; in a hand-edited config it makes the config `corrupt`.
+- **No NUL.** A root path may not contain a NUL character, which no OS path can hold. [`init`](operations.md#init) rejects such a path; in a hand-edited config (where TOML's `\u0000` can write one) it makes the config `corrupt`.
 - **Stored as given, cleaned.** The path is kept as the user spelled it, after lexical cleanup only: no trailing `/`, no empty or `.` segments. A hand-edited config that isn't clean (e.g. a trailing `/`) is accepted and cleaned when read. Symlinks are **not** resolved, so a root reached through a symlink keeps working when the symlink is repointed.
 - **Reported as stored.** Paths ftask reports under the root (e.g. a task's `notes_path`) are built from the stored path (with `~/` expanded), not from a symlink-resolved one.
 - **Resolving the root.** The root path itself is resolved through symlinks, and it counts as present only if it leads to a directory. (Symlinks *inside* the root are never followed; see [Walking the tree](#walking-the-tree).) A `~/` root with no home directory to expand it into counts as missing. A missing root is handled as [Root states](operations.md#root-states) describes.

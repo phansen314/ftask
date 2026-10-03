@@ -107,10 +107,9 @@ func runCreate(env Env, in CreateInput, w *errs.Collector) (any, *errs.Error) {
 			return e.WithPartial(CreatePartial{ID: id})
 		}
 		if err := tx.ReplaceRaw(loc.NotesRel(), []byte(in.Notes)); err != nil {
-			// An OS error with no symbolic name can't be a warning, and the
-			// task exists, so create still succeeds: failing would invite a
-			// retry that creates a duplicate.
-			_ = tx.NotesMissing(loc.NotesRel(), id, err)
+			// The task exists, so create still succeeds: failing would invite
+			// a retry that creates a duplicate.
+			tx.NotesMissing(loc.NotesRel(), id, err)
 		}
 		tf.Normalize()
 		out = model.Task{TaskFile: tf, Folder: in.Folder, NotesPath: tx.Path(loc.NotesRel())}

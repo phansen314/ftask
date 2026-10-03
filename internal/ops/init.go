@@ -58,10 +58,13 @@ func runInit(env Env, in InitInput, _ *errs.Collector) (any, *errs.Error) {
 
 // cleanRoot cleans root lexically — no trailing "/", no empty or "."
 // segments — then checks that it is absolute and has no ".." segment, which
-// cleaning never removes (see design-spec.md, Root path).
+// cleaning never removes, and no NUL (see design-spec.md, Root path).
 func cleanRoot(root string, p *model.Problems) (string, bool) {
 	clean := model.CleanPath(root)
 	switch {
+	case strings.ContainsRune(clean, 0):
+		p.AddAdditional("/root", "must not contain a NUL character")
+		return "", false
 	case !strings.HasPrefix(clean, "/"):
 		p.AddAdditional("/root", "must be an absolute path (resolving ~ or a relative path is the caller's job)")
 		return "", false

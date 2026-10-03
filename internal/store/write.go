@@ -92,14 +92,12 @@ func (tx *Tx) ReplaceRaw(rel string, data []byte) error {
 }
 
 // NotesMissing records the notes-missing warning for task id, whose .md at
-// rel could not be written because of err.
-func (tx *Tx) NotesMissing(rel string, id model.ID, err error) *errs.Error {
-	code, e := tx.code(rel, err)
-	if e != nil {
-		return e
-	}
+// rel could not be written because of err. An OS error with no symbolic name
+// still gets the warning, without code: the task exists, so the write can't
+// fail, and the notes must not be lost silently.
+func (tx *Tx) NotesMissing(rel string, id model.ID, err error) {
+	code, _ := tx.code(rel, err)
 	tx.Warn(errs.NotesMissing(tx.Path(rel), int64(id), code))
-	return nil
 }
 
 // Mkdir creates the folder rel, returning the OS error: whether EEXIST is an

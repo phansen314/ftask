@@ -125,6 +125,8 @@ func TestInit(t *testing.T) {
 			"created 0 root_created=true metadata_created=true", newMeta, `root = "~/tasks"` + "\n"},
 		{"replace with no config", nil, "tasks", true,
 			"created 0 root_created=true metadata_created=true", newMeta, `root = "~/tasks"` + "\n"},
+		{"config directory is a file", func(f *initFixture) { f.write("cfg", "") }, "tasks", false,
+			`io {"path":"~/cfg/config.toml","code":"ENOTDIR"} root_created=false metadata_created=false`, "<none>", ""},
 		{"config directory's parents created", func(f *initFixture) { f.env.ConfigDir = f.path("x/y/ftask") }, "tasks", false,
 			"created 0 root_created=true metadata_created=true", newMeta, ""},
 	} {
@@ -168,6 +170,26 @@ func TestInitRemovesStaleTemps(t *testing.T) {
 	}
 	if got := strings.Join(names, " "); got != "config.toml keep" {
 		t.Errorf("config directory holds %s", got)
+	}
+}
+
+// replace_config replaces the config file itself: a symlinked config (into
+// a dotfiles checkout, say) becomes a regular file, and the file it pointed
+// to is left as it was (operations.md, init, Effects).
+func TestInitReplacesSymlinkedConfig(t *testing.T) {
+	f := newInitFixture(t)
+	f.write("dotfiles/config.toml", `root = "/old"`+"\n")
+	f.mkdir("cfg")
+	must(t, os.Symlink(f.path("dotfiles/config.toml"), f.path("cfg/config.toml")))
+	_, e := Init(f.env, f.path("tasks"), true)
+	wantNoErr(t, e)
+	fi, err := os.Lstat(f.path("cfg/config.toml"))
+	must(t, err)
+	if !fi.Mode().IsRegular() {
+		t.Errorf("config is %v, want a regular file", fi.Mode())
+	}
+	if got := f.read("dotfiles/config.toml"); got != `root = "/old"`+"\n" {
+		t.Errorf("symlink's target %q", got)
 	}
 }
 

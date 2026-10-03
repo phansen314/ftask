@@ -15,7 +15,7 @@ How the design spec's [write lock](design-spec.md#write-lock) and [Guarantees](d
 - **Platform check.** `flock` on a directory descriptor is verified on Linux. On macOS it is confirmed from the XNU kernel source: `flock` accepts any descriptor on a filesystem, directories included; the advisory-lock layer rejects only FIFOs; and the local lock code never checks the file type. Its behavior matches Linux: the lock belongs to the open file description, is shared by `fork` and `dup` copies, and is advisory. An empirical check on macOS — contention, release on crash, close-on-exec — belongs in the implementation's test suite. Network filesystems are excluded (see [Assumptions](design-spec.md#assumptions)).
 - **Atomic file writes.** Write a complete temp file in the same directory (a hidden entry), then publish it: `rename` to replace an existing file, `link` to create a new one so an existing file is never clobbered. A process crash between writing the temp file and removing it can leave the temp file behind; it is ignored by reads and reported by [`doctor`](operations.md#doctor).
 - **Moves never replace.** [`move`](operations.md#move)'s task file and [`move-folder`](operations.md#move-folder)'s folder move with a rename that fails with `EEXIST` rather than replace what is at the new name: `renameat2` with `RENAME_NOREPLACE` on Linux, `renameatx_np` with `RENAME_EXCL` on macOS, both from `golang.org/x/sys/unix`, between the two folders opened through the `os.Root`. Plain `rename(2)` silently replaces an empty folder, so a check made beforehand under the lock would be the only guard; the no-replace rename is the backstop against an outside change, and reports it as `corrupt` (`unexpected-file`).
-- **Notes move by hard link.** `move` links the `.md` to a temp name in the destination folder, then renames that over an empty stray `.md` there (one with text is a conflict), before moving the task file; the old `.md` is removed last. The temp name is removed after the rename too, since renaming onto a second name of the same file — an interrupted move's link — does nothing and leaves it. The notes are therefore at the destination before the task is, and a crash never leaves the task without them.
+- **Notes move by hard link.** `move` links the `.md` to a temp name in the destination folder, then renames that over an empty stray `.md` there (one with text is a conflict), before moving the task file; the folder is flushed after that rename, so a system crash keeps the link too; the old `.md` is removed last. The temp name is removed after the rename too, since renaming onto a second name of the same file — an interrupted move's link — does nothing and leaves it. The notes are therefore at the destination before the task is, and a crash never leaves the task without them.
 - **Folders are removed by renaming them aside.** [`delete-folder`](operations.md#delete-folder) renames the folder to a temp name in the root (`.ftask-tmp-<random>`, a hidden folder), then removes that with `RemoveAll`. The rename is the one step that takes the folder out of the tree; a crash or error during the removal leaves a hidden folder that reads ignore and `doctor` finds by its prefix.
 
 ## Toolchain
@@ -102,7 +102,7 @@ Each command is declared by a small table: its name, the operation it runs, and 
 ### Phases
 
 1. **Parse.** cobra parses the command line and prints `--help` itself (plain text, exit `0`). `SilenceErrors` and `SilenceUsage` keep it from printing anything else. cobra's default `completion` command is disabled, and its `help` command is replaced by a hidden one that is a `usage` error, so neither prints text. Every error it returns — unknown command or flag, missing flag value, wrong argument count — is a `usage` error, reported with its message as the one problem.
-2. **Shape checks cobra lacks.** Before the operation runs: a missing required option, and `--input` together with any argument or option that sets a field, are `usage` errors. The argument count is checked by the command's `Args` function: the table's arguments, or none with `--input`.
+2. **Shape checks cobra lacks.** Before the operation runs: mutually exclusive options given together (the problem names the one given later), a missing required option, and `--input` together with any argument or option that sets a field, are `usage` errors. A command name after `--` is an argument, not a command, so it is an unknown command; when it names a real one, the problem says the command must come before `--`. The argument count is checked by the command's `Args` function: the table's arguments, or none with `--input`.
 3. **Build the input.** Place each value at its field, converting by type (below), and apply the command's input resolution (`init`'s `root`, `--notes-file`). Only flags actually given are placed; defaults are the operation's. With `--input`, read the file instead (then apply resolution).
 4. **Validate** through the same adapters as `--input` (see [Validation](#validation)).
 
@@ -126,7 +126,7 @@ Every file operation under the root — reads and writes — goes through one `o
 - **One resolution.** The root path is resolved once, when the `os.Root` is opened; every open, stat, `Mkdir`, `Link`, `Rename`, `Remove`, and `RemoveAll` is relative to that handle, and the no-replace rename (see [Mechanism](#mechanism)) is made between folders opened through it. This is the [Mechanism](#mechanism)'s *one resolution per write*, in the standard library. (The `syscall` package has no `openat`, `renameat`, or `linkat` on macOS, so the handle is the portable way to get it.)
 - **The lock** is taken on `root.Open(".")` — the same directory, through the same handle.
 - **No symlinks followed.** `os.Root` follows symlinks that stay inside the root; ftask never does. `os.Root.OpenFile` ignores a caller's `O_NOFOLLOW`: it adds the flag itself and, on `ELOOP`, resolves the symlink when its target stays inside the root. So `fsys` opens a file or folder in two steps: its parent folder through the `os.Root`, then the entry itself with `openat(2)` and `O_NOFOLLOW` relative to that folder, from `golang.org/x/sys/unix`, which has `openat` on Linux and macOS alike (the `syscall` package lacks it on macOS). A symlink fails with `ELOOP`, decided by the one call: there is no window between a check and the open, so an entry swapped for a symlink is refused, and a file replaced by a concurrent write's `rename` — `ftask.json`, read before the lock by every operation, under a burst of writes — is read whole, in one version or the other. `os.Root` also follows in-root symlinks in a name's *earlier* components, which is why the path walk `Lstat`s each component in turn. Files are opened with `O_NONBLOCK`, and anything that is not a regular file or folder — a FIFO, a socket, a device — reads as empty, so it can never block or read forever. Tests confirm each case — a symlink to a file, a symlink to a folder, a swap just before the open, and reads under concurrent replacement — on both platforms.
-- **A non-directory root is `ENOTDIR`.** `os.OpenRoot` opens the path without `O_DIRECTORY` and checks its type only afterwards, so a FIFO would block the open, and a regular file is reported by an error with no errno inside. `fsys` therefore hands it the path with `/.` appended: resolving that requires a directory, so the kernel refuses a FIFO or regular file with `ENOTDIR` before opening anything, with no window for a swap. The error's path and the root's `Name` are the configured path. The [OS errors](#meaning-is-decided-where-the-call-is-made) row for `os.OpenRoot` applies.
+- **A non-directory root is `ENOTDIR`.** `os.OpenRoot` opens the path without `O_DIRECTORY` and checks its type only afterwards, so a FIFO would block the open, and a regular file is reported by an error with no errno inside. `fsys` therefore hands it the path with `/.` appended: resolving that requires a directory, so the kernel refuses a FIFO or regular file with `ENOTDIR` before opening anything, with no window for a swap. The error's path and the root's `Name` are the configured path. The [OS errors](#meaning-is-decided-where-the-call-is-made) row for `os.OpenRoot` applies. Every folder `fsys` opens by name through the root — a file's folder, to open the file in it or rename into or out of it, and a folder to flush — is opened the same way, so a FIFO swapped into a folder's place by an outside change fails with `ENOTDIR` instead of blocking with the write lock held.
 
 ## Tree walk
 
@@ -219,7 +219,7 @@ So the first discovery of `id` yields the required path.
 
 ## OS errors
 
-`io` errors and the `unusable-file` (`unreadable`), `unreadable-folder`, and `notes-missing` warnings carry `code`: the symbolic OS error, never a number, and the same name on Linux and macOS ([Error kinds](operations.md#error-kinds)).
+`io` errors and the `unusable-file` (`unreadable`), `unreadable-folder`, and `notes-missing` warnings carry `code`: the symbolic OS error, never a number (a `notes-missing` warning for an errno with no name has none; see below), and the same name on Linux and macOS ([Error kinds](operations.md#error-kinds)).
 
 ### Names
 
@@ -227,7 +227,7 @@ The standard library has no errno-to-name function (`syscall.Errno.Error()` is t
 
 - **Aliases** get one fixed name on every platform: `EAGAIN` (not `EWOULDBLOCK`), `ENOTSUP` (not `EOPNOTSUPP`), `EDEADLK` (not `EDEADLOCK`). The rule is about names, not numbers: where a platform gives the other name its own number (`EOPNOTSUPP` is 102 on macOS, `ENOTSUP` 45), that number also maps to the canonical name, and the other name never appears in output. The table can therefore map two numbers to one name; a test checks that each alias maps to its canonical name on the current platform.
 - **Completeness test**, run on each platform: for every errno from 1 to 255 whose message is a real one (not "errno N"), the table must have a name. A missing name fails CI rather than shipping.
-- **An errno not in the table** (e.g. from a newer kernel) is `internal` — never an invented name.
+- **An errno not in the table** (e.g. from a newer kernel) is `internal` — never an invented name. The one exception is `notes-missing`, which comes after the task is written: it is still raised, without `code`.
 
 ### Extraction
 
@@ -245,10 +245,10 @@ The same errno means different things in different places, so each call site cla
 | Path walk | `ELOOP` (a symlink; see [Filesystem access](#filesystem-access)), `ENOTDIR` | `corrupt` (`unexpected-file`) |
 | Config or `ftask.json` | `ENOENT` | `not-initialized` (`missing`: `config` or `metadata`) |
 | `ftask.json` | `ELOOP` (a symlink), `EISDIR` | `corrupt` (`unexpected-file`) |
-| `os.OpenRoot` on the root | `ENOENT`, `ENOTDIR` | `not-initialized` (`missing`: `root`) |
+| `os.OpenRoot` on the root | `ENOENT`, `ENOTDIR`, `ELOOP` (a symlink loop) | `not-initialized` (`missing`: `root`) |
 | Loading a task file, in a read | `ENOENT` | skipped silently: it vanished ([Concurrent writes during a read](#concurrent-writes-during-a-read)) |
 | Loading a task file, in a read | any other | `unusable-file` warning (`reason`: `unreadable`, with `code`) |
-| Writing a task's `.md` (`create`, `create-batch`) | any | `notes-missing` warning, with `code`; the operation succeeds |
+| Writing a task's `.md` (`create`, `create-batch`) | any | `notes-missing` warning, with `code` (none for an errno with no name); the operation succeeds |
 | Loading a needed file, in a write | `ENOENT` | treated as never found ([Precedence](operations.md#precedence)) |
 | Publishing a new file with `link` | `EEXIST` | `corrupt` (`unexpected-file`): a file where none can exist |
 | Listing a folder, in `frontier` or `list` | any | `unreadable-folder` warning, with `code` |
@@ -379,6 +379,8 @@ The [config](design-spec.md#config-file) has exactly one key, so ftask reads it 
 
 Every failure above is `corrupt` with `reason` `invalid`; `not-json` does not apply, since the config is not JSON. The parser reports which rule failed, and the error's `detail` says so, starting `line N: ` when one line is at fault (e.g. `line 3: expected root = "…"`); a root in an illegal [form](design-spec.md#root-path) is reported as such.
 
+The config must be a regular file, or a symlink to one: it is checked with `stat` before it is read, and anything else — a directory, a FIFO — is `corrupt` (`unexpected-file`), and is never read, since reading a FIFO would block every command.
+
 `init` writes the config as `root = "<path>"` plus a newline, escaping as TOML basic strings require.
 
 **Move to a TOML library if the config ever gains more keys.** The subset parser is justified only because one key needs one line of syntax; a second key, a table, or any richer TOML makes a library (e.g. `github.com/BurntSushi/toml`) the right choice, with the same "anything unrecognized is `corrupt`" rule enforced on its result.
@@ -402,7 +404,7 @@ The config is written last, as [`init`](operations.md#init)'s crash behavior req
 | Field | Value |
 |---|---|
 | `config.path` | the config file's path; `null` when it can't be located |
-| `config.state` | `missing` on `ENOENT` or when the config can't be located; `unreadable` on any other OS error; `corrupt` if it fails the [subset parser](#config-file) or names a root in an illegal form; else `ok` |
+| `config.state` | `missing` on `ENOENT` or when the config can't be located; `unreadable` on any other OS error; `corrupt` if it is not a regular file, fails the [subset parser](#config-file), or names a root in an illegal form; else `ok` |
 | `config.root` | the root, cleaned and with `~/` expanded, when `config.state` is `ok`; else `null` |
 | `tree` | `null` when `config.root` is `null` (including a `~/` root with no home directory to expand it into) |
 | `tree.root_exists` | the root path leads, through symlinks, to a directory |

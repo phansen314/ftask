@@ -93,14 +93,16 @@ func rootExists(env Env, root string) (bool, *errs.Error) {
 }
 
 // configExists reports whether anything is at the config's path; init never
-// reads it.
+// reads it. Only ENOENT means no config, as for every other reader of it: a
+// file where the config directory should be (ENOTDIR) is io, before init
+// creates anything.
 func configExists(env Env) (bool, *errs.Error) {
 	p := env.ConfigPath()
 	_, err := env.FS.Lstat(p)
 	switch {
 	case err == nil:
 		return true, nil
-	case isErrno(err, syscall.ENOENT), isErrno(err, syscall.ENOTDIR):
+	case isErrno(err, syscall.ENOENT):
 		return false, nil
 	}
 	return false, errs.FromOS(p, err)

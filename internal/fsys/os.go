@@ -61,15 +61,16 @@ func (r *osRoot) Remove(name string) error                  { return r.r.Remove(
 func (r *osRoot) RemoveAll(name string) error               { return r.r.RemoveAll(name) }
 func (r *osRoot) Close() error                              { return r.r.Close() }
 
-// RenameNoReplace opens both names' folders through the root and renames
-// between them with the platform's no-replace rename (renameNoReplace).
+// RenameNoReplace opens both names' folders through the root (openDir) and
+// renames between them with the platform's no-replace rename
+// (renameNoReplace).
 func (r *osRoot) RenameNoReplace(oldname, newname string) error {
-	od, err := r.r.Open(path.Dir(oldname))
+	od, err := r.openDir(path.Dir(oldname))
 	if err != nil {
 		return err
 	}
 	defer od.Close()
-	nd, err := r.r.Open(path.Dir(newname))
+	nd, err := r.openDir(path.Dir(newname))
 	if err != nil {
 		return err
 	}
@@ -121,7 +122,7 @@ func (r *osRoot) ReadFile(name string) ([]byte, error) {
 }
 
 func (r *osRoot) SyncDir(name string) error {
-	d, err := r.r.Open(name)
+	d, err := r.openDir(name)
 	if err != nil {
 		return err
 	}
@@ -130,6 +131,15 @@ func (r *osRoot) SyncDir(name string) error {
 		err = cerr
 	}
 	return err
+}
+
+// openDir opens the folder name through the root. Like OpenRoot, it hands
+// os.Root name + "/.", which resolves only through a directory: a FIFO or
+// file in its place — put there by an outside change since the caller
+// looked — fails with ENOTDIR at once, where a plain open of a FIFO would
+// block forever, with the write lock held.
+func (r *osRoot) openDir(name string) (*os.File, error) {
+	return r.r.Open(name + "/.")
 }
 
 func (r *osRoot) ReadDir(name string) ([]fs.DirEntry, error) {
@@ -155,10 +165,10 @@ var beforeOpen func(name string)
 // replaced by a concurrent write's rename is simply read in one version or
 // the other.
 //
-// O_NONBLOCK keeps a FIFO from blocking the open. The returned FileInfo is
-// the opened file's.
+// O_NONBLOCK keeps a FIFO from blocking the open, and openDir one in the
+// folder's place. The returned FileInfo is the opened file's.
 func (r *osRoot) openNoFollow(name string) (*os.File, fs.FileInfo, error) {
-	d, err := r.r.Open(path.Dir(name))
+	d, err := r.openDir(path.Dir(name))
 	if err != nil {
 		return nil, nil, err
 	}

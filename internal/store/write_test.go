@@ -202,11 +202,12 @@ func TestNotesMissing(t *testing.T) {
 	var w errs.Collector
 	writeTx(t, f.env, &w, func(tx *Tx) {
 		err := tx.ReplaceRaw("missing/1.md", []byte("notes"))
-		wantNoErr(t, tx.NotesMissing("missing/1.md", 1, err))
-		wantKind(t, tx.NotesMissing("x.md", 2, errs.Internal("no errno")), errs.KindInternal)
+		tx.NotesMissing("missing/1.md", 1, err)
+		tx.NotesMissing("x.md", 2, errs.Internal("no errno")) // no symbolic name: no code
 	})
 	ws := w.Warnings()
-	if len(ws) != 1 || ws[0].Kind != errs.WarnNotesMissing || ws[0].Paths[0] != f.root+"/missing/1.md" || ws[0].Code != "ENOENT" {
+	if len(ws) != 2 || ws[0].Kind != errs.WarnNotesMissing || ws[0].Paths[0] != f.root+"/missing/1.md" || ws[0].Code != "ENOENT" ||
+		ws[1].Kind != errs.WarnNotesMissing || ws[1].Paths[0] != f.root+"/x.md" || ws[1].Code != "" {
 		t.Errorf("warnings %+v", ws)
 	}
 }

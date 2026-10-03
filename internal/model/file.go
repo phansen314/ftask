@@ -129,11 +129,15 @@ func DecodeTaskFile(obj *jsonio.Object, repeated []string, filenameID ID) (TaskF
 		t.UpdatedAt, _ = p.Timestamp(v, "/updated_at")
 	}
 	if v, ok := f.Required("blocked_by"); ok {
-		if ids, ok := p.IDs(v, "/blocked_by"); ok {
+		// The self check runs even when the set has another problem (a
+		// duplicate, say), so each rule broken is named; an invalid item
+		// is 0 in ids, which no task's ID is.
+		ids, ok := p.IDs(v, "/blocked_by")
+		if ok {
 			t.BlockedBy = ids
-			if i := slices.Index(ids, t.ID); i >= 0 && idOK {
-				p.AddAdditional(jsonio.Pointer("/blocked_by", strconv.Itoa(i)), "must not be the task's own ID")
-			}
+		}
+		if i := slices.Index(ids, t.ID); i >= 0 && idOK {
+			p.AddAdditional(jsonio.Pointer("/blocked_by", strconv.Itoa(i)), "must not be the task's own ID")
 		}
 	}
 	if v, ok := f.Required("tags"); ok {

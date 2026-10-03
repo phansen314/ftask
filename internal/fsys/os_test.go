@@ -442,6 +442,34 @@ func TestOpenRootFIFO(t *testing.T) {
 	}
 }
 
+// A FIFO where a folder should be — put there by an outside change after
+// the caller looked — is refused with ENOTDIR, never opened, which would
+// block with the write lock held.
+func TestFolderFIFODoesNotBlock(t *testing.T) {
+	r, _ := newRoot(t, func(dir string) {
+		must(t, syscall.Mkfifo(filepath.Join(dir, "a"), 0o644))
+		must(t, os.WriteFile(filepath.Join(dir, "x"), nil, 0o644))
+	})
+	for name, call := range map[string]func() error{
+		"ReadFile":                func() error { _, err := r.ReadFile("a/1.json"); return err },
+		"ReadDir":                 func() error { _, err := r.ReadDir("a/b"); return err },
+		"SyncDir":                 func() error { return r.SyncDir("a") },
+		"RenameNoReplace from it": func() error { return r.RenameNoReplace("a/x", "y") },
+		"RenameNoReplace into it": func() error { return r.RenameNoReplace("x", "a/y") },
+	} {
+		done := make(chan error, 1)
+		go func() { done <- call() }()
+		select {
+		case err := <-done:
+			if !errors.Is(err, syscall.ENOTDIR) {
+				t.Errorf("%s: got %v, want ENOTDIR", name, err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s blocked on a FIFO", name)
+		}
+	}
+}
+
 func TestFSReadFileFollowsSymlink(t *testing.T) {
 	dir := t.TempDir()
 	must(t, os.WriteFile(filepath.Join(dir, "real.toml"), []byte("x"), 0o644))

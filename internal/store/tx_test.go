@@ -67,9 +67,22 @@ func TestRootStates(t *testing.T) {
 			must(t, os.Symlink("nowhere", cfgPath(f)))
 		}, errs.KindNotInitialized, func(*fixture) any { return errs.NotInitializedDetails{Missing: errs.MissingConfig} }},
 		{"unreadable config", func(f *fixture) {
+			f.env = f.withFault(func(o fsys.Op) error {
+				if o.Name == fsys.OpReadFile && o.Path == cfgPath(f) {
+					return syscall.EACCES
+				}
+				return nil
+			})
+		},
+			errs.KindIO, func(f *fixture) any { return errs.IODetails{Path: cfgPath(f), Code: "EACCES"} }},
+		{"config is a directory", func(f *fixture) {
 			must(t, os.Remove(cfgPath(f)))
 			must(t, os.Mkdir(cfgPath(f), 0o755))
-		}, errs.KindIO, func(f *fixture) any { return errs.IODetails{Path: cfgPath(f), Code: "EISDIR"} }},
+		}, errs.KindCorrupt, func(f *fixture) any { return errs.CorruptDetails{Path: cfgPath(f), Reason: errs.CorruptUnexpectedFile} }},
+		{"config is a FIFO", func(f *fixture) {
+			must(t, os.Remove(cfgPath(f)))
+			must(t, syscall.Mkfifo(cfgPath(f), 0o644))
+		}, errs.KindCorrupt, func(f *fixture) any { return errs.CorruptDetails{Path: cfgPath(f), Reason: errs.CorruptUnexpectedFile} }},
 		{"corrupt config", func(f *fixture) { f.write("cfg/"+ConfigName, "root = /x\n") },
 			errs.KindCorrupt, func(f *fixture) any {
 				return errs.CorruptDetails{Path: cfgPath(f), Reason: errs.CorruptInvalid, Detail: "line 1: root must be a double-quoted string"}
@@ -82,6 +95,10 @@ func TestRootStates(t *testing.T) {
 			errs.KindCorrupt, func(f *fixture) any {
 				return errs.CorruptDetails{Path: cfgPath(f), Reason: errs.CorruptInvalid, Detail: "root must not contain a .. segment"}
 			}},
+		{"root with NUL", func(f *fixture) { f.write("cfg/"+ConfigName, "root = \"/tmp/x\\u0000y\"\n") },
+			errs.KindCorrupt, func(f *fixture) any {
+				return errs.CorruptDetails{Path: cfgPath(f), Reason: errs.CorruptInvalid, Detail: "root must not contain a NUL character"}
+			}},
 		{"~/ root without home", func(f *fixture) {
 			f.write("cfg/"+ConfigName, "root = \"~/tasks\"\n")
 			f.env.Home = ""
@@ -91,6 +108,10 @@ func TestRootStates(t *testing.T) {
 		{"root is a file", func(f *fixture) {
 			must(t, os.RemoveAll(f.root))
 			f.write("tasks", "")
+		}, errs.KindNotInitialized, func(*fixture) any { return errs.NotInitializedDetails{Missing: errs.MissingRoot} }},
+		{"root is a symlink loop", func(f *fixture) {
+			must(t, os.RemoveAll(f.root))
+			must(t, os.Symlink("tasks", f.root))
 		}, errs.KindNotInitialized, func(*fixture) any { return errs.NotInitializedDetails{Missing: errs.MissingRoot} }},
 		{"missing ftask.json", func(f *fixture) { must(t, os.Remove(meta(f))) },
 			errs.KindNotInitialized, func(*fixture) any { return errs.NotInitializedDetails{Missing: errs.MissingMetadata} }},

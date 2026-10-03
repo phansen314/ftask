@@ -20,7 +20,8 @@ type FS interface {
 	// (often a symlink into a dotfiles checkout), and pick's notes files.
 	ReadFile(path string) ([]byte, error)
 	// Stat follows symlinks: whether the root path leads to a directory
-	// (init's check of an existing root).
+	// (init's check of an existing root), and whether the config is a
+	// regular file, which must be known before reading it.
 	Stat(path string) (fs.FileInfo, error)
 	// Lstat does not follow a final symlink: whether anything is at the root
 	// path at all, so init can tell a dangling symlink from nothing, and

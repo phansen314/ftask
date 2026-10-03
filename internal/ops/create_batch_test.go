@@ -189,6 +189,10 @@ func TestCreateBatchCases(t *testing.T) {
 		{".md not written", func(f *fixture) { f.failAt(fsys.OpRename, "101.md", syscall.ENOSPC) }, `{"tasks": [{"title": "x"}, {"title": "y"}]}`,
 			`{"ids":[101,102],"refs":{},"folders_created":[]}; notes-missing [101] [~/tasks/101.md] ENOSPC`,
 			map[string]string{"tasks/101.md": "<none>", "tasks/102.md": ""}},
+		{".md not written, no errno name", func(f *fixture) { f.failAt(fsys.OpRename, "102.md", syscall.Errno(4000)) },
+			`{"tasks": [{"title": "x"}, {"title": "y", "notes": "n"}]}`,
+			`{"ids":[101,102],"refs":{},"folders_created":[]}; notes-missing [102] [~/tasks/102.md]`,
+			map[string]string{"tasks/101.md": "", "tasks/102.md": "<none>"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t)

@@ -48,6 +48,20 @@ func TestCycleGroupsLongChain(t *testing.T) {
 	}
 }
 
+// A long chain with no cycle has no groups, and takes linear time: each
+// node's group is found at the top of the stack, not by scanning the whole
+// path below it.
+func TestCycleGroupsLongAcyclicChain(t *testing.T) {
+	const n = 1_000_000
+	edges := make(map[model.ID][]model.ID, n)
+	for i := model.ID(1); i < n; i++ {
+		edges[i] = []model.ID{i + 1}
+	}
+	if groups := CycleGroups(edges); len(groups) != 0 {
+		t.Fatalf("got %d groups", len(groups))
+	}
+}
+
 // On many small random graphs, CycleGroups agrees with the transitive
 // closure — two IDs share a group exactly when each reaches the other — and
 // ExampleCycle with enumerating every simple cycle through the group's lowest

@@ -82,12 +82,14 @@ func decodeCreateBatch(f *model.Fields, p *model.Problems) any {
 				continue
 			}
 			bptr := jsonio.Pointer(ptr+"/blocked_by", strconv.Itoa(b.at))
+			// An earlier task first: a task whose ref duplicates an earlier
+			// one's (already reported) is not named by that ref.
 			j, found := refs[b.ref]
 			switch {
-			case b.ref == t.Ref:
-				p.AddAdditional(bptr, "names this task itself; a task cannot block itself")
 			case found && j < i:
 				t.Earlier = append(t.Earlier, j)
+			case b.ref == t.Ref:
+				p.AddAdditional(bptr, "names this task itself; a task cannot block itself")
 			case laterRef(items, i, b.ref):
 				p.AddAdditional(bptr, "names a later task in the batch; list a task's blockers before it")
 			default:
@@ -300,7 +302,7 @@ func runCreateBatch(env Env, in CreateBatchInput, w *errs.Collector) (any, *errs
 			}
 			if err := tx.ReplaceRaw(loc.NotesRel(), []byte(t.Notes)); err != nil {
 				// As in create: the task exists, so the batch goes on.
-				_ = tx.NotesMissing(loc.NotesRel(), ids[i], err)
+				tx.NotesMissing(loc.NotesRel(), ids[i], err)
 			}
 		}
 		return nil

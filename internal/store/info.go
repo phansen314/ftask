@@ -1,8 +1,6 @@
 package store
 
 import (
-	"syscall"
-
 	"github.com/phansen314/ftask/internal/model"
 )
 
@@ -84,12 +82,12 @@ func Inspect(env Env) Info {
 func inspectTree(env Env, root string) *TreeInfo {
 	t := &TreeInfo{Metadata: MetaMissing}
 	// Classified as openRoot does, so info agrees with Root states: only a
-	// root that is absent, or leads to something other than a directory, is
-	// missing. Any other error (EACCES on a parent, say) leaves the root
-	// present but unreadable.
+	// root that is absent, or leads to something other than a directory
+	// (a symlink loop included), is missing. Any other error (EACCES on a
+	// parent, say) leaves the root present but unreadable.
 	r, err := env.FS.OpenRoot(root)
 	if err != nil {
-		if isErrno(err, syscall.ENOENT) || isErrno(err, syscall.ENOTDIR) {
+		if rootMissing(err) {
 			return t
 		}
 		t.RootExists, t.Metadata = true, MetaUnreadable

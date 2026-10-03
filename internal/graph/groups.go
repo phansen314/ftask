@@ -62,7 +62,10 @@ func CycleGroups(edges map[model.ID][]model.ID) [][]model.ID {
 			if low[n] != index[n] {
 				continue
 			}
-			i := slices.Index(stack, n)
+			i := len(stack) - 1 // n's group is the top of the stack
+			for stack[i] != n {
+				i--
+			}
 			group := slices.Clone(stack[i:])
 			stack = stack[:i]
 			for _, m := range group {

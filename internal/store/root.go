@@ -25,16 +25,29 @@ type configState struct {
 	state ConfigState
 	cfg   config
 	err   error
-	why   string // ConfigCorrupt: what is wrong
+	cause errs.CorruptCause // ConfigCorrupt: what is wrong
 }
 
+// readConfig reads the config, which must be a regular file or a symlink to
+// one. Anything else is corrupt (unexpected-file), and never read: a FIFO
+// would block every command. A FIFO swapped in between the Stat and the
+// read can still block; that takes an outside change, and no lock is held
+// yet.
 func readConfig(env Env) configState {
 	p := env.ConfigPath()
 	if p == "" {
 		return configState{state: ConfigMissing}
 	}
 	cs := configState{cfg: config{path: p}}
-	data, err := env.FS.ReadFile(p)
+	fi, err := env.FS.Stat(p)
+	var data []byte
+	if err == nil && !fi.Mode().IsRegular() {
+		cs.state, cs.cause = ConfigCorrupt, errs.CorruptCause{Reason: errs.CorruptUnexpectedFile}
+		return cs
+	}
+	if err == nil {
+		data, err = env.FS.ReadFile(p)
+	}
 	if err != nil {
 		cs.state, cs.err = ConfigUnreadable, err
 		if isErrno(err, syscall.ENOENT) {
@@ -47,7 +60,7 @@ func readConfig(env Env) configState {
 		cs.cfg.raw, err = ParseRootPath(raw)
 	}
 	if err != nil {
-		cs.state, cs.why = ConfigCorrupt, err.Error()
+		cs.state, cs.cause = ConfigCorrupt, errs.CorruptCause{Reason: errs.CorruptInvalid, Detail: err.Error()}
 		return cs
 	}
 	cs.state = ConfigOK
@@ -67,7 +80,7 @@ func locateRoot(env Env) (string, *errs.Error) {
 	case ConfigUnreadable:
 		return "", errs.FromOS(cs.cfg.path, cs.err)
 	case ConfigCorrupt:
-		return "", errs.CorruptBy(cs.cfg.path, errs.CorruptCause{Reason: errs.CorruptInvalid, Detail: cs.why})
+		return "", errs.CorruptBy(cs.cfg.path, cs.cause)
 	}
 	root, ok := cs.cfg.raw.Expand(env.Home)
 	if !ok {
@@ -79,12 +92,19 @@ func locateRoot(env Env) (string, *errs.Error) {
 func openRoot(env Env, root string) (fsys.Root, *errs.Error) {
 	r, err := env.FS.OpenRoot(root)
 	if err != nil {
-		if isErrno(err, syscall.ENOENT) || isErrno(err, syscall.ENOTDIR) {
+		if rootMissing(err) {
 			return nil, errs.NotInitialized(errs.MissingRoot)
 		}
 		return nil, errs.FromOS(root, err)
 	}
 	return r, nil
+}
+
+// rootMissing reports whether err, from opening the root, means the root
+// path leads to no directory: nothing there, something other than a
+// directory, or a symlink loop (design-spec.md, Resolving the root).
+func rootMissing(err error) bool {
+	return isErrno(err, syscall.ENOENT) || isErrno(err, syscall.ENOTDIR) || isErrno(err, syscall.ELOOP)
 }
 
 // metaState is the outcome of reading ftask.json: its state as info reports

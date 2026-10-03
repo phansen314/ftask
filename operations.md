@@ -288,7 +288,7 @@ A warning reports a problem, relevant to the operation's result, that did not st
 | `duplicate-id` | Several task files with one ID all exist, and the duplication bears on the result (see [Walking the tree](design-spec.md#walking-the-tree)). | the files in the operation's scope, in [tree order](#tree-order) | the one ID | â€” |
 | `dangling-reference` | A task's `blocked_by` names an ID with no task (see [Dependencies](design-spec.md#dependencies)). Not reported while a folder the walk had to list was unreadable, since the blocker may be in it; the `unreadable-folder` warning explains why the task counts as blocked. | the referring task file | `[referring, missing]`, in that order | â€” |
 | `unreadable-folder` | A folder the walk had to list could not be listed; its tasks are missing from the result (see [Walking the tree](design-spec.md#walking-the-tree)). | the folder's filesystem path | none | `code` |
-| `notes-missing` | A task was written but its `.md` could not be. The task is valid; its notes are empty, or stale if a stray `.md` could not be replaced. | the `.md` | the task | `code` |
+| `notes-missing` | A task was written but its `.md` could not be. The task is valid; its notes are empty, or stale if a stray `.md` could not be replaced. | the `.md` | the task | `code`, unless the OS error has no symbolic name |
 
 An `unusable-file` warning says which file and, in `reason`, one word for why â€” never what is wrong inside it: no `problems` or `detail` as a [`corrupt`](#error-kinds) error has. The file was one the operation did not need, a damaged tree can produce dozens, and they recur on every call that walks past them. For the diagnosis, [`show`](#show) the task: its file is needed there, so it fails with the full `corrupt` error.
 
@@ -306,13 +306,12 @@ An `unusable-file` warning says which file and, in `reason`, one word for why â€
     "paths": { "type": "array", "items": { "type": "string" }, "description": "Filesystem paths involved; meaning per kind (see Warning kinds)." },
     "ids": { "type": "array", "items": { "type": "integer" }, "description": "Task IDs involved; order and meaning per kind (see Warning kinds)." },
     "reason": { "type": "string", "description": "For unusable-file: unreadable, corrupt, or unsupported-format." },
-    "code": { "type": "string", "description": "Symbolic OS error (e.g. EACCES), for unusable-file with reason unreadable, unreadable-folder, and notes-missing." }
+    "code": { "type": "string", "description": "Symbolic OS error (e.g. EACCES), for unusable-file with reason unreadable, unreadable-folder, and notes-missing (absent there when the OS error has no symbolic name)." }
   },
   "additionalProperties": false,
   "allOf": [
     { "if": { "properties": { "kind": { "const": "unusable-file" } } }, "then": { "required": ["reason"] } },
     { "if": { "properties": { "kind": { "const": "unusable-file" }, "reason": { "const": "unreadable" } }, "required": ["reason"] }, "then": { "required": ["code"] } },
-    { "if": { "properties": { "kind": { "const": "notes-missing" } } }, "then": { "required": ["code"] } },
     { "if": { "properties": { "kind": { "const": "unreadable-folder" } } }, "then": { "required": ["code"] } }
   ]
 }
@@ -637,7 +636,7 @@ Create a new tree, or attach an existing one, and make it this machine's configu
 }
 ```
 
-**Additional validation:** `root` must be an absolute path with no `..` segments (see [Root path](design-spec.md#root-path)). It is cleaned first; every check below runs on the cleaned path, which is also what the config records. If anything exists at that path, it must lead (through symlinks) to a directory; a regular file or a dangling symlink there is `invalid-input`.
+**Additional validation:** `root` must be an absolute path with no `..` segments and no NUL character (see [Root path](design-spec.md#root-path)). It is cleaned first; every check below runs on the cleaned path, which is also what the config records. If anything exists at that path, it must lead (through symlinks) to a directory; a regular file or a dangling symlink there is `invalid-input`.
 
 **Preconditions:**
 
@@ -657,6 +656,7 @@ If a config already exists â€” whatever it names, and whether or not it parses â
 
 - `root` is a directory containing `ftask.json`. A new tree has `{"schema": 1, "last_id": 0}`; an existing tree's `ftask.json` is unchanged.
 - The config names `root`. `init` creates the config directory, and any missing ancestors of it, as needed.
+- With `replace_config`, the config file itself is replaced: a config that is a symlink (into a dotfiles checkout, say) becomes a regular file, and the file it pointed to is left as it was.
 
 **Invariants at risk:** none. `init` never modifies an existing tree's content; creating a new tree produces an empty tree, which satisfies every invariant.
 
@@ -681,7 +681,7 @@ If a config already exists â€” whatever it names, and whether or not it parses â
 
 | Kind | When |
 |---|---|
-| `invalid-input` | `root` is not absolute, contains `..`, or something exists there that doesn't lead to a directory. |
+| `invalid-input` | `root` is not absolute, contains `..` or a NUL character, or something exists there that doesn't lead to a directory. |
 | `environment` | The config can't be located (see [Config file](design-spec.md#config-file)). |
 | `conflict` | (`rule`: `config-exists`) A config already exists and `replace_config` is false. |
 | `not-found` | `root` does not exist and neither does its parent directory (the parent in `paths`). |
@@ -1515,7 +1515,7 @@ A task may have a **`ref`**: a name, local to the batch, that later tasks in it 
 
 - Each `title` is trimmed, then validated, per [Titles](design-spec.md#titles), as in [`create`](#create).
 - Each `ref` is unique within `tasks` (`field`: the later one's `/tasks/<i>/ref`).
-- Each string in a `blocked_by` is the `ref` of an earlier task in `tasks` (`field`: `/tasks/<i>/blocked_by/<j>`). A ref that names a later task, the task itself, or no task in the batch is `invalid-input`; the `reason` says which.
+- Each string in a `blocked_by` is the `ref` of an earlier task in `tasks` (`field`: `/tasks/<i>/blocked_by/<j>`). A ref that names a later task, the task itself, or no task in the batch is `invalid-input`; the `reason` says which. A repeated `ref` (itself `invalid-input`) names the first task that has it, so it is never reported as the task itself.
 - `id`, `schema`, `created_at`, `completed_at`, and `updated_at` are never input, as in `create`.
 
 Like every `invalid-input`, every problem in every task is reported, sorted by `field`, the first 20 listed.
@@ -2456,11 +2456,13 @@ Present only when an error (e.g. `io`) comes after `parents` created at least on
 **Crash behavior:** a task is two files, which can't move in one step. Moving each with a plain `rename` would make the notes look lost if a crash fell between the two, whichever went first. So the notes are copied before they are removed:
 
 1. With `parents`, missing folders are created, outermost first.
-2. The `.md` is hard-linked into `to`, replacing an empty stray `.md` there, or a second name for the same notes. A [process crash](design-spec.md#crashes) here leaves the task in place with its notes, and a stray `.md` in `to` that a retry replaces.
+2. The `.md` is hard-linked into `to`, replacing an empty stray `.md` there, or a second name for the same notes, and `to` is flushed. A [process crash](design-spec.md#crashes) here leaves the task in place with its notes, and a stray `.md` in `to` that a retry replaces.
 3. The task file is renamed into `to`. This is the moment the task moves; its notes are already there.
 4. The old `.md` is removed. A crash before this leaves a stray `.md` in the old folder, which reads ignore and `doctor` reports as `orphan-notes` (`linked`: a second name for the notes now at the task), which `repair` removes.
 
 A task with no `.md` skips steps 2 and 4, and instead removes an empty stray `.md` in `to` under its name before step 3, so a stray can never become its notes. The notes are never lost, and the tree always satisfies every invariant.
+
+A [system crash](design-spec.md#crashes) keeps step 2 before the later steps, since its link is flushed. Steps 3 and 4 are not flushed, so a system crash can undo the rename yet keep the removal: the task is back in its old folder without notes, and its notes are in `to`, where `doctor` reports them as `orphan-notes` (`task-elsewhere`). The notes are still not lost.
 
 **Retry safety:** safe. After `busy`, an error with `partial`, or a crash, rerunning completes the move. After success, rerunning finds the task already in `to`, changes nothing, and returns `changed: false`.
 

@@ -178,6 +178,12 @@ func TestTaskFileExactProblems(t *testing.T) {
 		{"bad item and duplicates",
 			strings.Replace(exampleTask, `"blocked_by": []`, `"blocked_by": [3, 1, 3, "x", 1]`, 1), 42,
 			[]string{"/blocked_by/2: duplicate of item 0", "/blocked_by/3: expected an integer", "/blocked_by/4: duplicate of item 1"}},
+		{"own ID reported with a duplicate",
+			strings.Replace(exampleTask, `"blocked_by": []`, `"blocked_by": [42, 42]`, 1), 42,
+			[]string{"/blocked_by/0: must not be the task's own ID", "/blocked_by/1: duplicate of item 0"}},
+		{"own ID reported with a bad item",
+			strings.Replace(exampleTask, `"blocked_by": []`, `"blocked_by": ["x", 42]`, 1), 42,
+			[]string{"/blocked_by/0: expected an integer", "/blocked_by/1: must not be the task's own ID"}},
 	} {
 		_, r := decodeTask(t, tc.in, tc.filenameID)
 		got := slices.Clone(problemStrings(r.Problems))

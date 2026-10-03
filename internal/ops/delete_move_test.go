@@ -361,6 +361,32 @@ func TestMoveOntoItsLink(t *testing.T) {
 	}
 }
 
+// The notes' link is flushed with its folder before the task file is
+// renamed, so a system crash can't keep the rename and the old .md's
+// removal but lose the link (implementation-spec.md, Notes move by hard
+// link).
+func TestMoveFlushesNotesFirst(t *testing.T) {
+	f := newFixture(t)
+	f.task("", 5, false)
+	f.write("tasks/5.md", "notes\n")
+	f.mkdir("tasks/p")
+	var steps []string
+	f.hook(func(o fsys.Op) error {
+		switch o.Name {
+		case fsys.OpLink, fsys.OpRename, fsys.OpRenameNR:
+			steps = append(steps, o.Name+" "+o.NewPath)
+		case fsys.OpSyncDir, fsys.OpRemove:
+			steps = append(steps, o.Name+" "+o.Path)
+		}
+		return nil
+	})
+	f.op("move", `{"id": 5, "to": "/p"}`)
+	got := regexp.MustCompile(regexp.QuoteMeta(fsys.TempPrefix)+`[0-9a-f]+`).ReplaceAllString(strings.Join(steps, "; "), "TMP")
+	if want := "link p/TMP; rename p/5.md; syncdir p; remove p/TMP; rename-noreplace p/5.json; remove 5.md"; got != want {
+		t.Errorf("steps %q\nwant  %q", got, want)
+	}
+}
+
 func TestMoveFolderCases(t *testing.T) {
 	for _, tc := range []struct {
 		name, input string

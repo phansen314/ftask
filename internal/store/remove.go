@@ -47,8 +47,10 @@ func (tx *Tx) Move(oldRel, newRel string) *errs.Error {
 
 // LinkOver makes newRel a hard link to the file at oldRel, replacing any
 // file already at newRel: linked to a temp name in newRel's folder, then
-// renamed over it, so newRel is never missing and never partial. The temp
-// link is removed afterwards, whether the rename did anything or not.
+// renamed over it, so newRel is never missing and never partial. The folder
+// is then flushed, so a system crash can't keep a later step (the task
+// file's rename, the old name's removal) and lose the link. The temp link
+// is removed afterwards, whether the rename did anything or not.
 func (tx *Tx) LinkOver(oldRel, newRel string) *errs.Error {
 	if e := tx.mustWrite("link " + oldRel); e != nil {
 		return e
@@ -61,6 +63,7 @@ func (tx *Tx) LinkOver(oldRel, newRel string) *errs.Error {
 		tx.root.Remove(tmp)
 		return tx.OSError(newRel, err)
 	}
+	tx.root.SyncDir(path.Dir(newRel)) // a failure is ignored, as in Publish
 	// Renaming onto another name of the same file does nothing (POSIX) and
 	// leaves tmp behind; remove it. A failure leaves a temp-leftover.
 	tx.root.Remove(tmp)

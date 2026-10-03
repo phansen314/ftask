@@ -105,9 +105,11 @@ func TestParseRootPath(t *testing.T) {
 		}
 	}
 	const form, dotDot = "root must be an absolute path or begin with ~/", "root must not contain a .. segment"
+	const nul = "root must not contain a NUL character"
 	for raw, want := range map[string]string{
 		"": form, "~": form, "~user/x": form, "rel": form, "./a": form,
 		"/a/../b": dotDot, "/..": dotDot, "~/..": dotDot, "~/a/../b": dotDot,
+		"/tmp/x\x00y": nul, "~/x\x00": nul,
 	} {
 		if got, err := ParseRootPath(raw); err == nil || err.Error() != want {
 			t.Errorf("ParseRootPath(%q) = %+v, %v; want error %q", raw, got, err, want)

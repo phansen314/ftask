@@ -158,6 +158,7 @@ func TestInputProblems(t *testing.T) {
 		{"init", `{"root": "~/tasks"}`, []string{"/root"}},
 		{"init", `{"root": "/a/../b"}`, []string{"/root"}},
 		{"init", `{"root": "/.."}`, []string{"/root"}},
+		{"init", `{"root": "/tmp/x\u0000y"}`, []string{"/root"}},
 		{"init", `{"root": ""}`, []string{"/root"}},
 		{"init", `{}`, []string{"/root"}},
 		{"create", `{"title": "   "}`, []string{"/title"}},
@@ -166,7 +167,10 @@ func TestInputProblems(t *testing.T) {
 		{"create-batch", `{"tasks": [{"ref": "a", "title": "x", "blocked_by": ["a"]}]}`, []string{"/tasks/0/blocked_by/0"}},
 		{"create-batch", `{"tasks": [{"title": "x", "blocked_by": ["b"]}, {"ref": "b", "title": "y"}]}`, []string{"/tasks/0/blocked_by/0"}},
 		{"create-batch", `{"tasks": [{"title": "x", "blocked_by": ["nope", 3, "Bad", true, 3]}]}`, []string{"/tasks/0/blocked_by/0", "/tasks/0/blocked_by/2", "/tasks/0/blocked_by/3", "/tasks/0/blocked_by/4"}},
-		{"create-batch", `{"tasks": [{"ref": "a", "title": "x"}, {"ref": "a", "title": "y", "blocked_by": ["a", "a"]}]}`, []string{"/tasks/1/blocked_by/0", "/tasks/1/blocked_by/1", "/tasks/1/ref"}},
+		{"create-batch", `{"tasks": [{"ref": "a", "title": "x"}, {"ref": "a", "title": "y", "blocked_by": ["a", "a"]}]}`, []string{"/tasks/1/blocked_by/1", "/tasks/1/ref"}},
+		// A duplicated ref names the earlier task, not this one: only the
+		// duplicate is reported.
+		{"create-batch", `{"tasks": [{"ref": "a", "title": "x"}, {"ref": "a", "title": "y", "blocked_by": ["a"]}]}`, []string{"/tasks/1/ref"}},
 		{"create-batch", `{"folder": "x", "tasks": [{"title": " ", "x": 1}, 7]}`, []string{"/folder", "/tasks/0/title", "/tasks/0/x", "/tasks/1"}},
 		{"create-batch", `{"tasks": [{"title": "x", "blocked_by": [2.0]}]}`, []string{"/tasks/0/blocked_by/0"}},
 		{"block", `{"id": 42, "blockers": [41, 42]}`, []string{"/blockers/1"}},

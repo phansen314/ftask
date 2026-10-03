@@ -258,6 +258,10 @@ func TestUsage(t *testing.T) {
 		{"help command help", []string{"help", "--help"}, "help", "use --help"},
 		{"completion", []string{"completion", "bash"}, "completion", "unknown command"},
 		{"no completion suggestion", []string{"comp"}, "comp", "did you mean complete?"},
+		{"command after --", []string{"--", "version"}, "version", "the command must come before --"},
+		{"unknown command after --", []string{"--", "verison"}, "verison", "did you mean version"},
+		{"exclusive options", []string{"create", "t", "--notes", "x", "--notes-file", "-"}, "--notes-file", "--notes-file cannot be combined with --notes"},
+		{"exclusive options, other order", []string{"create", "t", "--notes-file", "-", "--notes", "x"}, "--notes", "--notes cannot be combined with --notes-file"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := run(t, commands, "{}", tc.args...)

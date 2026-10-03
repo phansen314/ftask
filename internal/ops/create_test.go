@@ -230,8 +230,8 @@ func TestCreateCases(t *testing.T) {
 			map[string]string{"tasks/ftask.json": "{\n  \"schema\": 1,\n  \"last_id\": 101\n}\n", "tasks/101.json": "<none>", "tasks/101.md": "<none>"}},
 		{".md not written", func(f *fixture) { f.failAt(fsys.OpRename, "101.md", syscall.ENOSPC) }, `{"title": "x", "notes": "n"}`,
 			`/ 101; notes-missing [101] [~/tasks/101.md] ENOSPC`, map[string]string{"tasks/101.md": "<none>"}},
-		{".md not written, no errno name", func(f *fixture) { f.failAt(fsys.OpRename, "101.md", syscall.Errno(4000)) }, `{"title": "x"}`,
-			`/ 101`, map[string]string{"tasks/101.md": "<none>"}},
+		{".md not written, no errno name", func(f *fixture) { f.failAt(fsys.OpRename, "101.md", syscall.Errno(4000)) }, `{"title": "x", "notes": "n"}`,
+			`/ 101; notes-missing [101] [~/tasks/101.md]`, map[string]string{"tasks/101.md": "<none>"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newFixture(t)

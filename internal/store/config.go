@@ -73,8 +73,12 @@ type RootPath struct {
 }
 
 // ParseRootPath checks a config's root: absolute or beginning "~/", with no
-// ".." segment. Any other form makes the config corrupt; the error says why.
+// ".." segment and no NUL. Any other form makes the config corrupt; the
+// error says why.
 func ParseRootPath(raw string) (r RootPath, err error) {
+	if strings.ContainsRune(raw, 0) {
+		return RootPath{}, errors.New("root must not contain a NUL character")
+	}
 	switch {
 	case strings.HasPrefix(raw, "/"):
 		r.Path = model.CleanPath(raw)

@@ -28,6 +28,11 @@ func TestInspect(t *testing.T) {
 		{"unreadable config", func(f *fixture) Env {
 			return f.withFault(fsys.ErrnoAt(fsys.OpReadFile, "", 1, syscall.EACCES))
 		}, `{"config":{"path":"CFG","state":"unreadable","root":null},"tree":null,"initialized":true,"usable":false,"compatible":null}`},
+		{"config is a FIFO", func(f *fixture) Env {
+			must(t, os.Remove(f.path("cfg/"+ConfigName)))
+			must(t, syscall.Mkfifo(f.path("cfg/"+ConfigName), 0o644))
+			return f.env
+		}, `{"config":{"path":"CFG","state":"corrupt","root":null},"tree":null,"initialized":true,"usable":false,"compatible":null}`},
 		{"corrupt config", func(f *fixture) Env { f.write("cfg/"+ConfigName, "root = \"rel\"\n"); return f.env },
 			`{"config":{"path":"CFG","state":"corrupt","root":null},"tree":null,"initialized":true,"usable":false,"compatible":null}`},
 		{"~/ root without home", func(f *fixture) Env {
@@ -39,6 +44,11 @@ func TestInspect(t *testing.T) {
 			`{"config":{"path":"CFG","state":"ok","root":"ROOT"},"tree":{"root_exists":false,"metadata":"missing","schema":null,"last_id":null},"initialized":false,"usable":false,"compatible":null}`},
 		{"root is a file", func(f *fixture) Env { must(t, os.RemoveAll(f.root)); f.write("tasks", ""); return f.env },
 			`{"config":{"path":"CFG","state":"ok","root":"ROOT"},"tree":{"root_exists":false,"metadata":"missing","schema":null,"last_id":null},"initialized":false,"usable":false,"compatible":null}`},
+		{"root is a symlink loop", func(f *fixture) Env {
+			must(t, os.RemoveAll(f.root))
+			must(t, os.Symlink("tasks", f.root))
+			return f.env
+		}, `{"config":{"path":"CFG","state":"ok","root":"ROOT"},"tree":{"root_exists":false,"metadata":"missing","schema":null,"last_id":null},"initialized":false,"usable":false,"compatible":null}`},
 		{"root is a symlink to a directory", func(f *fixture) Env {
 			must(t, os.Rename(f.root, f.path("real")))
 			must(t, os.Symlink("real", f.root))

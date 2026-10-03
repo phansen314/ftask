@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -117,6 +118,9 @@ func newRoot(cmds []Command, env Env, result **ops.Envelope) *cobra.Command {
 			if len(args) == 0 {
 				return usageErr(nil, "missing command")
 			}
+			if cmd.ArgsLenAtDash() == 0 && isCommand(cmd, args[0]) {
+				return usageErr(&args[0], "the command must come before --")
+			}
 			reason := "unknown command"
 			if s := cmd.SuggestionsFor(args[0]); len(s) > 0 {
 				reason += "; did you mean " + strings.Join(s, " or ") + "?"
@@ -194,15 +198,37 @@ func newCommand(c *Command, env Env, result **ops.Envelope) *cobra.Command {
 		}
 	}
 	fs.StringP("input", "i", "", "read the whole operation input from `file` (- for stdin)")
-	for _, g := range c.Exclusive {
-		cmd.MarkFlagsMutuallyExclusive(g...)
-	}
 	return cmd
 }
 
-// checkShape reports what cobra cannot: --input together with a field
-// option, and a missing required option, --input included.
+// isCommand reports whether name is one of root's commands, as typed.
+func isCommand(root *cobra.Command, name string) bool {
+	for _, c := range root.Commands() {
+		if !c.Hidden && c.Name() == name {
+			return true
+		}
+	}
+	return false
+}
+
+// checkShape reports what cobra cannot: mutually exclusive options given
+// together, naming the one given later; --input together with a field
+// option; and a missing required option, --input included.
 func checkShape(c *Command, cmd *cobra.Command) error {
+	for _, g := range c.Exclusive {
+		// Visit goes in the order options were first given, since
+		// SortFlags is off.
+		var given []string
+		cmd.Flags().Visit(func(f *pflag.Flag) {
+			if slices.Contains(g, f.Name) {
+				given = append(given, f.Name)
+			}
+		})
+		if len(given) > 1 {
+			arg := "--" + given[1]
+			return usageErr(&arg, arg+" cannot be combined with --"+given[0])
+		}
+	}
 	input := cmd.Flags().Changed("input")
 	if c.InputRequired && !input {
 		return usageErr(nil, "missing required option --input")

@@ -96,11 +96,16 @@ func UnreadableFolder(path, code string) Warning {
 	}
 }
 
-// NotesMissing: task id was written but its .md at path could not be.
+// NotesMissing: task id was written but its .md at path could not be. code
+// is "" for an OS error with no symbolic name, and then left out.
 func NotesMissing(path string, id int64, code string) Warning {
+	msg := fmt.Sprintf("%s: task %d written, but its notes could not be", path, id)
+	if code != "" {
+		msg += " (" + code + ")"
+	}
 	return Warning{
 		Kind:    WarnNotesMissing,
-		Message: fmt.Sprintf("%s: task %d written, but its notes could not be (%s)", path, id, code),
+		Message: msg,
 		Paths:   []string{path},
 		IDs:     []int64{id},
 		Code:    code,
