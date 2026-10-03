@@ -77,6 +77,7 @@ The command line is parsed in the conventional GNU style of Go's [cobra](https:/
 - **A repeated option** that takes one value (e.g. `-i a -i b`, `--priority 1 --priority 2`): the last one wins. List options accumulate (see *Value formats*).
 - **Bare `ftask`**, with no command, is a usage error.
 - **`--help`** (or `-h`) writes help text and exits `0`, running no operation: the command's help after a command (`ftask create --help`), otherwise the general help. Help text is for humans and not part of the contract; which other problems on the same command line it overrides is the libraries' behavior.
+- **No `help` or `completion` command.** Help is only `--help`: `ftask help` and `ftask completion` are usage errors, like any unknown command.
 
 ### Usage errors
 

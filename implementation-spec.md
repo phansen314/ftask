@@ -101,7 +101,7 @@ Each command is declared by a small table: its name, the operation it runs, and 
 
 ### Phases
 
-1. **Parse.** cobra parses the command line and prints `--help` itself (plain text, exit `0`). `SilenceErrors` and `SilenceUsage` keep it from printing anything else. Every error it returns — unknown command or flag, missing flag value, wrong argument count — is a `usage` error, reported with its message as the one problem.
+1. **Parse.** cobra parses the command line and prints `--help` itself (plain text, exit `0`). `SilenceErrors` and `SilenceUsage` keep it from printing anything else. cobra's default `completion` command is disabled, and its `help` command is replaced by a hidden one that is a `usage` error, so neither prints text. Every error it returns — unknown command or flag, missing flag value, wrong argument count — is a `usage` error, reported with its message as the one problem.
 2. **Shape checks cobra lacks.** Before the operation runs: a missing required option, and `--input` together with any argument or option that sets a field, are `usage` errors. The argument count is checked by the command's `Args` function: the table's arguments, or none with `--input`.
 3. **Build the input.** Place each value at its field, converting by type (below), and apply the command's input resolution (`init`'s `root`, `--notes-file`). Only flags actually given are placed; defaults are the operation's. With `--input`, read the file instead (then apply resolution).
 4. **Validate** through the same adapters as `--input` (see [Validation](#validation)).

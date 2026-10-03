@@ -102,7 +102,7 @@ func execute(cmds []Command, args []string, env Env) ([]byte, int, string) {
 	case err != nil:
 		return envelopeLine(ops.Failed(usage(err)))
 	}
-	return help.Bytes(), ExitOK, "" // --help, or cobra's own help and completion
+	return help.Bytes(), ExitOK, "" // --help
 }
 
 func newRoot(cmds []Command, env Env, result **ops.Envelope) *cobra.Command {
@@ -125,7 +125,22 @@ func newRoot(cmds []Command, env Env, result **ops.Envelope) *cobra.Command {
 		},
 		RunE:                       func(*cobra.Command, []string) error { return nil },
 		SuggestionsMinimumDistance: 2,
+		// No completion command: it is not in cli-spec.md, and prints no
+		// envelope.
+		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
 	}
+	// Help is --help only. cobra always adds a help command, so this one
+	// stands in for it, hidden and failing as an unknown command would.
+	root.SetHelpCommand(&cobra.Command{
+		Use:                "help",
+		Hidden:             true,
+		DisableFlagParsing: true,
+		Args: func(cmd *cobra.Command, _ []string) error {
+			name := cmd.Name()
+			return usageErr(&name, "unknown command; for help, use --help")
+		},
+		RunE: func(*cobra.Command, []string) error { return nil },
+	})
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return err })
 	for i := range cmds {
 		root.AddCommand(newCommand(&cmds[i], env, result))

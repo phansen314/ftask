@@ -253,6 +253,11 @@ func TestUsage(t *testing.T) {
 		{"missing value", []string{"version", "--input"}, "--input", "needs an argument"},
 		{"missing short value", []string{"version", "-i"}, "-i", "needs an argument"},
 		{"input with argument", []string{"version", "-i", "-", "x"}, "x", "--input cannot be combined"},
+		{"help command", []string{"help"}, "help", "use --help"},
+		{"help topic", []string{"help", "shwo"}, "help", "use --help"},
+		{"help command help", []string{"help", "--help"}, "help", "use --help"},
+		{"completion", []string{"completion", "bash"}, "completion", "unknown command"},
+		{"no completion suggestion", []string{"comp"}, "comp", "did you mean complete?"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := run(t, commands, "{}", tc.args...)
@@ -269,11 +274,15 @@ func TestUsage(t *testing.T) {
 
 func TestHelp(t *testing.T) {
 	for _, args := range [][]string{
-		{"--help"}, {"-h"}, {"help"}, {"help", "version"}, {"version", "--help"}, {"version", "-h"},
+		{"--help"}, {"-h"}, {"version", "--help"}, {"version", "-h"},
 	} {
 		r := run(t, commands, "", args...)
 		if r.code != ExitOK || r.envelope != nil || !strings.Contains(r.raw, "Usage:") {
 			t.Errorf("%q: exit %d: %s", args, r.code, r.raw)
+		}
+		// Help lists no command outside cli-spec.md.
+		if strings.Contains(r.raw, "completion") || strings.Contains(r.raw, "help [command]") {
+			t.Errorf("%q: lists help or completion: %s", args, r.raw)
 		}
 	}
 }
