@@ -3,6 +3,7 @@ package store
 import (
 	"fmt"
 	"syscall"
+	"time"
 
 	"github.com/phansen314/ftask/internal/errs"
 	"github.com/phansen314/ftask/internal/fsys"
@@ -42,7 +43,7 @@ func Read(env Env, w *errs.Collector, fn func(*Tx) *errs.Error) *errs.Error {
 }
 
 // Write runs fn holding the write lock: after the Root states checks, it
-// takes the lock (busy if it is held) and re-reads ftask.json, since a write
+// takes the lock (see takeLock) and re-reads ftask.json, since a write
 // decides on current state. The lock is released when fn returns.
 func Write(env Env, w *errs.Collector, fn func(*Tx) *errs.Error) *errs.Error {
 	tx, e := begin(env, w)
@@ -50,12 +51,9 @@ func Write(env Env, w *errs.Collector, fn func(*Tx) *errs.Error) *errs.Error {
 		return e
 	}
 	defer tx.root.Close()
-	lock, err := tx.root.Lock()
-	if err != nil {
-		if isErrno(err, syscall.EAGAIN) {
-			return errs.Busy()
-		}
-		return errs.FromOS(tx.rootPath, err)
+	lock, e := takeLock(tx.root, tx.rootPath, env.LockWait)
+	if e != nil {
+		return e
 	}
 	defer lock.Unlock()
 	ms := readMeta(tx.root)
@@ -68,8 +66,8 @@ func Write(env Env, w *errs.Collector, fn func(*Tx) *errs.Error) *errs.Error {
 
 // Diagnose runs fn holding the write lock, for doctor and repair
 // (implementation-spec.md, doctor and repair): after locating the config and
-// opening the root, it takes the lock (busy if it is held) and reads
-// ftask.json without failing on it — MetaState says what it found. The
+// opening the root, it takes the lock (see takeLock) and reads ftask.json
+// without failing on it — MetaState says what it found. The
 // transaction allows writes, and its walk records a Survey.
 func Diagnose(env Env, w *errs.Collector, fn func(*Tx) *errs.Error) *errs.Error {
 	if w == nil {
@@ -84,17 +82,37 @@ func Diagnose(env Env, w *errs.Collector, fn func(*Tx) *errs.Error) *errs.Error 
 		return e
 	}
 	defer r.Close()
-	lock, err := r.Lock()
-	if err != nil {
-		if isErrno(err, syscall.EAGAIN) {
-			return errs.Busy()
-		}
-		return errs.FromOS(rootPath, err)
+	lock, e := takeLock(r, rootPath, env.LockWait)
+	if e != nil {
+		return e
 	}
 	defer lock.Unlock()
 	ms := readMeta(r)
 	tx := &Tx{root: r, rootPath: rootPath, meta: ms.meta, write: true, survey: true, metaSt: ms, warn: w, cache: map[Location]*Loaded{}}
 	return fn(tx)
+}
+
+// lockPoll is how often a write retries a held write lock
+// (implementation-spec.md, Mechanism).
+const lockPoll = 10 * time.Millisecond
+
+// takeLock takes r's write lock, retrying while it is held until wait has
+// passed: busy if it is still held then. A wait of 0 tries once.
+func takeLock(r fsys.Root, rootPath string, wait time.Duration) (fsys.Lock, *errs.Error) {
+	deadline := time.Now().Add(wait)
+	for {
+		l, err := r.Lock()
+		if err == nil {
+			return l, nil
+		}
+		if !isErrno(err, syscall.EAGAIN) {
+			return nil, errs.FromOS(rootPath, err)
+		}
+		if !time.Now().Before(deadline) {
+			return nil, errs.Busy()
+		}
+		time.Sleep(min(lockPoll, time.Until(deadline)))
+	}
 }
 
 // MetaState is ftask.json's state as a diagnostic transaction read it, and

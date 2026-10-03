@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/phansen314/ftask/internal/errs"
 	"github.com/phansen314/ftask/internal/fsys"
@@ -174,6 +175,57 @@ func TestWriteHoldsLock(t *testing.T) {
 		wantKind(t, Write(f.env, nil, nil), errs.KindBusy)
 	})
 	writeTx(t, f.env, nil, func(*Tx) {})
+}
+
+// heldFor makes the first n Lock calls find the lock held, and counts every
+// call in calls.
+func heldFor(n int, calls *int) fsys.Hook {
+	return func(op fsys.Op) error {
+		if op.Name != fsys.OpLock {
+			return nil
+		}
+		*calls++
+		if *calls <= n {
+			return syscall.EAGAIN
+		}
+		return nil
+	}
+}
+
+// A write that finds the lock held retries until it is free, within its wait;
+// so do doctor and repair.
+func TestLockWait(t *testing.T) {
+	f := newFixture(t)
+	for name, tx := range map[string]func(Env, *errs.Collector, func(*Tx) *errs.Error) *errs.Error{"Write": Write, "Diagnose": Diagnose} {
+		calls := 0
+		env := f.withFault(heldFor(3, &calls))
+		env.LockWait = time.Second
+		if e := tx(env, nil, func(*Tx) *errs.Error { return nil }); e != nil {
+			t.Errorf("%s: %v", name, e)
+		}
+		if calls != 4 {
+			t.Errorf("%s: Lock called %d times, want 4", name, calls)
+		}
+	}
+}
+
+// A lock still held once the wait is over is busy.
+func TestLockWaitBusy(t *testing.T) {
+	f := newFixture(t)
+	r, err := fsys.OS{}.OpenRoot(f.root)
+	must(t, err)
+	defer r.Close()
+	l, err := r.Lock()
+	must(t, err)
+	defer l.Unlock()
+
+	env := f.env
+	env.LockWait = 50 * time.Millisecond
+	start := time.Now()
+	wantKind(t, Write(env, nil, nil), errs.KindBusy)
+	if d := time.Since(start); d < env.LockWait || d > time.Second {
+		t.Errorf("busy after %v, want the %v wait", d, env.LockWait)
+	}
 }
 
 func TestWriteLockError(t *testing.T) {

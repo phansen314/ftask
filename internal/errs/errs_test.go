@@ -136,7 +136,7 @@ func TestCorruptBy(t *testing.T) {
 
 func TestErrorJSON(t *testing.T) {
 	e := Busy()
-	if got, want := marshal(t, e), `{"kind":"busy","message":"another write holds the write lock; retry","details":{}}`; got != want {
+	if got, want := marshal(t, e), `{"kind":"busy","message":"another write held the write lock throughout the wait","details":{}}`; got != want {
 		t.Errorf("got %s, want %s", got, want)
 	}
 	type partial struct {

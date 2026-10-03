@@ -7,6 +7,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/phansen314/ftask/internal/fsys"
@@ -19,7 +20,12 @@ type Env struct {
 	FS        fsys.FS
 	Home      string
 	ConfigDir string
+	LockWait  time.Duration // how long a write waits for a held write lock; 0 tries once
 }
+
+// DefaultLockWait is how long a write waits for a held write lock before
+// failing with busy (design-spec.md, Guarantees: Bounded wait).
+const DefaultLockWait = 5 * time.Second
 
 // ConfigName is the config's file name in the config directory.
 const ConfigName = "config.toml"

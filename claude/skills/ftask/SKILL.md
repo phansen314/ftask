@@ -33,8 +33,7 @@ Branch on `.error.kind`, not the exit code. **Always tell the user about any `wa
 
 Error kinds worth handling:
 
-- `busy` — another write holds the lock (another session, maybe). Retry briefly:
-  `for i in 1 2 3 4 5; do out=$(ftask complete 42); jq -e '.error.kind != "busy"' <<<"$out" >/dev/null && break; sleep 0.3; done; echo "$out"`
+- `busy` — the tree's write lock stayed held for 5 seconds; ftask already waited. Don't retry in a loop: tell the user something is holding the lock (a `doctor`/`repair` on a very large tree, or a stuck `ftask` process), and retry once they say so.
 - `not-found` — `.error.details.ids` / `.folders` name what's missing. Folders are created only by `create-folder`, `-p`, and `create-batch`.
 - `invalid-input` — `.error.details.problems[]` lists every bad field.
 - `conflict` with `rule: "acyclic"` — the block would make a cycle; `.error.details.cycles` shows it.
@@ -45,7 +44,7 @@ Error kinds worth handling:
 
 ## When the tree is damaged
 
-After a `duplicate-id`, `id-above-last-id`, or `corrupt` error, or a `dangling-reference` warning, run `ftask doctor` — once per session, not after every command — and summarize `.result.findings` for the user: each finding's `kind`, its `items` (`paths`, `ids`), and its `suggest`. `doctor` changes nothing, and takes the write lock briefly, so other writes may get `busy` while it runs.
+After a `duplicate-id`, `id-above-last-id`, or `corrupt` error, or a `dangling-reference` warning, run `ftask doctor` — once per session, not after every command — and summarize `.result.findings` for the user: each finding's `kind`, its `items` (`paths`, `ids`), and its `suggest`. `doctor` changes nothing, and takes the write lock while it runs, so other writes wait for it.
 
 - Findings with a non-null `action` are what `ftask repair` would fix. **Never run `repair` unasked**: offer it, saying what it would change. It asks for permission anyway.
 - **Never run `repair --kinds metadata-missing` unless the user explicitly agrees**: rebuilding `ftask.json` can reissue the ID of a task that was deleted.

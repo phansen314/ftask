@@ -7,10 +7,12 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 )
 
-// A write held at the lock blocks other writes with busy, while reads go on;
-// once released, it completes (implementation-spec.md, Lock 1).
+// A write held at the lock makes other writes busy once their wait is over,
+// while reads go on; once released, it completes (implementation-spec.md,
+// Lock 1).
 func TestLockContention(t *testing.T) {
 	tr := newTree(t)
 	h := hold(t, tr.cmd("create", "a"))
@@ -101,6 +103,26 @@ func TestLockDiagnostics(t *testing.T) {
 	h.release()
 	if r := h.wait(); r.code != 0 {
 		t.Fatalf("holder: exit %d: %s%s", r.code, r.stdout, r.stderr)
+	}
+}
+
+// A write that finds the lock held, with the default wait, waits for it and
+// completes once the holder releases, taking the next ID: it never ran while
+// the holder held the lock (implementation-spec.md, Lock 8).
+func TestLockWaits(t *testing.T) {
+	tr := newTree(t)
+	h := hold(t, tr.cmd("create", "a"))
+	waiter := make(chan result)
+	go func() { waiter <- run(t, withoutLockWait(tr.cmd("create", "b"))) }()
+	time.Sleep(300 * time.Millisecond)
+	h.release()
+	if r := h.wait(); r.code != 0 || !strings.Contains(r.stdout, `"id":1,`) {
+		t.Fatalf("holder: exit %d: %s%s", r.code, r.stdout, r.stderr)
+	}
+	r := <-waiter
+	envelope(t, r)
+	if r.code != 0 || !strings.Contains(r.stdout, `"id":2,`) {
+		t.Fatalf("waiter: exit %d, want id 2: %s", r.code, r.stdout)
 	}
 }
 

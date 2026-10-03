@@ -16,11 +16,11 @@ type Env struct {
 }
 
 // NewEnv is the process's environment: the real filesystem, the home and
-// config directories located from getenv (design-spec.md, Config file), and
-// the real clock. goos is runtime.GOOS.
+// config directories located from getenv (design-spec.md, Config file), the
+// default lock wait, and the real clock. goos is runtime.GOOS.
 func NewEnv(getenv func(string) string, goos string) Env {
 	home, configDir := store.Locate(getenv, goos)
-	return Env{Env: store.Env{FS: fsys.OS{}, Home: home, ConfigDir: configDir}, Clock: RealClock}
+	return Env{Env: store.Env{FS: fsys.OS{}, Home: home, ConfigDir: configDir, LockWait: store.DefaultLockWait}, Clock: RealClock}
 }
 
 // Clock returns the current time. Operations stamp files with it, so tests

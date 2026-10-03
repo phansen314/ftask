@@ -117,7 +117,7 @@ func wantNote(t *testing.T, r result, stderr string) {
 func TestFailureNoteIgnoresWarnings(t *testing.T) {
 	env := ops.Envelope{Error: errs.Busy(), Warnings: []errs.Warning{errs.CorruptFile("/r/1.json", 1), errs.CorruptFile("/r/2.json", 2)}}
 	_, code, note := envelopeLine(env)
-	if want := "ftask: busy: another write holds the write lock; retry"; code != ExitError || note != want {
+	if want := "ftask: busy: another write held the write lock throughout the wait"; code != ExitError || note != want {
 		t.Errorf("exit %d, note %q; want 1, %q", code, note, want)
 	}
 }
@@ -435,7 +435,7 @@ func (w failWriter) Write(p []byte) (int, error) { return len(p), w.writeErr }
 func (w failWriter) Close() error                { return w.closeErr }
 
 func TestDeliver(t *testing.T) {
-	const note = "ftask: busy: another write holds the write lock; retry"
+	const note = "ftask: busy: another write held the write lock throughout the wait"
 	for _, tc := range []struct {
 		name      string
 		w         failWriter

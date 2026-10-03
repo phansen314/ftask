@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -43,11 +44,23 @@ func TestMain(m *testing.M) {
 }
 
 // ftask prepares the binary with args in its own home and config directory.
+// A write waits only briefly for a held lock (FTASK_E2E_LOCK_WAIT), so a busy
+// comes quickly; withoutLockWait restores the default.
 func ftask(t *testing.T, args ...string) *exec.Cmd {
 	t.Helper()
 	home := t.TempDir()
 	cmd := exec.Command(binary, args...)
-	cmd.Env = []string{"HOME=" + home, "XDG_CONFIG_HOME=" + filepath.Join(home, ".config"), "PATH=" + os.Getenv("PATH")}
+	cmd.Env = []string{"HOME=" + home, "XDG_CONFIG_HOME=" + filepath.Join(home, ".config"), "PATH=" + os.Getenv("PATH"), lockWait}
+	return cmd
+}
+
+// lockWait is the brief wait ftask gives every command.
+const lockWait = "FTASK_E2E_LOCK_WAIT=100ms"
+
+// withoutLockWait drops lockWait from cmd's environment, so it waits for a
+// held lock as a real ftask does.
+func withoutLockWait(cmd *exec.Cmd) *exec.Cmd {
+	cmd.Env = slices.DeleteFunc(cmd.Env, func(v string) bool { return v == lockWait })
 	return cmd
 }
 

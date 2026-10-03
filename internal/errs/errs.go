@@ -252,7 +252,7 @@ func Acyclic(ids []int64, cycles [][]int64) *Error {
 }
 
 func Busy() *Error {
-	return &Error{Kind: KindBusy, Message: "another write holds the write lock; retry", Details: empty{}}
+	return &Error{Kind: KindBusy, Message: "another write held the write lock throughout the wait", Details: empty{}}
 }
 
 // CorruptReason says why a file is corrupt.

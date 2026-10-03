@@ -11,7 +11,7 @@ How the design spec's [write lock](design-spec.md#write-lock) and [Guarantees](d
 - **One resolution per write.** A write resolves the root path once, in `os.OpenRoot`, locks that directory through the same handle, and performs every file operation through that handle — never by re-resolving the path. Repointing a symlinked root mid-write therefore cannot split one write across two directories.
 - **Close-on-exec.** The lock descriptor is close-on-exec so the lock cannot ride into a child program. Go opens every file close-on-exec by default.
 - **Keep the lock's file alive.** The `*os.File` from `root.Open(".")` must stay referenced until the write ends. If it becomes unreachable, Go's finalizer may close the descriptor mid-write, which releases the lock. The write holds it explicitly and closes it (releasing the lock) only when done.
-- **Non-blocking acquisition.** `LOCK_EX | LOCK_NB`; if the lock is held, fail immediately (see *Fail fast* in [Guarantees](design-spec.md#guarantees)).
+- **Polled acquisition.** `LOCK_EX | LOCK_NB`, retried every 10 ms while the lock is held, up to the wait in *Bounded wait* ([Guarantees](design-spec.md#guarantees)), then `busy`. Polling rather than a blocking `flock`, which only a signal can cut short. The wait is `store.Env.LockWait`; zero tries once, as unit tests use.
 - **Platform check.** `flock` on a directory descriptor is verified on Linux. On macOS it is confirmed from the XNU kernel source: `flock` accepts any descriptor on a filesystem, directories included; the advisory-lock layer rejects only FIFOs; and the local lock code never checks the file type. Its behavior matches Linux: the lock belongs to the open file description, is shared by `fork` and `dup` copies, and is advisory. An empirical check on macOS — contention, release on crash, close-on-exec — belongs in the implementation's test suite. Network filesystems are excluded (see [Assumptions](design-spec.md#assumptions)).
 - **Atomic file writes.** Write a complete temp file in the same directory (a hidden entry), then publish it: `rename` to replace an existing file, `link` to create a new one so an existing file is never clobbered. A process crash between writing the temp file and removing it can leave the temp file behind; it is ignored by reads and reported by [`doctor`](operations.md#doctor).
 - **Moves never replace.** [`move`](operations.md#move)'s task file and [`move-folder`](operations.md#move-folder)'s folder move with a rename that fails with `EEXIST` rather than replace what is at the new name: `renameat2` with `RENAME_NOREPLACE` on Linux, `renameatx_np` with `RENAME_EXCL` on macOS, both from `golang.org/x/sys/unix`, between the two folders opened through the `os.Root`. Plain `rename(2)` silently replaces an empty folder, so a check made beforehand under the lock would be the only guard; the no-replace rename is the backstop against an outside change, and reports it as `corrupt` (`unexpected-file`).
@@ -482,7 +482,7 @@ Tests that must pause a write or crash it at an exact point use hooks compiled o
 
 ### Lock
 
-In `e2e/`, on Linux and macOS:
+In `e2e/`, on Linux and macOS. Every command's wait for the lock is shortened to 100 ms (`FTASK_E2E_LOCK_WAIT`, a [test hook](#test-hooks)), so a `busy` comes quickly; test 8 uses the default.
 
 1. **Contention.** A write held open at a test hook; a second write gets `busy` (exit `1`), while reads still succeed.
 2. **One lock however the root is reached.** The second writer comes in through a symlinked root path, and through a different config (another `XDG_CONFIG_HOME`) naming the same root: both get `busy`.
@@ -491,6 +491,7 @@ In `e2e/`, on Linux and macOS:
 5. **Stress.** 16 processes each create 50 tasks, retrying on `busy`. Afterwards: 800 tasks, all IDs distinct, `last_id` 800, no lost update.
 6. **Racing `block`s.** `block A --blockers B` and `block B --blockers A` run concurrently, each retrying on `busy`, many rounds: in each, exactly one succeeds and the other ends `conflict` (`acyclic`).
 7. **Diagnostics take the lock.** A `doctor` held open at a test hook makes a write `busy`; a write held open makes `doctor` and `repair` `busy`.
+8. **Waiting.** With the default wait, a write started while another holds the lock waits, and completes with the next ID once the holder releases.
 
 The macOS run of this suite is the empirical check [Mechanism](#mechanism)'s platform check assigns to the test suite.
 

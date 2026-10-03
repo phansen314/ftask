@@ -328,7 +328,7 @@ These apply to write operations (see [Operation kinds](operations.md#operation-k
 
 - **Serialized writes.** At most one write operation runs against a root at a time. The write lock is held only for the duration of one operation — or one CLI command composing several — and nothing is held between them.
 - **Input is validated first.** A write rejects bad input (an invalid title, tag, or folder) before contending for the write lock, so malformed input is never reported as contention.
-- **Fail fast.** A write that cannot start because another write holds the lock fails immediately with a distinct error, so the caller can tell contention from other failures and retry.
+- **Bounded wait.** A write that finds the write lock held waits for it, up to 5 seconds, then fails with a distinct error (`busy`). A write holds the lock for milliseconds, so `busy` means something held it far longer: a `doctor` or `repair` on a very large tree, or a stuck process. The wait comes after input is validated and changes no outcome, since nothing a write decides on is read until the lock is acquired. An interrupt while waiting is a crash in which nothing was done.
 - **Writes decide on current state.** Everything a write's correctness depends on — the task it modifies, the graph it checks for cycles, the references it removes, the next ID — is read after the write lock is acquired, never before.
 - **No lost updates.** Following from the above, two writes to the same task, one after the other, both take effect.
 - **Atomic files.** Each file ftask writes is replaced all-or-nothing. A reader never sees a partially written file from ftask. Because each is flushed before it is published (see [Crashes](#crashes)), a file ftask wrote comes back from a system crash whole: the version written, or, if the crash came before it was published, the one before. A read reports an empty or garbled task file as unusable (see [Reads](#reads)); only an outside change, or a disk that ignores flushes, can leave one.
@@ -398,7 +398,7 @@ How the lock is taken, and how files are replaced atomically, is in the implemen
 
 A system crash or an outside change can leave a tree that breaks an [invariant](#invariants), or that holds entries no rule accounts for. Normal operations report or absorb such damage, and never repair it (see [Guarantees](#guarantees)). Two operations do: [`doctor`](operations.md#doctor) finds it, and [`repair`](operations.md#repair) fixes what can be fixed safely. Each problem they find is a [finding](operations.md#findings), of one of a fixed set of [kinds](operations.md#finding-kinds).
 
-- **At rest.** Both take the write lock, even `doctor`, which changes nothing. With no write running, every ftask temp file is a leftover, never a write in progress, and what `doctor` reports is the tree's state, not a write half done. If another write holds the lock, both fail with `busy`.
+- **At rest.** Both take the write lock, even `doctor`, which changes nothing. With no write running, every ftask temp file is a leftover, never a write in progress, and what `doctor` reports is the tree's state, not a write half done. If another write holds the lock, both wait for it like any write (see *Bounded wait* in [Guarantees](#guarantees)).
 - **They run when nothing else can.** Both need the config and the root it names, but not a usable `ftask.json`: a missing or unusable `ftask.json` is a finding, not an error. They are the way out of a root that every other operation refuses.
 - **The whole tree.** Both walk every folder, and look at what other operations skip: ftask's own temp files and folders, entries that match no naming rule, and `.md` files with no task file. Other hidden entries (`.git`, `.DS_Store`) are still ignored.
 - **Safe repairs only.** `repair` changes only what can't lose information or change meaning, given the tree is at rest: a temp file holds nothing anyone wrote; raising `last_id` only moves it up, as it always moves; a dangling reference names a task that isn't there; an empty `.md`, or a second name for notes that are also at their task, holds nothing that isn't kept elsewhere. Duplicate IDs, cycles, and unusable files all need someone to decide which version is right, so `doctor` explains them and suggests what to run, and `repair` leaves them to a person.
@@ -474,6 +474,3 @@ Let a caller set `completed_at` when completing a task (e.g. to backdate it), in
 
 A command that pretty-prints the tree — folders and tasks, nested — for people. Presentation only: built on [`list`](operations.md#list) (with `include_folders`), so it needs no new operation.
 
-### Waiting for the write lock
-
-Let a write that finds the write lock held wait (e.g. with a timeout) instead of failing immediately.
