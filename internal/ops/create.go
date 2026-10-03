@@ -54,9 +54,10 @@ type CreatePartial struct {
 
 // runCreate creates the task under the write lock, in create's precedence
 // order: the path walk of folder (a missing folder held, to be reported with
-// any missing blockers), the blockers looked up and then loaded, then the ID
-// ceiling. It writes in the order its Crash behavior relies on: last_id, the
-// task file, then the .md. Once the task file is written, create succeeds.
+// any missing blockers), the blockers looked up and then loaded, then
+// checked against last_id, then the ID ceiling. It writes in the order its
+// Crash behavior relies on: last_id, the task file, then the .md. Once the
+// task file is written, create succeeds.
 func runCreate(env Env, in CreateInput, w *errs.Collector) (any, *errs.Error) {
 	var out model.Task
 	e := store.Write(env.Env, w, func(tx *store.Tx) *errs.Error {
@@ -79,6 +80,9 @@ func runCreate(env Env, in CreateInput, w *errs.Collector) (any, *errs.Error) {
 			return errs.NotFound(missingFolder, missingIDs, nil)
 		}
 		if e := requireIDs(tx, found); e != nil {
+			return e
+		}
+		if e := aboveLastID(tx, in.BlockedBy); e != nil {
 			return e
 		}
 		if tx.Meta().LastID >= model.IDMax {

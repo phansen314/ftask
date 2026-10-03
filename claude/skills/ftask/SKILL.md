@@ -38,8 +38,8 @@ Error kinds worth handling:
 - `not-found` — `.error.details.ids` / `.folders` name what's missing. Folders are created only by `create-folder`, `-p`, and `create-batch`.
 - `invalid-input` — `.error.details.problems[]` lists every bad field.
 - `conflict` with `rule: "acyclic"` — the block would make a cycle; `.error.details.cycles` shows it.
-- `conflict` with `rule: "not-empty"` — `delete-folder` without `-r` on a folder that holds tasks or folders. Don't add `-r` on your own: ask the user.
-- `conflict` with `rule: "destination-exists"` — `move-folder` would land on a folder that already exists; folders are never merged.
+- `conflict` with `rule: "not-empty"` — `delete-folder` without `-r` on a folder that holds tasks, folders, or other files. Don't add `-r` on your own: ask the user.
+- `conflict` with `rule: "destination-exists"` — `move-folder` would land on a folder that already exists (folders are never merged), or `move` would overwrite a `.md` with text in the target folder; show it to the user.
 - `conflict` with `rule: "duplicate-id"` or `"id-above-last-id"` — the tree is damaged; check it (below), don't work around it.
 - `corrupt`, `unsupported-format`, `io`, `internal` — stop and report to the user, quoting `.error.message` (for `corrupt` it names what is wrong); don't try to fix files by hand.
 

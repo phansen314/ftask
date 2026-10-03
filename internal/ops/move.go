@@ -1,6 +1,7 @@
 package ops
 
 import (
+	"os"
 	"strings"
 	"syscall"
 
@@ -46,7 +47,7 @@ type CreatedPartial struct {
 // first (store.Tx.LinkOver), then the task file is renamed — the moment it
 // moves — then the old .md is removed, which is cleanup and cannot fail the
 // operation. A task with no .md has any stray one in to removed instead, so
-// the stray can't become its notes.
+// the stray can't become its notes. A stray with text is a conflict.
 func runMove(env Env, in MoveInput, w *errs.Collector) (any, *errs.Error) {
 	out := MoveOutput{Created: []model.FolderPath{}}
 	e := store.Write(env.Env, w, func(tx *store.Tx) *errs.Error {
@@ -113,6 +114,12 @@ func runMove(env Env, in MoveInput, w *errs.Collector) (any, *errs.Error) {
 func moveTask(tx *store.Tx, src, dst store.Location) *errs.Error {
 	fi, err := tx.Lstat(src.NotesRel())
 	notes := err == nil && fi.Mode().IsRegular()
+	// A .md with text at dst, other than a second name for these notes, may
+	// hold edits saved after an earlier move: never overwritten.
+	if dfi, derr := tx.Lstat(dst.NotesRel()); derr == nil && dfi.Mode().IsRegular() && dfi.Size() > 0 &&
+		!(notes && os.SameFile(fi, dfi)) {
+		return errs.Conflict(errs.RuleDestinationExists, []int64{int64(dst.ID)})
+	}
 	switch {
 	case notes:
 		if e := tx.LinkOver(src.NotesRel(), dst.NotesRel()); e != nil {

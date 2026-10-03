@@ -217,9 +217,9 @@ func Conflict(rule Rule, ids []int64) *Error {
 	case RuleIDAboveLastID:
 		msg = fmt.Sprintf("task ID %s is above last_id; repair the tree with doctor first", joinIDs(ids))
 	case RuleNotEmpty:
-		msg = "the folder holds tasks or folders; delete it recursively to remove them too"
+		msg = "the folder holds tasks, folders, or other files; delete it recursively to remove them too"
 	case RuleDestinationExists:
-		msg = "something already exists where the folder would move"
+		msg = "something already exists where the folder, or the task's notes, would move"
 	default:
 		msg = "conflict: " + string(rule)
 	}

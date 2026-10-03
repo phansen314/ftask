@@ -176,8 +176,15 @@ func runDeleteFolder(env Env, in DeleteFolderInput, w *errs.Collector) (any, *er
 		}
 		slices.Sort(ids)
 		ids = slices.Compact(ids)
-		if !in.Recursive && (len(tasks) > 0 || len(folders) > 1) {
-			return errs.Conflict(errs.RuleNotEmpty, int64s(ids))
+		if !in.Recursive {
+			if len(tasks) > 0 || len(folders) > 1 {
+				return errs.Conflict(errs.RuleNotEmpty, int64s(ids))
+			}
+			if other, e := tx.HoldsOther(in.Folder); e != nil {
+				return e
+			} else if other {
+				return errs.Conflict(errs.RuleNotEmpty, int64s(ids))
+			}
 		}
 		deps := []model.ID{}
 		if len(ids) > 0 {

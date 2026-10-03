@@ -149,6 +149,9 @@ func TestCreateBatchCases(t *testing.T) {
 			`{"ids":[101,102],"refs":{"a":101},"folders_created":[]}`, nil},
 
 		// The IDs.
+		{"blockers above last_id", func(f *fixture) { f.task("x", 101, false); f.task("", 1, false) },
+			`{"tasks": [{"title": "x", "folder": "/n", "blocked_by": [1]}, {"title": "y", "blocked_by": [101]}]}`,
+			`conflict {"rule":"id-above-last-id","ids":[101]}`, map[string]string{"tasks/ftask.json": fresh, "tasks/101.json": "<none>", "tasks/n": "<none>"}},
 		{"batch past the ceiling", func(f *fixture) { f.write("tasks/ftask.json", `{"schema": 1, "last_id": 999999999999998}`) },
 			`{"tasks": [{"title": "x"}, {"title": "y"}]}`,
 			`conflict {"rule":"id-exhausted","ids":[]}`, nil},

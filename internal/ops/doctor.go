@@ -259,10 +259,16 @@ func diagnose(tx *store.Tx) (findings, *errs.Error) {
 	metaPath := tx.Path(store.MetaName)
 	switch state, metaErr := tx.MetaState(); state {
 	case store.MetaMissing:
-		fs.add(kindMetadataMissing, Item{
+		it := Item{
 			Paths: []string{metaPath}, LastID: &maxID, Action: ptr(actionCreateMetadata),
 			Suggest: ptr("ftask repair --kinds metadata-missing, unless a task with an ID above " + fmt.Sprint(maxID) + " was ever deleted; then rebuild ftask.json by hand with that ID as last_id"),
-		})
+		}
+		// A folder that can't be listed may hold a higher ID, so last_id
+		// can't be rebuilt from the walk.
+		if !x.Complete() {
+			it.Action, it.Suggest = nil, ptr("fix the unreadable folders first; then ftask repair --kinds metadata-missing")
+		}
+		fs.add(kindMetadataMissing, it)
 	case store.MetaOK:
 		lastID := tx.Meta().LastID
 		for _, l := range x.Tasks {

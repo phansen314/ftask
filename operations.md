@@ -98,7 +98,7 @@ An error means the operation failed. `kind` and `details` are the contract; `mes
 | `not-initialized` | The root is *not initialized* (see [Root states](#root-states)). A file that exists but is unusable is never `not-initialized`. | `missing`: `config`, `root`, or `metadata` (meaning `ftask.json`) — the first absent piece. |
 | `environment` | The process's environment lacks what ftask needs to locate its files: the home directory, from which the config location is derived (see [Config file](design-spec.md#config-file)). Not a root state — no config was looked for. | `variable`: the environment variable that is unset or unusable; currently always `HOME`. |
 | `not-found` | A task or folder named by the input, or a filesystem directory it requires, does not exist. | `folders`: tree folder paths; `ids`: task IDs; `paths`: filesystem paths (e.g. `init`'s missing parent directory). All three always present, empty when not applicable. |
-| `conflict` | The operation was refused because it would violate an invariant, overwrite state it must not, or act on a task the tree cannot identify uniquely. | `rule`: the rule that refused it — currently `acyclic`, `id-exhausted` (no ID left under the [ID ceiling](design-spec.md#task-ids)), `config-exists`, `root-not-empty`, `duplicate-id` (a write names an ID that more than one task file has), `id-above-last-id` (a task to remove has an ID above `last_id`), `not-empty` (a folder to delete holds tasks or folders), `destination-exists` (something is already where a folder would move). `ids`: the tasks involved, always present, possibly empty. For `acyclic`, also `cycles`: `cycles[i]` is one cycle through `ids[i]`, chosen deterministically (see [`block`](#block)). |
+| `conflict` | The operation was refused because it would violate an invariant, overwrite state it must not, or act on a task the tree cannot identify uniquely. | `rule`: the rule that refused it — currently `acyclic`, `id-exhausted` (no ID left under the [ID ceiling](design-spec.md#task-ids)), `config-exists`, `root-not-empty`, `duplicate-id` (a write names an ID that more than one task file has), `id-above-last-id` (a task the write removes, or names as a blocker, has an ID above `last_id`), `not-empty` (a folder to delete holds tasks, folders, or other files), `destination-exists` (something is already where a folder, or a task's notes, would move). `ids`: the tasks involved, always present, possibly empty. For `acyclic`, also `cycles`: `cycles[i]` is one cycle through `ids[i]`, chosen deterministically (see [`block`](#block)). |
 | `busy` | Another write holds the write lock. Safe to retry. | none (`{}`). |
 | `corrupt` | A needed file — or an entry on an input path — is present and readable but its content or type is wrong (see [File validity](design-spec.md#file-validity)); or ftask found a file where, under its own invariants, none can exist (e.g. creating a task file that already exists). | `path`; `reason`: `not-json` (not parseable, or not an object), `invalid` (fails a file-level rule, including a missing `schema` or one not written as an integer literal within ±(2^53 − 1)), or `unexpected-file` (wrong entry type, e.g. `ftask.json` is a symlink or directory; or a file exists that must not). What is wrong, for `not-json` and `invalid`: `problems`, for a JSON file that is `invalid` — a list of `{field, reason}` as in `invalid-input`, but with `field` a JSON Pointer into the file (e.g. `/updated_at`), sorted the same way, and at most the first 20, with `problems_truncated: true` when more were found; or `detail`, a human-readable string — why the file is `not-json`, or why the config, which is not JSON, is `invalid`. `unexpected-file` has neither. |
 | `io` | The environment refused an operation: an unreadable file, permission denied, disk full, read-only filesystem, and similar. An OS error with no symbolic name is `internal`, not `io`. | `path`: built from the root as stored (see [Root path](design-spec.md#root-path)), or the config's own path for an error on the config; `code`: the symbolic OS error, e.g. `ENOSPC`, never a number. |
@@ -333,7 +333,7 @@ A finding is a problem with the tree that [`doctor`](#doctor) reports and [`repa
 | Kind | Class | One item per | `paths` | `ids` | Other fields | `action` |
 |---|---|---|---|---|---|---|
 | `temp-leftover` | auto | ftask temp file or folder (its name starts with `.ftask-tmp-`) anywhere under the root: a write's leftover file, or the folder an interrupted [`delete-folder`](#delete-folder) renamed aside. Its contents are not looked at. | the entry | none | — | `remove` |
-| `metadata-missing` | on-request | root with no `ftask.json`: one item. | where `ftask.json` belongs | none | `last_id`: the highest ID in any task filename, or `0` | `create-metadata` |
+| `metadata-missing` | on-request | root with no `ftask.json`: one item. | where `ftask.json` belongs | none | `last_id`: the highest ID in any task filename, or `0` | `create-metadata`; `null` while any folder can't be listed, since a task in it may have a higher ID |
 | `metadata-unusable` | manual | root whose `ftask.json` is unusable: one item. | `ftask.json` | none | `error`: the error every operation that requires a usable root fails with — `corrupt` (with its full `problems` or `detail`), `unsupported-format`, or `io` | `null` |
 | `id-above-last-id` | auto | task file whose filename ID is above `last_id`. Only when `ftask.json` is usable. | the task file | its ID | `last_id`: the highest ID in any task filename | `raise-last-id` |
 | `dangling-reference` | auto | pair of a task file and an ID in its `blocked_by` that names no task, as the [warning](#warning-kinds) of that name. Not reported while any folder can't be listed, since the task may be in it. | the referring task file | `[referring, missing]`, in that order | — | `remove-reference` |
@@ -1034,7 +1034,7 @@ Present only when an error (e.g. `io`) comes after at least one repair. Each rep
 **Crash behavior:** steps run in this order, one item at a time:
 
 1. `temp-leftover` items are removed. A crash while a temp folder is being removed leaves part of it, still a `temp-leftover`.
-2. `ftask.json` is created, when `kinds` names `metadata-missing`.
+2. `ftask.json` is created, when `kinds` names `metadata-missing` and its item's `action` is not `null`.
 3. `last_id` is raised.
 4. `dangling-reference` items are removed, one task file at a time.
 5. `orphan-notes` items are removed. Each is checked again just before: an `empty` one must still be empty, a `linked` one still the same file as its task's notes. One that changed is left, and reported among the remaining findings.
@@ -1160,13 +1160,13 @@ Permanently remove a folder and everything under it, and remove the IDs of the t
 **Preconditions:**
 
 - `folder` exists.
-- Without `recursive`, `folder` holds no task and no folder. Entries that count as neither — hidden entries, editor side files, a `.md` without a task file — don't make it non-empty, and are removed with it.
+- Without `recursive`, `folder` holds nothing but hidden entries and empty `.md` files, which are removed with it. A task, a folder, or any other entry — a user's file, an editor's backup, a `.md` with text but no task file — makes it non-empty, since it may be the user's only copy.
 - No task under `folder` has an ID with more than one task file, anywhere in the tree. A write must know which task it removes.
 - No task under `folder` has an ID above `last_id`: that state only arises from a system crash or an outside change, and removing the task would let its ID be reissued undetectably (see [Task IDs](design-spec.md#task-ids)).
 
 The tasks under `folder` may be open or complete, and their task files may be unusable: `delete-folder` needs only their filenames, never their contents.
 
-**Needed files:** the entries along `folder`'s path ([path walk](#path-walk)); the names of every entry under `folder`, at every depth; and, outside `folder`, every task file whose `blocked_by` names a task under it — those are rewritten. It lists everything under `folder` first, and fails with `io` if it meets a folder there it can't list: it must know every ID it removes. If `folder` holds a task, it then walks the rest of the tree — there is no index — and fails with `io` on a folder it can't list there too, since it must find every reference; if `folder` holds none, nothing outside it is read. Relevant files: every other task file outside `folder` — one that is unusable may hold a reference that can't be removed, so it is a warning, and the reference is left for [`doctor`](#doctor).
+**Needed files:** the entries along `folder`'s path ([path walk](#path-walk)); the names of every entry under `folder`, at every depth — and, without `recursive`, the type and size of each entry directly in it; and, outside `folder`, every task file whose `blocked_by` names a task under it — those are rewritten. It lists everything under `folder` first, and fails with `io` if it meets a folder there it can't list: it must know every ID it removes. If `folder` holds a task, it then walks the rest of the tree — there is no index — and fails with `io` on a folder it can't list there too, since it must find every reference; if `folder` holds none, nothing outside it is read. Relevant files: every other task file outside `folder` — one that is unusable may hold a reference that can't be removed, so it is a warning, and the reference is left for [`doctor`](#doctor).
 
 **Effects:**
 
@@ -1209,7 +1209,7 @@ Tasks that were blocked only by tasks under `folder` become ready, as they would
 | `environment`, `not-initialized`, `corrupt`, `unsupported-format` | The config can't be located, or the root is not usable (see [Root states](#root-states)). |
 | `busy` | Another write holds the write lock. |
 | `not-found`, `corrupt` | `folder` fails the [path walk](#path-walk) (`not-found`, `folders`: the outermost missing folder; or `corrupt`, `reason`: `unexpected-file`). |
-| `conflict` | (`rule`: `not-empty`) `recursive` is false and `folder` holds a task or folder. `ids`: the tasks under `folder`, ascending (empty if it holds only folders). |
+| `conflict` | (`rule`: `not-empty`) `recursive` is false and `folder` holds a task, a folder, or another entry that is neither hidden nor an empty `.md`. `ids`: the tasks under `folder`, ascending (empty if it holds none). |
 | `conflict` | (`rule`: `duplicate-id`) A task under `folder` has an ID with more than one task file. `ids`: every such ID, ascending. |
 | `conflict` | (`rule`: `id-above-last-id`) A task under `folder` has an ID above `last_id`. `ids`: every such ID, ascending. Run [`repair`](#repair) first, which raises `last_id`. |
 
@@ -1381,7 +1381,7 @@ Create a new, open task.
 
 **Additional validation:** `title` is trimmed, then validated, per [Titles](design-spec.md#titles). `id`, `schema`, `created_at`, `completed_at`, and `updated_at` are never input — ftask sets them.
 
-**Preconditions:** `folder` exists; every ID in `blocked_by` names an existing task, open or complete. A `blocked_by` ID that has several task files exists.
+**Preconditions:** `folder` exists; every ID in `blocked_by` names an existing task, open or complete. A `blocked_by` ID that has several task files exists. Every ID in `blocked_by` is at most `last_id`: one above it only arises from a system crash or an outside change, and the new task could be given that ID and block itself (see [Task IDs](design-spec.md#task-ids)).
 
 **Needed files:** the entries along `folder`'s path ([path walk](#path-walk)), and the task files whose filename ID is in `blocked_by`. When `blocked_by` is non-empty, `create` walks the whole tree to look its IDs up, and fails with `io` if it meets a folder it can't list; when `blocked_by` is empty, `create` does not walk the tree. Relevant files: the same task files — an ID in `blocked_by` with more than one task file is a warning, not an error.
 
@@ -1408,7 +1408,10 @@ Create a new, open task.
 | `busy` | Another write holds the write lock. |
 | `not-found`, `corrupt` | `folder` fails the [path walk](#path-walk) (`not-found`, or `corrupt` with `reason` `unexpected-file`); or an ID in `blocked_by` has no task file (`not-found`). A missing folder and missing blockers are reported in one `not-found`. |
 | `corrupt`, `unsupported-format` | A needed task file is corrupt or has an unsupported `schema`; or the new task's task file already exists in `folder` (`corrupt`, `reason`: `unexpected-file`). |
+| `conflict` | (`rule`: `id-above-last-id`) An ID in `blocked_by` is above `last_id`. `ids`: every such ID, ascending. Run [`repair`](#repair) first, which raises `last_id`. |
 | `conflict` | (`rule`: `id-exhausted`) The next ID would exceed the [ID ceiling](design-spec.md#task-ids). |
+
+The `conflict` rules are checked in the order listed; the first that applies is reported.
 
 **Warnings:**
 
@@ -1516,7 +1519,7 @@ A task may have a **`ref`**: a name, local to the batch, that later tasks in it 
 
 Like every `invalid-input`, every problem in every task is reported, sorted by `field`, the first 20 listed.
 
-**Preconditions:** every task's folder either exists or can be created: the [path walk](#path-walk) meets no entry that is not a plain directory, or is a symlink. Every integer in any `blocked_by` names an existing task, open or complete. An ID with several task files exists. `last_id` plus the number of tasks is within the [ID ceiling](design-spec.md#task-ids).
+**Preconditions:** every task's folder either exists or can be created: the [path walk](#path-walk) meets no entry that is not a plain directory, or is a symlink. Every integer in any `blocked_by` names an existing task, open or complete, and is at most `last_id`, as for [`create`](#create). An ID with several task files exists. `last_id` plus the number of tasks is within the [ID ceiling](design-spec.md#task-ids).
 
 **Needed files:** the entries along each distinct folder's path ([path walk](#path-walk)), up to the first missing one, and the task files whose filename ID is an integer in any `blocked_by`. When any `blocked_by` holds an integer, `create-batch` walks the whole tree once to look them up, and fails with `io` if it meets a folder it can't list; otherwise it does not walk the tree. Relevant files: the same task files — an ID with more than one task file is a warning, not an error.
 
@@ -1582,7 +1585,10 @@ The tasks themselves are not returned: the caller wrote them, and the result of 
 | `busy` | Another write holds the write lock. |
 | `not-found`, `corrupt` | An entry on a folder's path is not a plain directory, or is a symlink (`corrupt`, `reason`: `unexpected-file`); or an integer in a `blocked_by` has no task file (`not-found`, `ids`: every missing one, across all tasks). A missing folder is never an error: it is created. |
 | `corrupt`, `unsupported-format` | A needed task file is corrupt or has an unsupported `schema`; or a new task's task file already exists in its folder (`corrupt`, `reason`: `unexpected-file`, with a `partial`). |
+| `conflict` | (`rule`: `id-above-last-id`) An integer in a `blocked_by` is above `last_id`. `ids`: every such ID, across all tasks, ascending. Run [`repair`](#repair) first, which raises `last_id`. |
 | `conflict` | (`rule`: `id-exhausted`) The last of the *n* IDs would exceed the ID ceiling. Checked before `last_id` is raised, so nothing is consumed. |
+
+The `conflict` rules are checked in the order listed; the first that applies is reported.
 
 Every row but the `corrupt` for an existing task file is found before anything is written. That one, and `io`, can occur partway through the writes, and come with a `partial` when anything had been written.
 
@@ -2363,7 +2369,7 @@ Move a task into a folder. Its ID, fields, and notes go with it; moving a task t
 
 **Additional validation:** none.
 
-**Preconditions:** exactly one task file has ID `id`; the task may be open or complete. `to` exists, or `parents` is true, as for [`create-folder`](#create-folder):
+**Preconditions:** exactly one task file has ID `id`; the task may be open or complete. No `.md` with text is in `to` under the task's name, unless it is the same file (same device and inode) as the task's notes — what an interrupted move leaves. `to` exists, or `parents` is true, as for [`create-folder`](#create-folder):
 
 | State of `to` | Outcome |
 |---|---|
@@ -2376,7 +2382,7 @@ Move a task into a folder. Its ID, fields, and notes go with it; moving a task t
 
 **Effects:**
 
-- The task is in `to`, with every field (including `updated_at`: the folder is not stored in the task file), its task file's `schema`, and its `.md` unchanged. A stray `.md` already in `to` under the task's name — left by an editor after an earlier move (see [Assumptions](design-spec.md#assumptions)) — is replaced by the task's notes, or removed if the task has none.
+- The task is in `to`, with every field (including `updated_at`: the folder is not stored in the task file), its task file's `schema`, and its `.md` unchanged. A stray `.md` already in `to` under the task's name that is empty, or the same file as the task's notes, is replaced by the task's notes, or removed if the task has none. One with text may hold edits an editor saved after an earlier move (see [Assumptions](design-spec.md#assumptions)), so it is a `conflict`, never overwritten.
 - With `parents`, `to` and every folder above it exist.
 - If the task was already in `to`: nothing changes.
 
@@ -2423,6 +2429,9 @@ The task after the operation, per the [Task](#task) schema, plus `from`, `create
 | `not-found`, `corrupt` | `to` fails the [path walk](#path-walk) while `parents` is false (`not-found`, or `corrupt` with `reason` `unexpected-file`); or no task file has ID `id` (`not-found`). A missing folder and a missing task are reported in one `not-found`. |
 | `corrupt`, `unsupported-format` | The task file is unusable. |
 | `conflict` | (`rule`: `duplicate-id`) More than one task file has ID `id` (`ids`: `[id]`). A write must know which task it moves; [`doctor`](#doctor) reports the copies, for a person to resolve first. |
+| `conflict` | (`rule`: `destination-exists`) A `.md` with text is in `to` under the task's name, and is not the same file as the task's notes (`ids`: `[id]`). Merge its text into the task's notes, or remove it, first; [`doctor`](#doctor) reports it as `orphan-notes` (`task-elsewhere`). |
+
+The `conflict` rules are checked in the order listed; the first that applies is reported.
 
 **Warnings:** none.
 
@@ -2446,11 +2455,11 @@ Present only when an error (e.g. `io`) comes after `parents` created at least on
 **Crash behavior:** a task is two files, which can't move in one step. Moving each with a plain `rename` would make the notes look lost if a crash fell between the two, whichever went first. So the notes are copied before they are removed:
 
 1. With `parents`, missing folders are created, outermost first.
-2. The `.md` is hard-linked into `to`, replacing any stray `.md` there. A [process crash](design-spec.md#crashes) here leaves the task in place with its notes, and a stray `.md` in `to` that a retry replaces.
+2. The `.md` is hard-linked into `to`, replacing an empty stray `.md` there, or a second name for the same notes. A [process crash](design-spec.md#crashes) here leaves the task in place with its notes, and a stray `.md` in `to` that a retry replaces.
 3. The task file is renamed into `to`. This is the moment the task moves; its notes are already there.
 4. The old `.md` is removed. A crash before this leaves a stray `.md` in the old folder, which reads ignore and `doctor` reports as `orphan-notes` (`linked`: a second name for the notes now at the task), which `repair` removes.
 
-A task with no `.md` skips steps 2 and 4, and instead removes any stray `.md` in `to` under its name before step 3, so a stray can never become its notes. The notes are never lost, and the tree always satisfies every invariant.
+A task with no `.md` skips steps 2 and 4, and instead removes an empty stray `.md` in `to` under its name before step 3, so a stray can never become its notes. The notes are never lost, and the tree always satisfies every invariant.
 
 **Retry safety:** safe. After `busy`, an error with `partial`, or a crash, rerunning completes the move. After success, rerunning finds the task already in `to`, changes nothing, and returns `changed: false`.
 

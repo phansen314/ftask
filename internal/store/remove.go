@@ -3,10 +3,12 @@ package store
 import (
 	"io/fs"
 	"path"
+	"strings"
 	"syscall"
 
 	"github.com/phansen314/ftask/internal/errs"
 	"github.com/phansen314/ftask/internal/fsys"
+	"github.com/phansen314/ftask/internal/model"
 )
 
 // Lstat reports the entry at rel without following a final symlink.
@@ -46,7 +48,7 @@ func (tx *Tx) Move(oldRel, newRel string) *errs.Error {
 // LinkOver makes newRel a hard link to the file at oldRel, replacing any
 // file already at newRel: linked to a temp name in newRel's folder, then
 // renamed over it, so newRel is never missing and never partial. The temp
-// link is removed if the rename fails.
+// link is removed afterwards, whether the rename did anything or not.
 func (tx *Tx) LinkOver(oldRel, newRel string) *errs.Error {
 	if e := tx.mustWrite("link " + oldRel); e != nil {
 		return e
@@ -59,6 +61,9 @@ func (tx *Tx) LinkOver(oldRel, newRel string) *errs.Error {
 		tx.root.Remove(tmp)
 		return tx.OSError(newRel, err)
 	}
+	// Renaming onto another name of the same file does nothing (POSIX) and
+	// leaves tmp behind; remove it. A failure leaves a temp-leftover.
+	tx.root.Remove(tmp)
 	return nil
 }
 
@@ -74,4 +79,28 @@ func (tx *Tx) Discard(rel string) *errs.Error {
 	}
 	tx.root.RemoveAll(tmp)
 	return nil
+}
+
+// HoldsOther reports whether folder f holds an entry that is neither hidden
+// nor an empty .md named like a task's notes: one that may be the user's own
+// data, which only a recursive delete-folder removes.
+func (tx *Tx) HoldsOther(f model.FolderPath) (bool, *errs.Error) {
+	rel := FolderRel(f)
+	entries, err := tx.root.ReadDir(rel)
+	if err != nil {
+		return false, tx.OSError(rel, err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, ".") {
+			continue
+		}
+		if notesFileName.MatchString(name) && e.Type().IsRegular() {
+			if fi, err := tx.root.Lstat(joinPath(rel, name)); err == nil && fi.Mode().IsRegular() && fi.Size() == 0 {
+				continue
+			}
+		}
+		return true, nil
+	}
+	return false, nil
 }

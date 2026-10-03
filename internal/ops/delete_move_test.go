@@ -195,7 +195,7 @@ func TestDeleteFolderCases(t *testing.T) {
 		setup       func(f *fixture)
 		want, files string
 	}{
-		{"empty", `{"folder": "/p"}`, func(f *fixture) { f.write("tasks/p/.keep", ""); f.write("tasks/p/x.txt", "") },
+		{"empty", `{"folder": "/p"}`, func(f *fixture) { f.write("tasks/p/.keep", ""); f.write("tasks/p/5.md", "") },
 			`{"folder":"/p","folders":["/p"],"ids":[],"dependents":[]}`, ""},
 		{"unusable task files go with it", `{"folder": "/p", "recursive": true}`, func(f *fixture) { f.write("tasks/p/5.json", "{"); f.task("", 6, false, 5) },
 			`{"folder":"/p","folders":["/p"],"ids":[5],"dependents":[6]}`, "6.json"},
@@ -218,6 +218,12 @@ func TestDeleteFolderCases(t *testing.T) {
 			`conflict {"rule":"not-empty","ids":[5,6]}`, "p/ p/5.json p/a/ p/a/6.json"},
 		{"not empty: a folder", `{"folder": "/p"}`, func(f *fixture) { f.write("tasks/p/a/.keep", "") },
 			`conflict {"rule":"not-empty","ids":[]}`, "p/ p/a/ p/a/.keep"},
+		{"not empty: a user's file", `{"folder": "/p"}`, func(f *fixture) { f.write("tasks/p/x.txt", "") },
+			`conflict {"rule":"not-empty","ids":[]}`, "p/ p/x.txt"},
+		{"not empty: notes with text and no task", `{"folder": "/p"}`, func(f *fixture) { f.write("tasks/p/77.md", "notes") },
+			`conflict {"rule":"not-empty","ids":[]}`, "p/ p/77.md"},
+		{"not empty: a folder that isn't ftask's", `{"folder": "/p"}`, func(f *fixture) { f.write("tasks/p/Photos/img.txt", "precious") },
+			`conflict {"rule":"not-empty","ids":[]}`, "p/ p/Photos/ p/Photos/img.txt"},
 		{"duplicated", `{"folder": "/p", "recursive": true}`, func(f *fixture) { f.task("p", 5, false); f.task("", 5, false); f.task("p", 6, false) },
 			`conflict {"rule":"duplicate-id","ids":[5]}`, "5.json p/ p/5.json p/6.json"},
 		{"above last_id", `{"folder": "/p", "recursive": true}`, func(f *fixture) { f.task("p", 101, false); f.task("p", 102, false) },
@@ -279,15 +285,24 @@ func TestMoveCases(t *testing.T) {
 			short("/p", "/", "", true), "p/ p/.keep p/5.json"},
 		{"already there", `{"id": 5, "to": "/p"}`, func(f *fixture) { f.task("p", 5, false); f.write("tasks/p/5.md", "n") },
 			short("/p", "/p", "", false), "p/ p/5.json p/5.md"},
-		{"a stray .md is replaced by the notes", `{"id": 5, "to": "/p"}`, func(f *fixture) {
+		{"an empty stray .md is replaced by the notes", `{"id": 5, "to": "/p"}`, func(f *fixture) {
 			f.task("", 5, false)
 			f.write("tasks/5.md", "mine")
-			f.write("tasks/p/5.md", "stray")
+			f.write("tasks/p/5.md", "")
 		}, short("/p", "/", "", true), "p/ p/5.json p/5.md"},
-		{"a stray .md is removed when there are no notes", `{"id": 5, "to": "/p"}`, func(f *fixture) {
+		{"an empty stray .md is removed when there are no notes", `{"id": 5, "to": "/p"}`, func(f *fixture) {
 			f.task("", 5, false)
-			f.write("tasks/p/5.md", "stray")
+			f.write("tasks/p/5.md", "")
 		}, short("/p", "/", "", true), "p/ p/5.json"},
+		{"a stray .md with text is a conflict", `{"id": 5, "to": "/p"}`, func(f *fixture) {
+			f.task("", 5, false)
+			f.write("tasks/5.md", "mine")
+			f.write("tasks/p/5.md", "edits")
+		}, `conflict {"rule":"destination-exists","ids":[5]}`, "5.json 5.md p/ p/5.md"},
+		{"a stray .md with text is a conflict when there are no notes", `{"id": 5, "to": "/p"}`, func(f *fixture) {
+			f.task("", 5, false)
+			f.write("tasks/p/5.md", "edits")
+		}, `conflict {"rule":"destination-exists","ids":[5]}`, "5.json p/ p/5.md"},
 		{"blockers and dependents are not read", `{"id": 5, "to": "/p"}`, func(f *fixture) {
 			f.task("", 5, false, 6)
 			f.write("tasks/6.json", "{")
@@ -321,6 +336,23 @@ func TestMoveCases(t *testing.T) {
 				t.Errorf("files %q, want %q", got, tc.files)
 			}
 		})
+	}
+}
+
+// A .md in to that is already a second name for the notes — an interrupted
+// move's link — is taken as the notes, and the temp link leaves nothing.
+func TestMoveOntoItsLink(t *testing.T) {
+	f := newFixture(t)
+	f.task("", 5, false)
+	f.write("tasks/5.md", "mine")
+	f.mkdir("tasks/p")
+	f.link("tasks/5.md", "tasks/p/5.md")
+	f.op("move", `{"id": 5, "to": "/p"}`)
+	if got := f.entries(); got != "p/ p/5.json p/5.md" {
+		t.Errorf("entries %q", got)
+	}
+	if got := f.read("tasks/p/5.md"); got != "mine" {
+		t.Errorf("notes %q", got)
 	}
 }
 

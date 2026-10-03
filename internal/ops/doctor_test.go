@@ -351,6 +351,25 @@ func TestRepairMetadataMissing(t *testing.T) {
 	}
 }
 
+// ftask.json is not rebuilt while a folder can't be listed: a task in it may
+// have a higher ID, which a too-low last_id would reissue.
+func TestRepairMetadataMissingUnreadable(t *testing.T) {
+	f := newFixture(t)
+	f.remove("tasks/ftask.json")
+	f.task("", 3, false)
+	f.task("q", 4, false)
+	f.fail(fsys.OpReadDir, "q", syscall.EACCES)
+	got := f.op("repair", `{"kinds": ["metadata-missing"]}`)
+	want := `{"repaired":[],"healthy":false,"findings":[{"kind":"metadata-missing","class":"on-request","count":1,"truncated":false,"items":[` +
+		`{"paths":["~/tasks/ftask.json"],"ids":[],"action":null,"suggest":"fix the unreadable folders first; then ftask repair --kinds metadata-missing","last_id":3}]},`
+	if !strings.HasPrefix(got, want) {
+		t.Errorf("repair:\ngot  %s\nwant %s...", got, want)
+	}
+	if got := f.read("tasks/ftask.json"); got != "<none>" {
+		t.Errorf("ftask.json %q", got)
+	}
+}
+
 // No dangling reference is reported, or removed, while a folder can't be
 // listed: the blocker may be in it.
 func TestDoctorUnreadableFolder(t *testing.T) {

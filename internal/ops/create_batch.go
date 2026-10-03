@@ -206,9 +206,9 @@ type CreateBatchPartial struct {
 // runCreateBatch creates the batch under the write lock. Everything is
 // checked first: the path walk of each folder in tree order (a missing
 // folder is to be created, not an error), the existing blockers looked up
-// and then loaded, then the ID ceiling. Every task file is encoded before
-// anything is written, so a failure midway is always a write's, with its
-// partial. Then it writes in the order its Crash behavior relies on: the
+// and then loaded, then checked against last_id, then the ID ceiling.
+// Every task file is encoded before anything is written, so a failure
+// midway is always a write's, with its partial. Then it writes in the order its Crash behavior relies on: the
 // missing folders in tree order, last_id once, then each task's file and
 // .md in input order, so a failure leaves a prefix of the batch.
 func runCreateBatch(env Env, in CreateBatchInput, w *errs.Collector) (any, *errs.Error) {
@@ -235,6 +235,9 @@ func runCreateBatch(env Env, in CreateBatchInput, w *errs.Collector) (any, *errs
 				return errs.NotFound(nil, missingIDs, nil)
 			}
 			if e := requireIDs(tx, found); e != nil {
+				return e
+			}
+			if e := aboveLastID(tx, existing); e != nil {
 				return e
 			}
 		}

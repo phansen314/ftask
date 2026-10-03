@@ -169,6 +169,23 @@ func requireIDs(tx *store.Tx, found map[model.ID][]*store.Loaded) *errs.Error {
 	return nil
 }
 
+// aboveLastID is the id-above-last-id conflict for the blockers in ids above
+// last_id, ascending, or nil if there are none. Only a crash or an outside
+// change leaves one, and a new task could be given its ID and block itself.
+func aboveLastID(tx *store.Tx, ids []model.ID) *errs.Error {
+	var above []int64
+	for _, id := range ids {
+		if int64(id) > tx.Meta().LastID {
+			above = append(above, int64(id))
+		}
+	}
+	if above == nil {
+		return nil
+	}
+	slices.Sort(above)
+	return errs.Conflict(errs.RuleIDAboveLastID, slices.Compact(above))
+}
+
 // warnDuplicates records a duplicate-id warning for each ID found with
 // several copies.
 func warnDuplicates(tx *store.Tx, found map[model.ID][]*store.Loaded) {
