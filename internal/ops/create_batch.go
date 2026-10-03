@@ -84,10 +84,10 @@ func decodeCreateBatch(f *model.Fields, p *model.Problems) any {
 			bptr := jsonio.Pointer(ptr+"/blocked_by", strconv.Itoa(b.at))
 			j, found := refs[b.ref]
 			switch {
-			case found && j < i:
-				t.Earlier = append(t.Earlier, j)
 			case b.ref == t.Ref:
 				p.AddAdditional(bptr, "names this task itself; a task cannot block itself")
+			case found && j < i:
+				t.Earlier = append(t.Earlier, j)
 			case laterRef(items, i, b.ref):
 				p.AddAdditional(bptr, "names a later task in the batch; list a task's blockers before it")
 			default:
@@ -204,12 +204,13 @@ type CreateBatchPartial struct {
 }
 
 // runCreateBatch creates the batch under the write lock. Everything is
-// checked first, in create's precedence order: the path walk of each
-// folder in tree order (a missing folder is to be created, not an error),
-// the existing blockers looked up and then loaded, then the ID ceiling.
-// Then it writes in the order its Crash behavior relies on: the missing
-// folders in tree order, last_id once, then each task's file and .md in
-// input order, so a failure leaves a prefix of the batch.
+// checked first: the path walk of each folder in tree order (a missing
+// folder is to be created, not an error), the existing blockers looked up
+// and then loaded, then the ID ceiling. Every task file is encoded before
+// anything is written, so a failure midway is always a write's, with its
+// partial. Then it writes in the order its Crash behavior relies on: the
+// missing folders in tree order, last_id once, then each task's file and
+// .md in input order, so a failure leaves a prefix of the batch.
 func runCreateBatch(env Env, in CreateBatchInput, w *errs.Collector) (any, *errs.Error) {
 	out := CreateBatchOutput{IDs: []model.ID{}, FoldersCreated: []model.FolderPath{}}
 	e := store.Write(env.Env, w, func(tx *store.Tx) *errs.Error {
@@ -242,6 +243,28 @@ func runCreateBatch(env Env, in CreateBatchInput, w *errs.Collector) (any, *errs
 			return errs.Conflict(errs.RuleIDExhausted, nil)
 		}
 
+		ids := make([]model.ID, len(in.Tasks))
+		for i := range ids {
+			ids[i] = model.ID(last + 1 + int64(i))
+		}
+		now := model.TimestampOf(env.Clock())
+		files := make([][]byte, len(in.Tasks))
+		for i, t := range in.Tasks {
+			blockedBy := slices.Clone(t.BlockedBy)
+			for _, j := range t.Earlier {
+				blockedBy = append(blockedBy, ids[j])
+			}
+			tf := model.TaskFile{
+				Schema: model.TaskSchema, ID: ids[i], Title: t.Title, Priority: t.Priority,
+				CreatedAt: now, UpdatedAt: now, BlockedBy: blockedBy, Tags: t.Tags, Extra: t.Extra,
+			}
+			data, err := tf.Encode()
+			if err != nil {
+				return errs.Internal("encoding the task file: " + err.Error())
+			}
+			files[i] = data
+		}
+
 		partial := func(e *errs.Error, consumed []model.ID) *errs.Error {
 			if len(out.FoldersCreated) == 0 && consumed == nil {
 				return e
@@ -260,29 +283,12 @@ func runCreateBatch(env Env, in CreateBatchInput, w *errs.Collector) (any, *errs
 				out.FoldersCreated = append(out.FoldersCreated, f)
 			}
 		}
-		ids := make([]model.ID, len(in.Tasks))
-		for i := range ids {
-			ids[i] = model.ID(last + 1 + int64(i))
-		}
 		if e := tx.SetLastID(int64(ids[len(ids)-1])); e != nil {
 			return partial(e, nil)
 		}
-		now := model.TimestampOf(env.Clock())
 		for i, t := range in.Tasks {
-			blockedBy := slices.Clone(t.BlockedBy)
-			for _, j := range t.Earlier {
-				blockedBy = append(blockedBy, ids[j])
-			}
 			loc := store.Location{Folder: t.Folder, ID: ids[i]}
-			tf := model.TaskFile{
-				Schema: model.TaskSchema, ID: ids[i], Title: t.Title, Priority: t.Priority,
-				CreatedAt: now, UpdatedAt: now, BlockedBy: blockedBy, Tags: t.Tags, Extra: t.Extra,
-			}
-			data, err := tf.Encode()
-			if err != nil {
-				return errs.Internal("encoding the task file: " + err.Error())
-			}
-			if e := tx.Create(loc.Rel(), data); e != nil {
+			if e := tx.Create(loc.Rel(), files[i]); e != nil {
 				return partial(e, ids)
 			}
 			out.IDs = append(out.IDs, ids[i])
