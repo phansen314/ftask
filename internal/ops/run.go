@@ -38,6 +38,7 @@ var runners = map[string]runner{
 	"show":          typed(runShow),
 	"init":          typed(runInit),
 	"create":        typed(runCreate),
+	"create-batch":  typed(runCreateBatch),
 	"create-folder": typed(runCreateFolder),
 	"complete":      typed(runComplete),
 	"reopen":        typed(runReopen),

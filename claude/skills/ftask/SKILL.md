@@ -29,13 +29,13 @@ Branch on `.error.kind`, not the exit code. **Always tell the user about any `wa
 | 0 | Success | — |
 | 1 | Operation error; see `.error.kind` | See below |
 | 2 | Usage error (bad command line) | Fix the command; check `ftask <cmd> --help` |
-| 3 or other | Outcome unknown (killed, stdout lost) | Reads: rerun. `create`: check with `list` before rerunning, or it may duplicate. Other writes are safe to rerun. |
+| 3 or other | Outcome unknown (killed, stdout lost) | Reads: rerun. `create` and `create-batch`: check with `list` before rerunning, or they may duplicate. Other writes are safe to rerun. |
 
 Error kinds worth handling:
 
 - `busy` — another write holds the lock (another session, maybe). Retry briefly:
   `for i in 1 2 3 4 5; do out=$(ftask complete 42); jq -e '.error.kind != "busy"' <<<"$out" >/dev/null && break; sleep 0.3; done; echo "$out"`
-- `not-found` — `.error.details.ids` / `.folders` name what's missing. Folders are never created implicitly.
+- `not-found` — `.error.details.ids` / `.folders` name what's missing. Folders are created only by `create-folder`, `-p`, and `create-batch`.
 - `invalid-input` — `.error.details.problems[]` lists every bad field.
 - `conflict` with `rule: "acyclic"` — the block would make a cycle; `.error.details.cycles` shows it.
 - `conflict` with `rule: "not-empty"` — `delete-folder` without `-r` on a folder that holds tasks or folders. Don't add `-r` on your own: ask the user.
@@ -109,6 +109,25 @@ ftask unblock 42 --blockers 41
 ftask reopen 42
 ```
 
+### A plan: several tasks at once
+
+When a request breaks down into several tasks, especially with dependencies among them, create them in **one** `create-batch` instead of a chain of `create`s. Give a task a `ref` to let later tasks in the batch wait on it; a `blocked_by` item is an existing task's ID (a number) or an earlier task's ref (a string). List blockers before what they block.
+
+```sh
+ftask create-batch -i - <<'EOF'
+{"folder": "/proj/api", "tasks": [
+  {"ref": "schema", "title": "Design schema", "priority": 2, "tags": ["db"]},
+  {"ref": "migrate", "title": "Write migrations", "blocked_by": ["schema"]},
+  {"title": "Deploy", "blocked_by": ["migrate", 41], "notes": "Needs a maintenance window."}
+]}
+EOF
+```
+
+- The result is small: `ids` (in input order), `refs` (ref → ID), and `folders_created`. Folders a task names are **created if missing**, so check `folders_created` for one you didn't mean (a typo) and tell the user.
+- Everything is checked before anything is written: an `invalid-input` names every bad field as `/tasks/<i>/…`, and a `not-found` every missing ID. Fix and rerun.
+- To make an existing task wait on the plan, `block` it afterwards: `ftask block 40 --blockers <ids>`.
+- An error with `.error.partial` stopped partway through: the first `len(partial.ids)` tasks were created, the rest weren't. Don't rerun the whole batch (it would duplicate them). Rerun only the rest, with refs to created tasks replaced by their IDs from `partial.refs`, and tell the user what happened.
+
 Rules the commands enforce:
 
 - **Folder paths are exact**, from the tree's root: `/`, `/proj/api`. Never `proj/api` or `/proj/`, and never derived from the working directory. Segments and tags: lowercase letters, digits, hyphens.
@@ -137,7 +156,7 @@ ftask delete-folder -r /proj/old               # .result.ids: what went; .result
 
 - **Never** hand-edit, create, rename, or delete anything under the root except a task's notes `.md` — use `move`, `move-folder`, `delete`, and `delete-folder`. Task `.json` files and `ftask.json` belong to ftask; a hand edit can break invariants no command will repair.
 - **Never run `ftask pick`.** It's an interactive picker that needs the user's terminal. When the user wants to choose tasks themselves, suggest they run it in their own terminal (`ftask pick > picked.json`, say) and hand you the output. That envelope is read like any other: `result.tasks` (or `result.folders`) is their selection, `result.missing` what vanished meanwhile, and `result.actions` every change they made in the picker, each with its own `output` envelope, failures included; `result.notes_edited` lists tasks whose notes they edited. A failed `pick` (`cancelled`, `incomplete`, or `unavailable` after fzf ran) still lists its changes, in `.error.details.actions`.
-- Don't pass `--input` unless building input from other JSON; flags are clearer.
+- Don't pass `--input` unless building input from other JSON, or for `create-batch`, which takes nothing else; flags are clearer.
 - Don't create tasks the user didn't ask for. When a follow-up turns up during other work, offer it: "Want me to add a task for X?"
 
 ## Conventions

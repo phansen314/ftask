@@ -72,6 +72,8 @@ type crashCase struct {
 	// outside change repair repairs.
 	seed func(t *testing.T, root string)
 	args []string
+	// stdin, if set, is the write's standard input, for -i -.
+	stdin string
 	// order is what the write changes, relative to the home, in the order
 	// its Crash behavior says the changes land. Paths in one group land in
 	// one call.
@@ -116,6 +118,20 @@ var crashCases = []crashCase{
 				return 0, `"id":1,`, true
 			}
 			return 0, `"id":2,`, false
+		},
+	},
+	{
+		name:  "create-batch",
+		args:  []string{"create-batch", "-i", "-"},
+		stdin: `{"tasks": [{"ref": "a", "title": "x", "folder": "/p", "notes": "n"}, {"title": "y", "blocked_by": ["a"], "notes": "m"}]}`,
+		order: [][]string{{"tasks/p"}, {"tasks/ftask.json"}, {"tasks/p/1.json"}, {"tasks/p/1.md"}, {"tasks/2.json"}, {"tasks/2.md"}},
+		// Not safe after a crash once IDs are consumed: a rerun creates the
+		// batch again, with new IDs.
+		rerun: func(stage int) (int, string, bool) {
+			if stage <= 1 {
+				return 0, `"ids":[1,2]`, true
+			}
+			return 0, `"ids":[3,4]`, false
 		},
 	},
 	{
@@ -290,6 +306,15 @@ func findingKinds(t *testing.T, cmd *exec.Cmd) []string {
 	return kinds
 }
 
+// cmd prepares c's write in tr, with its stdin.
+func (c crashCase) cmd(tr *tree) *exec.Cmd {
+	cmd := tr.cmd(c.args...)
+	if c.stdin != "" {
+		stdin(cmd, c.stdin)
+	}
+	return cmd
+}
+
 // fixture is the tree c runs against, in a home of its own.
 func (c crashCase) fixture(t *testing.T) *tree {
 	t.Helper()
@@ -341,7 +366,7 @@ func TestCrashInjection(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			ref := c.fixture(t)
 			before := snap(t, ref.home)
-			steps(t, []step{{ref.cmd(c.args...), 0, `"ok":true`}})
+			steps(t, []step{{c.cmd(ref), 0, `"ok":true`}})
 			after := snap(t, ref.home)
 			stages := c.stages(before, after)
 			if !maps.Equal(stages[len(stages)-1], after.files) {
@@ -355,7 +380,7 @@ func TestCrashInjection(t *testing.T) {
 					t.Fatal("still crashing at k=50")
 				}
 				tr := c.fixture(t)
-				cmd := tr.cmd(c.args...)
+				cmd := c.cmd(tr)
 				cmd.Env = append(cmd.Env, "FTASK_E2E_CRASH_BEFORE="+strconv.Itoa(k))
 				r := run(t, cmd)
 				ws, _ := cmd.ProcessState.Sys().(syscall.WaitStatus)
@@ -393,7 +418,7 @@ func TestCrashInjection(t *testing.T) {
 					c.diagnose(t, tr, stage, crashed)
 				}
 				code, want, same := c.rerun(stage)
-				steps(t, []step{{tr.cmd(c.args...), code, want}})
+				steps(t, []step{{c.cmd(tr), code, want}})
 				s := snap(t, tr.home)
 				if same && !maps.Equal(s.files, after.files) {
 					t.Errorf("k=%d: rerun left %v, want %v", k, s.files, after.files)

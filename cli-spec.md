@@ -471,6 +471,38 @@ gh issue view 12 --json body -q .body | ftask create 'Fix login bug' --notes-fil
 ftask create 'Wait on quote' --extra '{"status":"waiting"}'
 ```
 
+### create-batch
+
+Create several tasks in one call, with dependencies between them named by refs. Runs [`create-batch`](operations.md#create-batch).
+
+**Synopsis:** `ftask create-batch -i <file>`.
+
+**Operation:** [`create-batch`](operations.md#create-batch).
+
+**Arguments:** none. The tasks are a list of objects, which only `--input` can carry.
+
+**Options:** none beyond the [global options](#global-options). `--input` is required; without it, the command is a [usage error](#usage-errors).
+
+**Input:** none beyond `--input`, taken as-is.
+
+**Output:** Passthrough: `ids`, `refs` and `folders_created`.
+
+**Errors:** none beyond the operation's.
+
+**Examples:**
+
+```sh
+jq -n '{folder: "/work/api", tasks: [
+  {ref: "schema", title: "Design schema", priority: 2, tags: ["db"]},
+  {ref: "migrate", title: "Write migrations", blocked_by: ["schema"]},
+  {ref: "backfill", title: "Backfill old rows", blocked_by: ["migrate"]},
+  {title: "Deploy", blocked_by: ["migrate", "backfill", 12]}
+]}' | ftask create-batch -i -                     # creates /work/api if missing; .result.refs.schema is Design schema's ID
+
+ftask create-batch -i plan.json | jq -r '.result.ids | join(",")' \
+  | xargs ftask block 41 --blockers               # task 41 now waits on the whole plan
+```
+
 ### show
 
 Return one task by ID, with its readiness and where its notes live. Runs [`show`](operations.md#show).

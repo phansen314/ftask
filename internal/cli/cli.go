@@ -186,9 +186,12 @@ func newCommand(c *Command, env Env, result **ops.Envelope) *cobra.Command {
 }
 
 // checkShape reports what cobra cannot: --input together with a field
-// option, and a missing required option.
+// option, and a missing required option, --input included.
 func checkShape(c *Command, cmd *cobra.Command) error {
 	input := cmd.Flags().Changed("input")
+	if c.InputRequired && !input {
+		return usageErr(nil, "missing required option --input")
+	}
 	for _, o := range c.Options {
 		given := cmd.Flags().Changed(o.Name)
 		switch {

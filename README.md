@@ -80,6 +80,9 @@ ftask create 'Design schema' --folder /work/api --priority 2 --tags db
 ftask create 'Write migrations' --folder /work/api --blocked-by 1
 ftask frontier --limit 10 --fields id,title                       # the next ready tasks, in work order
 ftask complete 1
+jq -n '{folder: "/work/api", tasks: [                             # a plan in one call: refs name earlier tasks
+  {ref: "endpoints", title: "Add endpoints"},
+  {title: "Document endpoints", blocked_by: ["endpoints"]}]}' | ftask create-batch -i -
 ```
 
 ## Picking tasks yourself

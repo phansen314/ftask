@@ -192,6 +192,30 @@ func TestCreate(t *testing.T) {
 	}
 }
 
+// create-batch writes a plan: refs become IDs, folders are made, and the
+// tasks read back like any others.
+func TestCreateBatch(t *testing.T) {
+	tr := newTree(t)
+	same := tr.cmd
+	steps(t, []step{
+		{same("create", "Existing"), 0, `"id":1,`},
+		{stdin(same("create-batch", "-i", "-"), `{"folder": "/work/api", "tasks": [
+			{"ref": "schema", "title": "Design schema", "notes": "draft"},
+			{"ref": "migrate", "title": "Write migrations", "blocked_by": ["schema"]},
+			{"title": "Deploy", "folder": "/ops", "blocked_by": ["migrate", 1]}]}`),
+			0, `"result":{"ids":[2,3,4],"refs":{"schema":2,"migrate":3},"folders_created":["/ops","/work","/work/api"]}`},
+		{same("show", "4"), 0, `"blocked_by":[1,3],"tags":[],"extra":{},"folder":"/ops"`},
+		{same("frontier", "--fields", "id"), 0, `"tasks":[{"id":1},{"id":2}]`},
+		{stdin(same("create-batch", "-i", "-"), `{"tasks": [{"title": "x", "blocked_by": ["later"]}, {"ref": "later", "title": "y"}]}`),
+			1, `"field":"/tasks/0/blocked_by/0"`},
+		{same("create-batch"), 2, `"reason":"missing required option --input"`},
+		{same("info"), 0, `"last_id":4`},
+	})
+	if b, err := os.ReadFile(filepath.Join(tr.root(), "work", "api", "2.md")); err != nil || string(b) != "draft" {
+		t.Errorf("2.md: %q %v", b, err)
+	}
+}
+
 // create-folder makes the folders create then files tasks in.
 func TestCreateFolder(t *testing.T) {
 	same := newTree(t).cmd

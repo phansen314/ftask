@@ -113,6 +113,18 @@ var commands = []Command{
   ftask create 'Wait on quote' --extra '{"status":"waiting"}'`,
 	},
 	{
+		Name:          "create-batch",
+		Op:            "create-batch",
+		Summary:       "Create several tasks in one call, with dependencies between them named by refs",
+		InputRequired: true,
+		Example: `  jq -n '{folder: "/work/api", tasks: [
+    {ref: "schema", title: "Design schema", priority: 2, tags: ["db"]},
+    {ref: "migrate", title: "Write migrations", blocked_by: ["schema"]},
+    {title: "Deploy", blocked_by: ["migrate", 12]}
+  ]}' | ftask create-batch -i -        # creates /work/api if missing; .result.refs.schema is Design schema's ID
+  ftask create-batch -i plan.json | jq -r '.result.ids | join(",")' | xargs ftask block 41 --blockers`,
+	},
+	{
 		Name:    "show",
 		Op:      "show",
 		Summary: "Return one task by ID, with its readiness and where its notes live",

@@ -92,6 +92,26 @@ var midwayCases = []midwayCase{
 		},
 	},
 	{
+		name:  "create-batch",
+		setup: func(*fixture) {},
+		input: `{"tasks": [{"ref": "a", "title": "x", "folder": "/p/q", "notes": "n"}]}`,
+		order: [][]string{{"tasks/p"}, {"tasks/p/q"}, {"tasks/ftask.json"}, {"tasks/p/q/101.json"}, {"tasks/p/q/101.md"}},
+		// One task: a failure writing a .md is a warning and the batch goes
+		// on, so with several tasks the stages would not be in a line
+		// (TestCreateBatchCases has those partials). Once the task file is
+		// written, the task is created.
+		outcome: func(stage int) string {
+			return []string{
+				"error",
+				`error partial {"folders_created":["/p"],"consumed":[],"ids":[],"refs":{}}`,
+				`error partial {"folders_created":["/p","/p/q"],"consumed":[],"ids":[],"refs":{}}`,
+				`error partial {"folders_created":["/p","/p/q"],"consumed":[101],"ids":[],"refs":{}}`,
+				"ok",
+				"ok",
+			}[stage]
+		},
+	},
+	{
 		name:  "create-folder",
 		setup: func(*fixture) {},
 		input: `{"folder": "/a/b", "parents": true}`,

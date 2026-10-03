@@ -648,6 +648,40 @@ func TestCreateFolderInput(t *testing.T) {
 	}
 }
 
+// create-batch's input is only --input, which is required.
+func TestCreateBatchInput(t *testing.T) {
+	saved := runOp
+	t.Cleanup(func() { runOp = saved })
+	var got string
+	runOp = func(_ string, in *jsonio.Object, _ []errs.Problem, _ ops.Env) ops.Envelope {
+		b, _ := json.Marshal(in)
+		got = string(b)
+		return ops.Envelope{OK: true, Result: struct{}{}, Warnings: []errs.Warning{}}
+	}
+	if r := run(t, commands, `{"tasks": [{"title": "x"}]}`, "create-batch", "-i", "-"); r.code != ExitOK || got != `{"tasks":[{"title":"x"}]}` {
+		t.Errorf("-i -: exit %d, input %s", r.code, got)
+	}
+	for _, tc := range []struct {
+		args        []string
+		arg, reason string
+	}{
+		{[]string{"create-batch"}, "", "missing required option --input"},
+		{[]string{"create-batch", "plan.json"}, "plan.json", "unexpected argument"},
+		{[]string{"create-batch", "-i", "-", "x"}, "x", "--input cannot be combined with arguments"},
+		{[]string{"create-batch", "--folder", "/a"}, "--folder", "unknown flag"},
+	} {
+		got = ""
+		r := run(t, commands, "", tc.args...)
+		if r.code != ExitUsage || got != "" {
+			t.Errorf("%q: exit %d, input %s: %s", tc.args, r.code, got, r.raw)
+			continue
+		}
+		if arg, reason := r.usageProblem(t); arg != tc.arg || !strings.Contains(reason, tc.reason) {
+			t.Errorf("%q: problem (%q, %q), want (%q, ...%q...)", tc.args, arg, reason, tc.arg, tc.reason)
+		}
+	}
+}
+
 // update's input: each option at its field, nested ones included.
 func TestUpdateInput(t *testing.T) {
 	saved := runOp

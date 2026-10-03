@@ -24,6 +24,7 @@ var decoders = map[string]decoder{
 	"init":          decodeInit,
 	"create-folder": decodeCreateFolder,
 	"create":        decodeCreate,
+	"create-batch":  decodeCreateBatch,
 	"show":          decodeShow,
 	"complete":      decodeComplete,
 	"reopen":        decodeReopen,

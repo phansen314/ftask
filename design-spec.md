@@ -462,6 +462,10 @@ Let a caller reserve a ready task so that concurrent callers are not handed the 
 
 Let a caller pass an optional request key to [`create`](operations.md#create), so that retrying after a crash or an unclear outcome returns the task already created instead of creating a duplicate. Requires somewhere to remember keys.
 
+### Blocking existing tasks in a batch
+
+Let a task in a [`create-batch`](operations.md#create-batch) name existing tasks that should wait on it, so breaking a task down into steps is one call. The batch would then rewrite existing task files, which it otherwise never touches, and could close a cycle (a new task blocked by an existing one and blocking it), so it needs [`block`](operations.md#block)'s cycle check. Meanwhile, a `block` after the batch does the same in a second call.
+
 ### Explicit completion time
 
 Let a caller set `completed_at` when completing a task (e.g. to backdate it), instead of always using the current time (see [`complete`](operations.md#complete)).

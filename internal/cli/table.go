@@ -54,6 +54,9 @@ type Command struct {
 	// what the operation leaves to its caller (init's root). Its problems
 	// are reported with the adapter's; its error stops the command.
 	Resolve func(in *jsonio.Object, env Env) ([]errs.Problem, *errs.Error)
+	// InputRequired makes --input required: the command's input is only
+	// what --input can carry (create-batch's list of tasks).
+	InputRequired bool
 	// Exclusive lists groups of options, by name, of which at most one may
 	// be given.
 	Exclusive [][]string

@@ -138,7 +138,7 @@ Operations that must find an ID, prove it absent, or return a collection walk th
 - **Classification**, per [Walking the tree](design-spec.md#walking-the-tree): a hidden entry is skipped; a folder name that is a directory is descended into; `<id>.json` that is a regular file is a task; everything else, symlinks included, is skipped.
 - **Result:** an index from each ID to every location that has it, in tree order; the list of folders; and the folders that could not be listed, with their errno.
 
-`create` without `blocked_by`, `create-folder`, `version`, `info`, and `init` do not walk. `doctor` and `repair` walk with a recorder for what the index skips (see [The survey](#the-survey)).
+`create` without `blocked_by`, `create-batch` without an ID in any `blocked_by`, `create-folder`, `version`, `info`, and `init` do not walk. `doctor` and `repair` walk with a recorder for what the index skips (see [The survey](#the-survey)).
 
 ### Loading task files
 
@@ -150,7 +150,7 @@ Operations use the index through a few helpers:
 
 - **Find exactly one** — the targets of `show`, `complete`, `reopen`, `block`, `unblock`, `update`, `move`, and `delete` (which reads only the filename, never the file).
 - **Find every reference** — `delete` and `delete-folder`: every task file outside what is removed is loaded, and those whose `blocked_by` names a removed ID are rewritten; the unusable ones are `unusable-file` warnings.
-- **Check existence** — `create`'s `blocked_by`, `block`'s blockers.
+- **Check existence** — `create`'s `blocked_by`, `create-batch`'s existing blockers, `block`'s blockers.
 - **Filter by scope** — `frontier` and `list`: tasks and folders under `folder`, recursively or not. Every open task in scope gets its readiness derived, whatever `list`'s `readiness` keeps, so the warnings don't depend on it; then [Narrowing tasks](operations.md#narrowing-tasks) applies to the views, after every warning is recorded.
 - **Derive readiness** — for an open task only, evaluating every blocker even once one is known to block, per [Dependencies](design-spec.md#dependencies): no task file → blocking, `dangling-reference` (unless a folder the walk had to list was unreadable — then no warning, per [Warning kinds](operations.md#warning-kinds)); several → blocking, `duplicate-id`; unusable → blocking, `unusable-file`; complete → not blocking; open → blocking.
 
@@ -248,7 +248,7 @@ The same errno means different things in different places, so each call site cla
 | `os.OpenRoot` on the root | `ENOENT`, `ENOTDIR` | `not-initialized` (`missing`: `root`) |
 | Loading a task file, in a read | `ENOENT` | skipped silently: it vanished ([Concurrent writes during a read](#concurrent-writes-during-a-read)) |
 | Loading a task file, in a read | any other | `unusable-file` warning (`reason`: `unreadable`, with `code`) |
-| Writing a task's `.md` (`create`) | any | `notes-missing` warning, with `code`; the operation succeeds |
+| Writing a task's `.md` (`create`, `create-batch`) | any | `notes-missing` warning, with `code`; the operation succeeds |
 | Loading a needed file, in a write | `ENOENT` | treated as never found ([Precedence](operations.md#precedence)) |
 | Publishing a new file with `link` | `EEXIST` | `corrupt` (`unexpected-file`): a file where none can exist |
 | Listing a folder, in `frontier` or `list` | any | `unreadable-folder` warning, with `code` |
