@@ -643,8 +643,9 @@ func TestPickHostileStatus(t *testing.T) {
 		t.Skip("root reads unreadable files")
 	}
 	eachFzf(t, func(t *testing.T, fzfDir string) {
-		// A short home, so the message fits the status line.
-		home, err := os.MkdirTemp("", "h")
+		// A short home, so the message fits the status line: /tmp, not
+		// $TMPDIR, which on macOS is a long path under /var/folders.
+		home, err := os.MkdirTemp("/tmp", "h")
 		if err != nil {
 			t.Fatal(err)
 		}
