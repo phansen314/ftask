@@ -86,6 +86,8 @@ type term struct {
 	ptmx   *os.File
 	vt     vt10x.Terminal
 	exited chan struct{}
+	// diag, if set, is more to show when a wait fails, beyond the screen.
+	diag func() string
 }
 
 // startTerm starts cmd in a session of its own whose controlling terminal
@@ -191,6 +193,15 @@ func (tm *term) done() bool {
 	}
 }
 
+// diagnose is diag's text, on lines of its own after the screen's, or ""
+// if there is no diag.
+func (tm *term) diagnose() string {
+	if tm.diag == nil {
+		return ""
+	}
+	return "\n" + tm.diag()
+}
+
 // waitFor waits until cond holds, failing the test, with the screen, if it
 // doesn't within waitTimeout.
 func (tm *term) waitFor(what string, cond func() bool) {
@@ -198,7 +209,7 @@ func (tm *term) waitFor(what string, cond func() bool) {
 	deadline := time.Now().Add(waitTimeout)
 	for !cond() {
 		if time.Now().After(deadline) {
-			tm.t.Fatalf("timed out waiting for %s; screen:\n%s", what, tm.screen())
+			tm.t.Fatalf("timed out waiting for %s; screen:\n%s%s", what, tm.screen(), tm.diagnose())
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -211,7 +222,7 @@ func (tm *term) holds(what string, d time.Duration, cond func() bool) {
 	tm.t.Helper()
 	for end := time.Now().Add(d); time.Now().Before(end); time.Sleep(20 * time.Millisecond) {
 		if !cond() {
-			tm.t.Fatalf("%s stopped holding; screen:\n%s", what, tm.screen())
+			tm.t.Fatalf("%s stopped holding; screen:\n%s%s", what, tm.screen(), tm.diagnose())
 		}
 	}
 }
@@ -228,7 +239,7 @@ func (tm *term) wait() int {
 	select {
 	case <-tm.exited:
 	case <-time.After(waitTimeout):
-		tm.t.Fatalf("timed out waiting for exit; screen:\n%s", tm.screen())
+		tm.t.Fatalf("timed out waiting for exit; screen:\n%s%s", tm.screen(), tm.diagnose())
 	}
 	return tm.cmd.ProcessState.ExitCode()
 }
@@ -256,8 +267,44 @@ func startPick(t *testing.T, fzfDir string, cmd *exec.Cmd) *picker {
 		cmd.Stderr = &p.stderr
 	}
 	p.term = startTerm(t, cmd, 24, 100)
+	runtime := ""
+	for _, kv := range cmd.Env {
+		if v, ok := strings.CutPrefix(kv, "XDG_RUNTIME_DIR="); ok {
+			runtime = v
+		}
+	}
+	p.diag = func() string { return p.diagnosis(runtime) }
 	p.listening()
 	return p
+}
+
+// diagnosis is fzf's state and the session's files under runtime, for a
+// failed wait: what pick and fzf hold, which the screen may not show yet.
+func (p *picker) diagnosis(runtime string) string {
+	var b strings.Builder
+	if st, err := p.get(); err != nil {
+		fmt.Fprintf(&b, "fzf state: %v\n", err)
+	} else {
+		fmt.Fprintf(&b, "fzf state: query %q, %d/%d, reading %v\n", st.Query, st.MatchCount, st.TotalCount, st.Reading)
+	}
+	b.WriteString("session files:\n")
+	filepath.WalkDir(runtime, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		rel, _ := filepath.Rel(runtime, path)
+		data, err := os.ReadFile(path)
+		switch {
+		case err != nil:
+			fmt.Fprintf(&b, "  %s: %v\n", rel, err)
+		case len(data) > 512:
+			fmt.Fprintf(&b, "  %s: %d bytes\n", rel, len(data))
+		default:
+			fmt.Fprintf(&b, "  %s: %q\n", rel, data)
+		}
+		return nil
+	})
+	return b.String()
 }
 
 // pickEnv is env for running pick with the fzf in fzfDir first on PATH, a
